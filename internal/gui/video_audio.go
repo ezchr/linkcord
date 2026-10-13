@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"encoding/binary"
 	"io"
 	"sync/atomic"
 	"time"
@@ -18,6 +19,7 @@ type videoAudio struct {
 	paused  atomic.Bool
 	held    atomic.Bool // silent until the picture starts
 	muted   atomic.Bool
+	volume  atomic.Uint32 // out of 1000
 	played  atomic.Int64
 	eof     atomic.Bool
 	stop    func()
@@ -25,6 +27,7 @@ type videoAudio struct {
 
 func newVideoAudio() (*videoAudio, error) {
 	audio := &videoAudio{queue: make(chan []byte, 16)}
+	audio.volume.Store(1000)
 	stop, err := voice.StartMediaAudio(audio.fill)
 	if err != nil {
 		return nil, err
@@ -57,12 +60,23 @@ func (a *videoAudio) fill(output []byte) {
 		n := min(len(output), len(a.current))
 		if !a.muted.Load() {
 			copy(output[:n], a.current[:n])
+			if vol := a.volume.Load(); vol < 1000 {
+				scaleSamples(output[:n], vol)
+			}
 		}
 		output = output[n:]
 		a.current = a.current[n:]
 		consumed += n
 	}
 	a.played.Add(int64(consumed))
+}
+
+// scaleSamples turns 16-bit samples down to vol out of 1000.
+func scaleSamples(pcm []byte, vol uint32) {
+	for i := 0; i+1 < len(pcm); i += 2 {
+		s := int32(int16(binary.LittleEndian.Uint16(pcm[i:])))
+		binary.LittleEndian.PutUint16(pcm[i:], uint16(int16(s*int32(vol)/1000)))
+	}
 }
 
 func (a *videoAudio) position() time.Duration {

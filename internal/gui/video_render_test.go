@@ -47,6 +47,8 @@ func TestRenderVideoControls(t *testing.T) {
 		{"image-viewer", image.Pt(1000, 700), false},
 		{"gif-viewer", image.Pt(1000, 700), false},
 		{"performance-menu", image.Pt(420, 260), true},
+		{"video-loading", image.Pt(420, 260), false},
+		{"video-tile", image.Pt(420, 260), false},
 	} {
 		win, err := headless.NewWindow(tc.size.X, tc.size.Y)
 		if err != nil {
@@ -69,6 +71,19 @@ func TestRenderVideoControls(t *testing.T) {
 			u.images.entries["640:"+raw] = entry
 			u.chat.viewer = &imageViewer{original: raw, openURL: raw, w: 640, h: 360, zoom: 1}
 			u.chat.layoutViewer(gtx)
+		} else if tc.name == "video-loading" {
+			// A video still loading shows a spinner on its tile and no viewer.
+			u.chat.video = &videoViewer{source: "https://example.test/clip.mp4", cancel: func() {}}
+			if u.chat.video.visible() {
+				t.Error("the viewer of a loading video is open")
+			}
+			u.chat.layoutVideo(gtx, mediaPreview{playURL: "https://example.test/clip.mp4", width: 400, height: 225})
+		} else if tc.name == "video-tile" {
+			// A playing video plays in its tile, with its controls.
+			v := &videoViewer{source: "https://example.test/clip.mp4", frame: &frame, status: "2.5 s", cancel: func() {}}
+			v.tileVolume.Value = 0.6
+			u.chat.video = v
+			u.chat.layoutVideo(gtx, mediaPreview{playURL: "https://example.test/clip.mp4", width: 400, height: 225})
 		} else {
 			u.chat.layoutVideoViewer(gtx)
 		}

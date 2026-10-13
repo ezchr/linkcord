@@ -75,8 +75,11 @@ type channelRow struct {
 }
 
 type chatView struct {
-	u  *ui
-	st *ningen.State
+	// The video volume chosen last, kept for the next video.
+	lastVolume float32
+	volumeSet  bool
+	u          *ui
+	st         *ningen.State
 
 	events     chan gateway.Event
 	done       chan struct{}
@@ -882,7 +885,7 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 	if c.viewer != nil {
 		c.layoutViewer(gtx)
 	}
-	if c.video != nil {
+	if c.video != nil && c.video.visible() {
 		c.layoutVideoViewer(gtx)
 	}
 	if c.act.deleting != nil {

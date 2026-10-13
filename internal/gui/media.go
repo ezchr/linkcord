@@ -2,6 +2,7 @@ package gui
 
 import (
 	"image"
+	"image/color"
 	"net/url"
 	"path"
 	"strings"
@@ -294,47 +295,109 @@ func previewSize(gtx layout.Context, w, h int) image.Point {
 
 func (c *chatView) layoutVideo(gtx layout.Context, p mediaPreview) layout.Dimensions {
 	size := previewSize(gtx, p.width, p.height)
-	cl := c.linkClick("video:" + p.openURL)
-	if cl.Clicked(gtx) {
-		title := p.title
-		if title == "" {
-			title = "Video"
-		}
-		c.openVideo(p.playURL, title)
+	title := p.title
+	if title == "" {
+		title = "Video"
 	}
+	// The video playing here, if it is this one and not in the fullscreen
+	// layer, whose controls then belong to the layer.
+	v := c.video
+	if v != nil && v.source != p.playURL {
+		v = nil
+	}
+	inTile := v != nil && !v.visible()
+	cl := c.linkClick("video:" + p.openURL)
+	if inTile {
+		if v.tileVolume.Update(gtx) {
+			c.setVolume(v, v.tileVolume.Value)
+		}
+		if v.tilePause.Clicked(gtx) {
+			v.togglePause()
+		}
+		if v.tileFull.Clicked(gtx) {
+			v.setShown(true)
+		}
+	}
+	if cl.Clicked(gtx) {
+		switch {
+		case v == nil:
+			c.openVideo(p.playURL, title, false)
+			v = c.video
+			inTile = true
+		case c.videoLoading(p.playURL):
+			// A click while it loads gives up on it.
+			c.closeVideo()
+			v, inTile = nil, false
+		case v.isEnded():
+			c.openVideo(p.playURL, title, false)
+			v = c.video
+		default:
+			v.togglePause()
+		}
+	}
+	var frame *paint.ImageOp
+	status, ended := "", false
+	if v != nil {
+		v.mu.Lock()
+		frame, status, ended = v.frame, v.status, v.ended
+		v.mu.Unlock()
+	}
+	loading := v != nil && frame == nil && !ended
 	return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		r := image.Rectangle{Max: size}
+		cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			if p.openURL != "" {
 				pointer.CursorPointer.Add(gtx.Ops)
 			}
-			r := image.Rectangle{Max: size}
 			defer clip.UniformRRect(r, gtx.Dp(8)).Push(gtx.Ops).Pop()
-			paint.FillShape(gtx.Ops, colorSidebar, clip.Rect(r).Op())
-			source := mediaURL(p.proxy, p.original, size.X, size.Y)
-			if img := c.u.images.get(source, max(size.X, size.Y)); img != nil {
-				gtx.Constraints = layout.Exact(size)
-				widget.Image{Src: *img, Fit: widget.Cover}.Layout(gtx)
-			}
 			gtx.Constraints = layout.Exact(size)
-			layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return rounded(gtx, colorServers, 28, func(gtx layout.Context) layout.Dimensions {
-					return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return icon(gtx, iconPlay, 32, colorHeader)
+			if inTile && frame != nil {
+				paint.FillShape(gtx.Ops, color.NRGBA{A: 0xff}, clip.Rect(r).Op())
+				widget.Image{Src: *frame, Fit: widget.Contain}.Layout(gtx)
+			} else {
+				paint.FillShape(gtx.Ops, colorSidebar, clip.Rect(r).Op())
+				source := mediaURL(p.proxy, p.original, size.X, size.Y)
+				if img := c.u.images.get(source, max(size.X, size.Y)); img != nil {
+					widget.Image{Src: *img, Fit: widget.Cover}.Layout(gtx)
+				}
+			}
+			// The play button, a spinner while loading, nothing while playing.
+			playing := inTile && frame != nil && !ended && !v.paused.Load()
+			if !playing {
+				layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return rounded(gtx, colorServers, 28, func(gtx layout.Context) layout.Dimensions {
+						return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							if loading {
+								gtx.Constraints = layout.Exact(image.Pt(gtx.Dp(32), gtx.Dp(32)))
+								return loader(c.u.th).Layout(gtx)
+							}
+							return icon(gtx, iconPlay, 32, colorHeader)
+						})
 					})
 				})
-			})
-			title := p.title
-			if title == "" {
-				title = "Video"
 			}
-			gtx.Constraints = layout.Exact(size)
-			layout.S.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return rounded(gtx, colorServers, 0, func(gtx layout.Context) layout.Dimensions {
-					return layout.UniformInset(unit.Dp(6)).Layout(gtx,
-						oneLine(label(c.u.th, 12, colorHeader, title+" · play in Linkcord")).Layout)
-				})
-			})
 			return layout.Dimensions{Size: size}
 		})
+		// The bar at the bottom: the title, or the controls once it plays.
+		gtx.Constraints = layout.Exact(size)
+		defer clip.UniformRRect(r, gtx.Dp(8)).Push(gtx.Ops).Pop()
+		layout.S.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return rounded(gtx, withAlpha(colorServers, 0xe0), 0, func(gtx layout.Context) layout.Dimensions {
+				return layout.UniformInset(unit.Dp(6)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					if inTile && (frame != nil || ended) {
+						return c.layoutVideoControls(gtx, v, &v.tilePause, &v.tileFull, &v.tileVolume, "Fullscreen", status)
+					}
+					text := title + " · click to play"
+					switch {
+					case loading:
+						text = title + " · loading…"
+					case v != nil && v.visible():
+						text = title + " · playing fullscreen"
+					}
+					return oneLine(label(c.u.th, 12, colorHeader, text)).Layout(gtx)
+				})
+			})
+		})
+		return layout.Dimensions{Size: size}
 	})
 }
