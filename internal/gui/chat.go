@@ -68,6 +68,8 @@ type channelRow struct {
 	user discord.UserID
 	// muted reports whether a voice member is muted or deafened.
 	muted bool
+	// avatar is the picture of a voice member, "" when it isn't known.
+	avatar string
 }
 
 type chatView struct {
@@ -405,11 +407,12 @@ func (c *chatView) rebuildRows() {
 			for _, vs := range voiceStates {
 				if vs.ChannelID == ch.ID {
 					members = append(members, channelRow{
-						kind:  rowVoiceMember,
-						ch:    ch,
-						user:  vs.UserID,
-						label: c.memberName(c.selGuild, vs.UserID, vs.Member),
-						muted: vs.Mute || vs.SelfMute || vs.Deaf || vs.SelfDeaf,
+						kind:   rowVoiceMember,
+						ch:     ch,
+						user:   vs.UserID,
+						label:  c.memberName(c.selGuild, vs.UserID, vs.Member),
+						muted:  vs.Mute || vs.SelfMute || vs.Deaf || vs.SelfDeaf,
+						avatar: c.voiceAvatarURL(c.selGuild, vs),
 					})
 				}
 			}
@@ -471,6 +474,27 @@ func (c *chatView) dmName(ch discord.Channel) string {
 		return "Mensaje directo"
 	}
 	return strings.Join(names, ", ")
+}
+
+// voiceAvatarURL is the picture of the user of vs: their server avatar, if
+// any, or their own. It is "" when the user isn't known yet, which shows
+// their initials instead.
+func (c *chatView) voiceAvatarURL(guildID discord.GuildID, vs discord.VoiceState) string {
+	if vs.Member != nil {
+		if vs.Member.Avatar != "" {
+			return cdnSize(vs.Member.AvatarURLWithType(discord.PNGImage, guildID))
+		}
+		if vs.Member.User.ID.IsValid() {
+			return c.authorAvatarURL(guildID, vs.Member.User)
+		}
+	}
+	if m, err := c.st.Cabinet.Member(guildID, vs.UserID); err == nil {
+		return c.authorAvatarURL(guildID, m.User)
+	}
+	if u, err := c.st.Cabinet.User(vs.UserID); err == nil {
+		return c.authorAvatarURL(guildID, *u)
+	}
+	return ""
 }
 
 // memberName is how a user is called in a server: their nickname, display
@@ -929,7 +953,7 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 			}
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return avatar(gtx, th, 22, colorFor(uint64(r.user)), r.label, -1)
+					return c.u.picture(gtx, r.avatar, 22, colorFor(uint64(r.user)), r.label, -1)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Flexed(1, oneLine(label(th, 14, col, r.label)).Layout),
