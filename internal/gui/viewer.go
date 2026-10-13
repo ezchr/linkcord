@@ -100,8 +100,9 @@ func (c *chatView) layoutVisualViewer(gtx layout.Context, v *imageViewer, frame 
 		closeViewer()
 		return layout.Dimensions{Size: size}
 	}
+	// Saved to the Downloads folder, not opened in the browser.
 	if v.openBtn.Clicked(gtx) {
-		openLink(v.openURL)
+		c.saveFile(v.openURL, "")
 	}
 	if v.zoomIn.Clicked(gtx) {
 		v.zoomAt(v.zoom*1.5, f32.Point{})
@@ -246,7 +247,13 @@ func (c *chatView) layoutVisualViewer(gtx layout.Context, v *imageViewer, frame 
 						return iconButton(gtx, &v.zoomIn, iconZoomIn, colorText, colorHeader)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return iconButton(gtx, &v.openBtn, iconOpen, colorText, colorHeader)
+						ic := iconDownload
+						if d := c.downloads[v.openURL]; d != nil {
+							if _, _, _, err, done := d.state(); done && err == nil {
+								ic = iconDone
+							}
+						}
+						return iconButton(gtx, &v.openBtn, ic, colorText, colorHeader)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return iconButton(gtx, &v.closeBtn, iconClose, colorText, colorHeader)
