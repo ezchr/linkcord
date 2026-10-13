@@ -187,6 +187,32 @@ func (u *ui) startDemo() {
 	// A message someone deleted, shown with its sign; the demo keeps nothing.
 	u.chat.deleted = newDeletedLog("")
 	u.chat.deleted.record(deleted)
+
+	// Friends in each state, and a message request from a stranger.
+	rel := func(user discord.User, t discord.RelationshipType) discord.Relationship {
+		return discord.Relationship{UserID: user.ID, User: user, Type: t}
+	}
+	gabi := discord.User{ID: discord.UserID(id(9)), Discriminator: "0", Username: "gabi", DisplayName: "Gabi"}
+	hugo := discord.User{ID: discord.UserID(id(10)), Discriminator: "0", Username: "hugo_77", DisplayName: "Hugo"}
+	spam := discord.User{ID: discord.UserID(id(11)), Discriminator: "0", Username: "free_nitro", DisplayName: "Free Nitro"}
+	stranger := discord.User{ID: discord.UserID(id(12)), Discriminator: "0", Username: "ivan.dev", DisplayName: "Iván"}
+	u.chat.friends.demoRels = []discord.Relationship{
+		rel(users[0], discord.FriendRelationship), rel(users[1], discord.FriendRelationship),
+		rel(users[2], discord.FriendRelationship), rel(users[3], discord.FriendRelationship),
+		rel(users[6], discord.FriendRelationship),
+		rel(gabi, discord.IncomingFriendRequest), rel(hugo, discord.SentFriendRequest),
+		rel(spam, discord.BlockedRelationship),
+	}
+	request := discord.Channel{ID: discord.ChannelID(id(202)), Type: discord.DirectMessage, DMRecipients: []discord.User{stranger}, LastMessageID: discord.MessageID(id(9100))}
+	cab.ChannelSet(&request, false)
+	for i := 60; i > 0; i-- {
+		add(request.ID, 0, stranger, time.Duration(i)*time.Minute, fmt.Sprintf("hi! I saw you in the Games server (%d)", i), nil)
+	}
+	u.chat.friends.setRequests([]messageRequest{{
+		ID: request.ID, Type: request.Type, IsMessageRequest: true, LastMessageID: request.LastMessageID,
+		Since: discord.NewTimestamp(time.Now().Add(-time.Hour)), Recipients: request.DMRecipients,
+	}})
+
 	u.chat.load(ready)
 	u.chat.selectGuild(guild.ID)
 	u.screen = screenChat

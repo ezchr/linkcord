@@ -30,6 +30,14 @@ const groupWindow = 7 * time.Minute
 func (c *chatView) layoutMessages(gtx layout.Context) layout.Dimensions {
 	th := c.u.th
 	if c.selChannel == nil {
+		if !c.selGuild.IsValid() {
+			switch c.friends.page {
+			case homeFriends:
+				return c.layoutFriends(gtx)
+			case homeRequests:
+				return c.layoutMessageRequests(gtx)
+			}
+		}
 		return layout.Center.Layout(gtx, label(th, 16, colorMuted, "Choose a conversation or channel").Layout)
 	}
 	title := "# " + c.selChannel.Name

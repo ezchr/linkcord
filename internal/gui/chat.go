@@ -60,6 +60,9 @@ const (
 	rowCategory
 	rowVoiceMember
 	rowDM
+	// rowHome is the friends or the message requests, at the top of the
+	// direct messages.
+	rowHome
 )
 
 // channelRow is a line of the channel column.
@@ -77,6 +80,10 @@ type channelRow struct {
 }
 
 type chatView struct {
+	// friends is the friends page and the message requests of the direct
+	// messages.
+	friends friendsState
+
 	// detached is set while older messages show in place of the newest,
 	// after a jump; flashID is lit until flashUntil.
 	detached    bool
@@ -243,6 +250,7 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 			}
 		}
 	})
+	c.friends.init()
 	c.memberList.Axis = layout.Vertical
 	c.guildList.Axis = layout.Vertical
 	c.channelList.Axis = layout.Vertical
@@ -291,6 +299,10 @@ func (c *chatView) pump() {
 						}
 					})
 				}
+			case *gateway.RelationshipAddEvent, *gateway.RelationshipRemoveEvent:
+				// The gateway state keeps the friends; the lists read it
+				// while laying out.
+				c.u.win.Invalidate()
 			case *gateway.MessageCreateEvent, *gateway.MessageUpdateEvent, *gateway.MessageDeleteEvent, *gateway.MessageDeleteBulkEvent,
 				*gateway.TypingStartEvent, *read.UpdateEvent,
 				*gateway.GuildCreateEvent, *gateway.GuildDeleteEvent, *gateway.GuildUpdateEvent,
@@ -368,6 +380,9 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 		c.refreshCurrentChat()
 	} else {
 		c.selectGuild(discord.NullGuildID)
+		// The message requests are known only from the list of direct
+		// messages, which the gateway does not send with them marked.
+		c.loadMessageRequests()
 	}
 }
 
@@ -404,8 +419,29 @@ func (c *chatView) selectGuild(id discord.GuildID) {
 			}
 		}
 	}
-	c.selChannel, c.messages = nil, nil
+	// The direct messages open on the friends, as in Discord.
+	if !id.IsValid() {
+		c.openHome(homeFriends)
+		return
+	}
+	c.closeChannel()
 	c.setTitle(appName)
+}
+
+// closeChannel leaves the open channel, if any, so that nothing is shown in
+// the middle until something else is opened.
+func (c *chatView) closeChannel() {
+	if c.refreshCancel != nil {
+		c.refreshCancel()
+		c.refreshCancel = nil
+	}
+	// Loads on their way for the channel are dropped when they arrive.
+	c.historyEpoch++
+	c.friends.page = homeNone
+	c.selChannel, c.messages = nil, nil
+	c.comp.files, c.comp.mentions, c.comp.mentionOn, c.comp.emoji = nil, nil, false, nil
+	c.act.reset()
+	c.memberRows, c.memberChunk = nil, 0
 }
 
 func isVoice(t discord.ChannelType) bool {
@@ -425,6 +461,10 @@ func isTextual(t discord.ChannelType) bool {
 func (c *chatView) rebuildRows() {
 	c.rows = c.rows[:0]
 	if !c.selGuild.IsValid() {
+		c.rows = append(c.rows, channelRow{kind: rowHome, ch: discord.Channel{ID: friendsRowID}, label: "Friends"})
+		if len(c.friends.requests) > 0 {
+			c.rows = append(c.rows, channelRow{kind: rowHome, ch: discord.Channel{ID: requestsRowID}, label: "Message Requests"})
+		}
 		channels, err := c.st.PrivateChannels()
 		if err != nil {
 			slog.Error("failed to get private channels", "err", err)
@@ -433,6 +473,10 @@ func (c *chatView) rebuildRows() {
 			return cmp.Compare(lastActivity(b), lastActivity(a))
 		})
 		for _, ch := range channels {
+			// Message requests wait in their own page until accepted.
+			if c.friends.requestIDs[ch.ID] {
+				continue
+			}
 			c.rows = append(c.rows, channelRow{kind: rowDM, ch: ch, label: c.dmName(ch)})
 		}
 		return
@@ -602,6 +646,7 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 		c.refreshCancel = nil
 	}
 	c.historyEpoch++
+	c.friends.page = homeNone
 	c.refreshing, c.refreshPending, c.refreshFailures = false, false, 0
 	c.lastRefresh, c.refreshLive = time.Time{}, nil
 	c.selChannel = &ch
@@ -849,6 +894,12 @@ func (c *chatView) update(gtx layout.Context) {
 			c.rebuildRows()
 		case rowText, rowDM:
 			c.selectChannel(r.ch)
+		case rowHome:
+			if r.ch.ID == requestsRowID {
+				c.openHome(homeRequests)
+			} else {
+				c.openHome(homeFriends)
+			}
 		case rowVoice:
 			c.joinVoice(r.ch)
 		}
@@ -1020,8 +1071,15 @@ func (c *chatView) guildButton(gtx layout.Context, click *widget.Clickable, sele
 }
 
 func (c *chatView) dmsUnread() ningen.UnreadIndication {
+	// Friend requests waiting for an answer count as mentions, as in Discord.
+	if c.incomingRequests() > 0 {
+		return ningen.ChannelMentioned
+	}
 	channels, _ := c.st.PrivateChannels()
 	for _, ch := range channels {
+		if c.friends.requestIDs[ch.ID] {
+			continue
+		}
 		if c.st.ChannelIsUnread(ch.ID, ningen.UnreadOpts{}) != ningen.ChannelRead {
 			return ningen.ChannelMentioned
 		}
@@ -1053,6 +1111,8 @@ func (c *chatView) layoutChannels(gtx layout.Context) layout.Dimensions {
 func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layout.Dimensions {
 	th := c.u.th
 	switch r.kind {
+	case rowHome:
+		return c.layoutHomeRow(gtx, r)
 	case rowCategory:
 		top := unit.Dp(14)
 		if first {

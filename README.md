@@ -18,7 +18,8 @@ Linkcord was created for people on Windows 7 who can no longer run the official 
 | PNG, animated APNG, and GIF stickers; animated Tenor embeds | Lottie sticker rendering |
 | Image viewer with zoom, pan, and animation | |
 | Video thumbnails and a play button that opens the video in the browser | In-client video playback |
-| Cached avatars and server icons, presence, member lists, and profile cards | Friends, requests, and settings |
+| Cached avatars and server icons, presence, member lists, and profile cards | Settings |
+| Friends (online, all, pending, blocked), sending, accepting, and canceling friend requests, and message requests | |
 | Attachments, emoji picker, mention autocomplete, and typing indicators | |
 | Voice join/leave, mute/deafen, connection status, and speaking indicators | Verification in a real voice call |
 | React, reply, edit, copy, delete, and inline reaction controls | |
