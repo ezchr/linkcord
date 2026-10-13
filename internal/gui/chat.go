@@ -137,6 +137,11 @@ type chatView struct {
 	// richStates hold the clickable spans of each message, and revealed the
 	// messages whose spoilers were clicked.
 	richStates map[discord.MessageID]*richtextState
+	// textStates hold the clickable spans of the other texts of messages,
+	// such as embeds and the texts of components, by message and part.
+	textStates map[string]*richtextState
+	// inter is the state of the buttons, menus and forms of bots.
+	inter      interactions
 	revealed   map[discord.MessageID]bool
 	linkClicks map[string]*widget.Clickable
 
@@ -227,6 +232,7 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 		userClicks:  make(map[discord.UserID]*widget.Clickable),
 		msgClicks:   make(map[msgClickKey]*widget.Clickable),
 		richStates:  make(map[discord.MessageID]*richtextState),
+		textStates:  make(map[string]*richtextState),
 		revealed:    make(map[discord.MessageID]bool),
 		showMembers: true,
 		act:         newActionState(),
@@ -251,6 +257,7 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 		}
 	})
 	c.friends.init()
+	c.inter.init()
 	c.memberList.Axis = layout.Vertical
 	c.guildList.Axis = layout.Vertical
 	c.channelList.Axis = layout.Vertical
@@ -299,6 +306,17 @@ func (c *chatView) pump() {
 						}
 					})
 				}
+			case *interactionSuccessEvent:
+				c.u.post(func() { c.interactionDone(ev.Nonce, true) })
+			case *interactionFailureEvent:
+				c.u.post(func() { c.interactionDone(ev.Nonce, false) })
+			case *modalCreateEvent:
+				c.u.post(func() {
+					// The form answers a click of this client, which stays
+					// pending until the form shows.
+					delete(c.inter.pending, ev.Nonce)
+					c.openModal(*ev)
+				})
 			case *gateway.RelationshipAddEvent, *gateway.RelationshipRemoveEvent:
 				// The gateway state keeps the friends; the lists read it
 				// while laying out.
@@ -342,6 +360,7 @@ func (c *chatView) close() {
 // load fills the chat from the ready event.
 func (c *chatView) load(ready *gateway.ReadyEvent) {
 	c.me = ready.User
+	c.inter.sessionID = ready.SessionID
 
 	seen := make(map[discord.GuildID]bool)
 	var order []discord.GuildID
@@ -659,6 +678,8 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	clear(c.selectables)
 	clear(c.msgClicks)
 	clear(c.richStates)
+	clear(c.textStates)
+	c.inter.open = ""
 	clear(c.revealed)
 	c.comp.files, c.comp.mentions, c.comp.mentionOn, c.comp.emoji = nil, nil, false, nil
 	c.act.reset()
@@ -905,6 +926,7 @@ func (c *chatView) update(gtx layout.Context) {
 		}
 		break
 	}
+	c.updateComponents(gtx)
 	if c.selfClick.Clicked(gtx) {
 		if c.profile != nil && c.profile.self {
 			c.profile = nil
@@ -977,6 +999,9 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 	}
 	if c.act.deleting != nil {
 		c.layoutDeleteConfirm(gtx)
+	}
+	if c.inter.modal != nil {
+		c.layoutModal(gtx)
 	}
 	return dims
 }

@@ -23,6 +23,7 @@ Linkcord was created for people on Windows 7 who can no longer run the official 
 | Attachments, emoji picker, mention autocomplete, and typing indicators | |
 | Voice join/leave, mute/deafen, connection status, and speaking indicators | Verification in a real voice call |
 | React, reply, edit, copy, delete, and inline reaction controls | |
+| Bot buttons, select menus, and forms; components V2 layouts; embeds with formatting, fields, authors, and footers | Multi-value select menus |
 | English interface and project documentation | Testing on a physical Windows 7 machine |
 
 Shift-click Delete skips confirmation. Up Arrow in an empty composer edits your most recent message.

@@ -33,14 +33,16 @@ var (
 	colorGreen    = rgb(0x23a55a)
 	// colorGreenButton is the green of filled buttons, such as Add Friend.
 	colorGreenButton = rgb(0x248046)
-	colorYellow      = rgb(0xf0b232)
-	colorOffline     = rgb(0x80848e)
-	colorPopup       = rgb(0x111214)
-	colorMenu        = rgb(0x18181c)
-	colorRed         = rgb(0xda373c)
-	colorCode        = rgb(0x18181c)
-	colorMention     = rgb(0xc9cdfb)
-	colorMentionB    = rgb(0x3c4270)
+	// colorSecondaryButton is the gray of secondary and link buttons.
+	colorSecondaryButton = rgb(0x4e5058)
+	colorYellow          = rgb(0xf0b232)
+	colorOffline         = rgb(0x80848e)
+	colorPopup           = rgb(0x111214)
+	colorMenu            = rgb(0x18181c)
+	colorRed             = rgb(0xda373c)
+	colorCode            = rgb(0x18181c)
+	colorMention         = rgb(0xc9cdfb)
+	colorMentionB        = rgb(0x3c4270)
 )
 
 type colorT = color.NRGBA

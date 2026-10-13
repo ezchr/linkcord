@@ -30,10 +30,34 @@ type authTokenRefreshEvent struct {
 func (*authTokenRefreshEvent) Op() ws.OpCode           { return 0 } // dispatch
 func (*authTokenRefreshEvent) EventType() ws.EventType { return "AUTH_TOKEN_REFRESH" }
 
+// interactionResult is what Discord says of an interaction a user sent:
+// INTERACTION_SUCCESS once the bot answered, or INTERACTION_FAILURE.
+type interactionResult struct {
+	ID    string `json:"id"`
+	Nonce string `json:"nonce"`
+}
+
+type (
+	interactionSuccessEvent struct{ interactionResult }
+	interactionFailureEvent struct{ interactionResult }
+)
+
+func (*interactionSuccessEvent) Op() ws.OpCode           { return 0 }
+func (*interactionSuccessEvent) EventType() ws.EventType { return "INTERACTION_SUCCESS" }
+func (*interactionFailureEvent) Op() ws.OpCode           { return 0 }
+func (*interactionFailureEvent) EventType() ws.EventType { return "INTERACTION_FAILURE" }
+func (*modalCreateEvent) Op() ws.OpCode                  { return 0 }
+func (*modalCreateEvent) EventType() ws.EventType        { return "INTERACTION_MODAL_CREATE" }
+
 func init() {
 	// Arikawa does not know this event; teach its decoder before any gateway
 	// is created, as the gateway copies the registry.
 	gateway.OpUnmarshalers.Add(func() ws.Event { return new(authTokenRefreshEvent) })
+	gateway.OpUnmarshalers.Add(
+		func() ws.Event { return new(interactionSuccessEvent) },
+		func() ws.Event { return new(interactionFailureEvent) },
+		func() ws.Event { return new(modalCreateEvent) },
+	)
 }
 
 // newState returns the Discord state of a user account, set up like the web

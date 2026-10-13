@@ -327,8 +327,26 @@ func isWordByte(b byte) bool {
 
 // layoutContent lays out the content of a message with its formatting.
 func (c *chatView) layoutContent(gtx layout.Context, m discord.Message) layout.Dimensions {
+	return c.layoutRich(gtx, c.richState(m.ID), m, m.Content, 15)
+}
+
+// layoutText lays out text of message m with Discord's formatting, such as
+// an embed's description or a text of a bot's components. key tells it from
+// the other texts of the message, so that each keeps its clickable spans.
+func (c *chatView) layoutText(gtx layout.Context, m discord.Message, key, text string, size unit.Sp) layout.Dimensions {
+	k := fmt.Sprintf("%d/%s", m.ID, key)
+	s, ok := c.textStates[k]
+	if !ok {
+		s = &richtextState{blocks: make(map[int]*richtext.InteractiveText)}
+		c.textStates[k] = s
+	}
+	return c.layoutRich(gtx, s, m, text, size)
+}
+
+// layoutRich lays out text with the formatting of Discord, keeping its
+// clickable spans in state. The spoilers it reveals are those of m.
+func (c *chatView) layoutRich(gtx layout.Context, state *richtextState, m discord.Message, text string, size unit.Sp) layout.Dimensions {
 	th := c.u.th
-	state := c.richState(m.ID)
 	for {
 		span, ev, ok := state.Update(gtx)
 		if !ok {
@@ -362,10 +380,10 @@ func (c *chatView) layoutContent(gtx layout.Context, m discord.Message) layout.D
 	revealed := c.revealed[m.ID]
 	// Re-parse only when the message, its spoilers or the minute change
 	// (the minute keeps "5 minutes ago" timestamps and mention names fresh).
-	key := fmt.Sprintf("%v|%v|%d|%s", m.EditedTimestamp, revealed, time.Now().Unix()/60, m.Content)
+	key := fmt.Sprintf("%v|%v|%d|%v|%s", m.EditedTimestamp, revealed, time.Now().Unix()/60, size, text)
 	if state.key != key {
 		state.key = key
-		state.parts, state.all = c.buildContent(m, revealed)
+		state.parts, state.all = c.buildContent(m, text, size, revealed)
 	}
 	// Every block draws from the one state, so that the spans keep their
 	// indices from frame to frame.
@@ -416,16 +434,17 @@ type contentPart struct {
 	start, n int
 }
 
-// buildContent parses a message into the blocks layoutContent draws.
-func (c *chatView) buildContent(m discord.Message, revealed bool) ([]contentPart, []richtext.SpanStyle) {
+// buildContent parses text of message m into the blocks layoutRich draws,
+// with size the size of plain text.
+func (c *chatView) buildContent(m discord.Message, text string, size unit.Sp, revealed bool) ([]contentPart, []richtext.SpanStyle) {
 	var parts []contentPart
 	var all []richtext.SpanStyle
-	for _, b := range parseBlocks(m.Content) {
+	for _, b := range parseBlocks(text) {
 		if b.kind == blockCode {
 			parts = append(parts, contentPart{kind: blockCode, text: b.text})
 			continue
 		}
-		base := richtext.SpanStyle{Size: 15, Color: colorText}
+		base := richtext.SpanStyle{Size: size, Color: colorText}
 		switch b.kind {
 		case blockHeading:
 			base.Size = [...]unit.Sp{0, 22, 19, 17}[b.level]

@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -311,10 +310,13 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 // stickers and embeds.
 func (c *chatView) mediaChildren(m discord.Message) []layout.FlexChild {
 	var children []layout.FlexChild
-	for _, a := range m.Attachments {
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return c.layoutAttachment(gtx, a)
-		}))
+	// Messages laid out with components show their files inside them.
+	if m.Flags&discord.IsComponentsV2 == 0 {
+		for _, a := range m.Attachments {
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return c.layoutAttachment(gtx, a)
+			}))
+		}
 	}
 	for _, s := range m.Stickers {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -334,8 +336,14 @@ func (c *chatView) mediaChildren(m discord.Message) []layout.FlexChild {
 		if e.Title == "" && e.Description == "" && e.Image == nil {
 			continue
 		}
+		ei := len(children)
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return c.layoutEmbed(gtx, e)
+			return c.layoutEmbed(gtx, m, ei, e)
+		}))
+	}
+	if len(m.Components) > 0 {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return c.layoutComponents(gtx, m)
 		}))
 	}
 	return children
@@ -567,56 +575,193 @@ func (c *chatView) layoutAttachment(gtx layout.Context, a discord.Attachment) la
 	})
 }
 
-func (c *chatView) layoutEmbed(gtx layout.Context, e discord.Embed) layout.Dimensions {
+// layoutEmbed lays out a rich preview of a link or a bot's card: its author,
+// title, formatted description, fields, picture and footer, with its color
+// on the left. idx tells it from the other embeds of message m.
+func (c *chatView) layoutEmbed(gtx layout.Context, m discord.Message, idx int, e discord.Embed) layout.Dimensions {
 	th := c.u.th
 	bar := colorSelected
 	if e.Color != 0 && e.Color != discord.NullColor {
 		bar = rgb(uint32(e.Color))
 	}
+	key := fmt.Sprintf("e%d", idx)
 	cl := c.linkClick("embed:" + string(e.URL) + e.Title)
 	if e.URL != "" && cl.Clicked(gtx) {
 		openLink(string(e.URL))
 	}
+	var authorClick *widget.Clickable
+	if e.Author != nil && e.Author.URL != "" {
+		authorClick = c.linkClick("embed-author:" + string(e.Author.URL))
+		if authorClick.Clicked(gtx) {
+			openLink(string(e.Author.URL))
+		}
+	}
+	thumb := e.Thumbnail
+	body := func(gtx layout.Context) layout.Dimensions {
+		var children []layout.FlexChild
+		gap := func() {
+			if len(children) > 0 {
+				children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout))
+			}
+		}
+		if a := e.Author; a != nil && a.Name != "" {
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				row := func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if a.Icon == "" {
+								return layout.Dimensions{}
+							}
+							return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return c.u.picture(gtx, string(firstURL(a.ProxyIcon, a.Icon)), 24, colorPanel, "", -1)
+							})
+						}),
+						layout.Flexed(1, oneLine(bold(label(th, 14, colorHeader, a.Name))).Layout),
+					)
+				}
+				if authorClick == nil {
+					return row(gtx)
+				}
+				return authorClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					return row(gtx)
+				})
+			}))
+		}
+		if e.Title != "" {
+			gap()
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				col := colorHeader
+				if e.URL != "" {
+					col = colorLink
+				}
+				return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					if e.URL != "" {
+						pointer.CursorPointer.Add(gtx.Ops)
+					}
+					return bold(label(th, 15, col, e.Title)).Layout(gtx)
+				})
+			}))
+		}
+		if e.Description != "" {
+			gap()
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return c.layoutText(gtx, m, key+"/d", e.Description, 14)
+			}))
+		}
+		if len(e.Fields) > 0 {
+			gap()
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return c.layoutEmbedFields(gtx, m, key, e.Fields)
+			}))
+		}
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	}
 	return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(520))
 		return rounded(gtx, colorSidebar, 4, func(gtx layout.Context) layout.Dimensions {
-			dims := layout.Inset{Left: unit.Dp(14), Right: unit.Dp(12), Top: unit.Dp(10), Bottom: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				var children []layout.FlexChild
-				if e.Title != "" {
-					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						col := colorHeader
-						if e.URL != "" {
-							col = colorLink
-						}
-						return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							if e.URL != "" {
-								pointer.CursorPointer.Add(gtx.Ops)
-							}
-							return bold(label(th, 15, col, e.Title)).Layout(gtx)
-						})
-					}))
-				}
-				if e.Description != "" {
-					desc := e.Description
-					if utf8.RuneCountInString(desc) > 400 {
-						desc = string([]rune(desc)[:400]) + "…"
+			dims := layout.Inset{Left: unit.Dp(14), Right: unit.Dp(12), Top: unit.Dp(10), Bottom: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				var rows []layout.FlexChild
+				// The small picture sits at the right of the text.
+				rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if thumb == nil || e.Image != nil {
+						return body(gtx)
 					}
-					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, label(th, 14, colorText, desc).Layout)
-					}))
-				}
+					return layout.Flex{Alignment: layout.Start}.Layout(gtx,
+						layout.Flexed(1, body),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Inset{Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								px := gtx.Dp(80)
+								item := discord.UnfurledMediaitem{URL: string(thumb.URL), ProxyURL: string(thumb.Proxy), Width: int(thumb.Width), Height: int(thumb.Height)}
+								return c.layoutMediaItem(gtx, item, px, px)
+							})
+						}),
+					)
+				}))
 				if e.Image != nil {
 					img := e.Image
-					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return c.layoutMedia(gtx, string(img.Proxy), string(img.URL), int(img.Width), int(img.Height), string(img.URL))
 					}))
 				}
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+				if f := e.Footer; f != nil && (f.Text != "" || e.Timestamp.IsValid()) {
+					rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						txt := f.Text
+						if e.Timestamp.IsValid() {
+							if txt != "" {
+								txt += " • "
+							}
+							txt += formatTime(e.Timestamp.Time())
+						}
+						return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if f.Icon == "" {
+										return layout.Dimensions{}
+									}
+									return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										return c.u.picture(gtx, string(firstURL(f.ProxyIcon, f.Icon)), 20, colorPanel, "", -1)
+									})
+								}),
+								layout.Flexed(1, label(th, 12, colorMuted, txt).Layout),
+							)
+						})
+					}))
+				}
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
 			})
 			paint.FillShape(gtx.Ops, bar, clip.UniformRRect(image.Rect(0, 0, gtx.Dp(4), dims.Size.Y), gtx.Dp(2)).Op(gtx.Ops))
 			return dims
 		})
 	})
+}
+
+// firstURL returns a if it is set, else b, as for the proxied copy of an
+// icon and the original.
+func firstURL(a, b discord.URL) discord.URL {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// layoutEmbedFields lays out the fields of an embed: those marked inline
+// side by side, three to a row as Discord does, and the others on their own.
+func (c *chatView) layoutEmbedFields(gtx layout.Context, m discord.Message, key string, fields []discord.EmbedField) layout.Dimensions {
+	field := func(i int, f discord.EmbedField) layout.Widget {
+		return func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Bottom: unit.Dp(8), Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return c.layoutText(gtx, m, fmt.Sprintf("%s/f%dn", key, i), "**"+f.Name+"**", 14)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return c.layoutText(gtx, m, fmt.Sprintf("%s/f%dv", key, i), f.Value, 14)
+					}),
+				)
+			})
+		}
+	}
+	var rows []layout.FlexChild
+	for i := 0; i < len(fields); {
+		if !fields[i].Inline {
+			rows = append(rows, layout.Rigid(field(i, fields[i])))
+			i++
+			continue
+		}
+		var cols []layout.FlexChild
+		for n := 0; n < 3 && i < len(fields) && fields[i].Inline; n++ {
+			cols = append(cols, layout.Flexed(1, field(i, fields[i])))
+			i++
+		}
+		for len(cols) < 3 {
+			cols = append(cols, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{} }))
+		}
+		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Alignment: layout.Start}.Layout(gtx, cols...)
+		}))
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
 }
 
 var (

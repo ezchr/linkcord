@@ -163,6 +163,71 @@ func (u *ui) startDemo() {
 	})
 	add(channels[0].ID, guild.ID, users[6], 30*time.Minute, "", func(m *discord.Message) { m.Type = discord.GuildMemberJoinMessage })
 
+	// A music bot with formatting in its embed, buttons of every color, a
+	// menu, and a message laid out with components.
+	add(channels[0].ID, guild.ID, users[4], 25*time.Minute, "", func(m *discord.Message) {
+		m.Embeds = []discord.Embed{{
+			Description: "> Now playing\n**[Demo Song (original)](https://example.com/song)**\n`[▬▬▬▬🔘──────────]` 1:24 / 3:05",
+			Color:       0xf0b232,
+		}}
+		m.Components = discord.TopLevelComponents{
+			&discord.ActionRowComponent{
+				&discord.ButtonComponent{Style: discord.SecondaryButtonStyle(), Emoji: &discord.ComponentEmoji{Name: "⏮"}, CustomID: "prev"},
+				&discord.ButtonComponent{Style: discord.PrimaryButtonStyle(), Label: "Pause", Emoji: &discord.ComponentEmoji{Name: "⏸"}, CustomID: "pause"},
+				&discord.ButtonComponent{Style: discord.SecondaryButtonStyle(), Emoji: &discord.ComponentEmoji{Name: "⏭"}, CustomID: "next"},
+				&discord.ButtonComponent{Style: discord.SuccessButtonStyle(), Label: "Add song", CustomID: demoFormID},
+				&discord.ButtonComponent{Style: discord.DangerButtonStyle(), Label: "Stop", CustomID: "stop"},
+			},
+			&discord.ActionRowComponent{
+				&discord.StringSelectComponent{CustomID: "loop", Placeholder: "Loop mode", Options: []discord.SelectOption{
+					{Label: "Off", Value: "off", Description: "Play the queue once", Emoji: &discord.ComponentEmoji{Name: "➡️"}},
+					{Label: "Song", Value: "song", Description: "Repeat the current song", Emoji: &discord.ComponentEmoji{Name: "🔂"}},
+					{Label: "Queue", Value: "queue", Description: "Repeat the whole queue", Emoji: &discord.ComponentEmoji{Name: "🔁"}},
+				}},
+			},
+			&discord.ActionRowComponent{
+				&discord.ButtonComponent{Style: discord.LinkButtonStyle("https://example.com/dashboard"), Label: "Dashboard"},
+				&discord.ButtonComponent{Style: discord.SecondaryButtonStyle(), Label: "Disabled", CustomID: "off", Disabled: true},
+			},
+		}
+	})
+	add(channels[0].ID, guild.ID, users[4], 24*time.Minute, "", func(m *discord.Message) {
+		m.Embeds = []discord.Embed{{
+			Author:      &discord.EmbedAuthor{Name: "Server Stats"},
+			Title:       "Weekly report",
+			URL:         "https://example.com/stats",
+			Description: "Here is how the server did this week. **Great job, everyone!** 🎉",
+			Color:       0x5865f2,
+			Fields: []discord.EmbedField{
+				{Name: "Messages", Value: "12,480", Inline: true},
+				{Name: "New members", Value: "37", Inline: true},
+				{Name: "Voice hours", Value: "210", Inline: true},
+				{Name: "Top channel", Value: "<#" + channels[0].ID.String() + "> with *4,210* messages"},
+			},
+			Thumbnail: &discord.EmbedThumbnail{URL: discord.URL(avatar), Width: 128, Height: 128},
+			Footer:    &discord.EmbedFooter{Text: "Stats bot"},
+			Timestamp: discord.NewTimestamp(time.Now().Add(-24 * time.Minute)),
+		}}
+	})
+	add(channels[0].ID, guild.ID, users[4], 23*time.Minute, "", func(m *discord.Message) {
+		m.Flags = discord.IsComponentsV2
+		m.Components = discord.TopLevelComponents{
+			&discord.ContainerComponent{AccentColor: 0x23a55a, Components: []discord.Component{
+				&discord.SectionComponent{
+					Components: []discord.Component{
+						&discord.TextDisplayComponent{Content: "## Event tonight\nMovie night in **🏝 Game Room** at 9 PM.\n-# Organized by the moderators"},
+					},
+					Accessory: &discord.ThumbnailComponent{Media: discord.UnfurledMediaitem{URL: avatar, Width: 128, Height: 128}},
+				},
+				&discord.SeparatorComponent{Divider: true, Spacing: discord.SeparatorComponentSpacingSmallPadding},
+				&discord.ActionRowComponent{
+					&discord.ButtonComponent{Style: discord.SuccessButtonStyle(), Label: "I'm going", Emoji: &discord.ComponentEmoji{Name: "✅"}, CustomID: "going"},
+					&discord.ButtonComponent{Style: discord.SecondaryButtonStyle(), Label: "Maybe", CustomID: "maybe"},
+				},
+			}},
+		}
+	})
+
 	for i := 60; i > 0; i-- {
 		author := users[0]
 		if i%3 == 0 {
@@ -216,4 +281,27 @@ func (u *ui) startDemo() {
 	u.chat.load(ready)
 	u.chat.selectGuild(guild.ID)
 	u.screen = screenChat
+}
+
+// demoFormID is the button of the demo whose bot answers with a form.
+const demoFormID = "demo_form"
+
+// demoForm is the form of the demo, with the kinds of fields bots use.
+func demoForm(m discord.Message) modalCreateEvent {
+	ev := modalCreateEvent{
+		ID: "demo", ChannelID: m.ChannelID, Title: "Add a song", CustomID: "add_song",
+		Components: discord.TopLevelComponents{
+			&discord.LabelComponent{Label: "Song", Description: "A name or a link", Component: &discord.TextInputComponent{
+				CustomID: "song", Style: discord.TextInputShortStyle, Required: true, Placeholder: "Never Gonna Give You Up",
+			}},
+			&discord.LabelComponent{Label: "Where in the queue", Component: &discord.StringSelectComponent{
+				CustomID: "where", Options: []discord.SelectOption{{Label: "Next", Value: "next"}, {Label: "Last", Value: "last", Default: true}},
+			}},
+			&discord.LabelComponent{Label: "Note for the DJ", Component: &discord.TextInputComponent{
+				CustomID: "note", Style: discord.TextInputParagraphStyle,
+			}},
+		},
+	}
+	ev.Application.Name = m.Author.DisplayOrUsername()
+	return ev
 }
