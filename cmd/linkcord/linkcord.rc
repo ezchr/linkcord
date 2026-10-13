@@ -1,0 +1,4 @@
+// The icon shown for linkcord.exe, its window and its taskbar button.
+// Rebuild rsrc_windows_amd64.syso after changing it:
+//   windres -O coff -o rsrc_windows_amd64.syso linkcord.rc
+1 ICON "../../assets/linkcord.ico"
