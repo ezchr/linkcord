@@ -591,8 +591,17 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	c.setTitle(title + " - " + appName)
 
 	id, epoch := ch.ID, c.historyEpoch
+	demo := c.demo
 	go func() {
-		msgs, err := c.st.Client.Messages(id, 50)
+		// The history comes from Discord, which may hold newer messages than
+		// the cache; the demo has no connection and keeps its own.
+		var msgs []discord.Message
+		var err error
+		if demo {
+			msgs, err = c.st.Cabinet.Messages(id)
+		} else {
+			msgs, err = c.st.Client.Messages(id, 50)
+		}
 		c.u.post(func() {
 			if c.closed || c.historyEpoch != epoch || c.selChannel == nil || c.selChannel.ID != id {
 				return
