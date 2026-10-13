@@ -57,6 +57,9 @@ type voiceState struct {
 	// demoChannel is the voice channel joined in the demo, which has no
 	// session.
 	demoChannel discord.ChannelID
+	// demoSpeaker is who always speaks in the demo, where the user speaks
+	// while in a voice channel and not muted.
+	demoSpeaker discord.UserID
 
 	// err says why the last voice action failed, or what it did if info,
 	// until errUntil.
@@ -213,6 +216,12 @@ func (u *ui) voiceStatus() voice.Status {
 func (u *ui) voiceChannel() discord.ChannelID { return u.voiceStatus().ChannelID }
 
 func (u *ui) voiceSpeaking(id discord.UserID) bool {
+	if v := &u.voice; v.demoSpeaker.IsValid() {
+		if c := u.chat; c != nil && id == c.me.ID {
+			return v.demoChannel.IsValid() && !v.muted
+		}
+		return id == v.demoSpeaker
+	}
 	if s := u.voice.session; s != nil {
 		return s.Speaking(id)
 	}

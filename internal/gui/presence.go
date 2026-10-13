@@ -165,9 +165,32 @@ func elapsed(t time.Time) string {
 // avatarStatus lays out the picture of a user with the dot of their status in
 // the bottom right corner, cut out of ring, the color behind it.
 func (c *chatView) avatarStatus(gtx layout.Context, user discord.User, guildID discord.GuildID, size unit.Dp, ring colorT) layout.Dimensions {
+	return c.avatarStatusSpeaking(gtx, user, guildID, size, ring, false)
+}
+
+// avatarStatusSpeaking is avatarStatus with the green ring of who is
+// speaking around the picture if speaking, as Discord shows it.
+func (c *chatView) avatarStatusSpeaking(gtx layout.Context, user discord.User, guildID discord.GuildID, size unit.Dp, ring colorT, speaking bool) layout.Dimensions {
 	dims := c.u.picture(gtx, cdnSize(user.AvatarURLWithType(discord.PNGImage)), size, colorFor(uint64(user.ID)), user.DisplayOrUsername(), -1)
+	if speaking {
+		speakingRing(gtx, dims.Size.X, ring)
+	}
 	statusDot(gtx, c.status(guildID, user.ID), dims.Size.X, ring)
 	return dims
+}
+
+// speakingRing draws the green ring of who is speaking over the edge of a
+// round picture of px pixels, with a thin gap of the color bg inside it.
+func speakingRing(gtx layout.Context, px int, bg colorT) {
+	w := max(gtx.Dp(2), 2)
+	gap := max(gtx.Dp(1), 1)
+	r := image.Rect(0, 0, px, px)
+	stroke := func(c colorT, inset, width int) {
+		e := clip.Ellipse(r.Inset(inset + width/2))
+		paint.FillShape(gtx.Ops, c, clip.Stroke{Path: e.Path(gtx.Ops), Width: float32(width)}.Op())
+	}
+	stroke(bg, w, gap)
+	stroke(colorGreen, 0, w)
 }
 
 // statusDot draws the status dot over the bottom right corner of an avatar

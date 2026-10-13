@@ -32,6 +32,8 @@ func (u *ui) startDemo() {
 		{ID: discord.UserID(id(7)), Discriminator: "0", Username: "elena", DisplayName: "𝓔𝓵𝓮𝓷𝓪 | ᴷⁱⁿᵍ"},
 		{ID: discord.UserID(id(8)), Discriminator: "0", Username: "fer", DisplayName: "Fer"},
 	}
+	// Beto speaks in the demo's voice channel, for its rings to show.
+	u.voice.demoSpeaker = users[1].ID
 	presences := []discord.Presence{
 		{Status: discord.OnlineStatus, Activities: []discord.Activity{{Type: discord.ListeningActivity, Name: "YouTube Music", Details: "Sample song", State: "Sample artist", Timestamps: &discord.ActivityTimestamps{Start: discord.UnixMsTimestamp(time.Now().Add(-56 * time.Minute).UnixMilli())}}}},
 		{Status: discord.OnlineStatus, Activities: []discord.Activity{{Type: discord.GameActivity, Name: "Counter-Strike"}}},

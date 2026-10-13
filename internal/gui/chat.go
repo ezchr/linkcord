@@ -1305,15 +1305,16 @@ func (c *chatView) layoutVoiceMember(gtx layout.Context, r channelRow, hovered b
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		return layout.Inset{Left: unit.Dp(8), Right: unit.Dp(8), Top: unit.Dp(3), Bottom: unit.Dp(3)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			col := colorMuted
-			switch {
-			case c.u.voiceSpeaking(r.user):
-				col = colorGreen
-			case hovered:
+			if hovered {
 				col = colorText
 			}
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return c.u.picture(gtx, r.avatar, 22, colorFor(uint64(r.user)), r.label, -1)
+					dims := c.u.picture(gtx, r.avatar, 22, colorFor(uint64(r.user)), r.label, -1)
+					if c.u.voiceSpeaking(r.user) {
+						speakingRing(gtx, dims.Size.X, bg)
+					}
+					return dims
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Flexed(1, oneLine(label(th, 14, col, r.label)).Layout),
@@ -1391,7 +1392,7 @@ func (c *chatView) layoutUserPanel(gtx layout.Context) layout.Dimensions {
 								return layout.Inset{Top: unit.Dp(4), Bottom: unit.Dp(4), Left: unit.Dp(2), Right: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 									return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											return c.avatarStatus(gtx, c.me, discord.NullGuildID, 32, bg)
+											return c.avatarStatusSpeaking(gtx, c.me, discord.NullGuildID, 32, bg, c.u.voiceSpeaking(c.me.ID))
 										}),
 										layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
