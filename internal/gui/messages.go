@@ -371,6 +371,10 @@ func isImage(a discord.Attachment) bool {
 // pixels, which downloads much less than the original.
 func mediaURL(proxy, original string, w, h int) string {
 	u := proxy
+	if parsed, err := url.Parse(original); err == nil && (strings.EqualFold(path.Ext(parsed.Path), ".gif") || parsed.Fragment == gifVideoFragment) {
+		// Static proxy renditions must not replace the animated original.
+		u = original
+	}
 	if u == "" {
 		u = original
 	}
@@ -382,6 +386,10 @@ func mediaURL(proxy, original string, w, h int) string {
 		return u
 	}
 	q := parsed.Query()
+	if strings.EqualFold(path.Ext(parsed.Path), ".gif") {
+		q.Del("format")
+		q.Set("animated", "true")
+	}
 	q.Set("width", strconv.Itoa(max(w, 1)))
 	q.Set("height", strconv.Itoa(max(h, 1)))
 	parsed.RawQuery = q.Encode()

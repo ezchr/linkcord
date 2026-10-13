@@ -9,11 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gioui.org/io/event"
-	"gioui.org/io/key"
-	"gioui.org/io/pointer"
 	"gioui.org/layout"
-	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
@@ -31,6 +27,7 @@ type videoViewer struct {
 	ended                                  bool
 	closeBtn, pauseBtn, muteBtn, replayBtn widget.Clickable
 	focused                                bool
+	view                                   imageViewer
 }
 
 func (v *videoViewer) setStatus(u *ui, status string, ended bool) {
@@ -192,18 +189,6 @@ func (v *videoViewer) toggleMute() {
 
 func (c *chatView) layoutVideoViewer(gtx layout.Context) layout.Dimensions {
 	v := c.video
-	size := gtx.Constraints.Max
-	area := clip.Rect{Max: size}.Push(gtx.Ops)
-	event.Op(gtx.Ops, v)
-	area.Pop()
-	if !v.focused {
-		gtx.Execute(key.FocusCmd{Tag: v})
-		v.focused = true
-	}
-	if v.closeBtn.Clicked(gtx) {
-		c.closeVideo()
-		return layout.Dimensions{Size: size}
-	}
 	if v.pauseBtn.Clicked(gtx) {
 		v.togglePause()
 	}
@@ -214,42 +199,22 @@ func (c *chatView) layoutVideoViewer(gtx layout.Context) layout.Dimensions {
 		c.openVideo(v.source, v.title)
 		v = c.video
 	}
-	for {
-		ev, ok := gtx.Event(
-			key.Filter{Focus: v, Name: key.NameEscape},
-			pointer.Filter{Target: v, Kinds: pointer.Press | pointer.Release | pointer.Scroll,
-				ScrollX: pointer.ScrollRange{Min: -1e6, Max: 1e6},
-				ScrollY: pointer.ScrollRange{Min: -1e6, Max: 1e6}},
-		)
-		if !ok {
-			break
-		}
-		if e, ok := ev.(key.Event); ok && e.State == key.Press {
-			c.closeVideo()
-			return layout.Dimensions{Size: size}
-		}
-	}
 	v.mu.Lock()
 	frame, status, ended := v.frame, v.status, v.ended
 	v.mu.Unlock()
-	paint.FillShape(gtx.Ops, colorServers, clip.Rect{Max: size}.Op())
-	return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-					layout.Flexed(1, oneLine(label(c.u.th, 16, colorText, v.title)).Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return button(gtx, c.u.th, &v.closeBtn, colorPanel, "Close")
-					}),
-				)
-			}),
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				if frame == nil {
-					return layout.Center.Layout(gtx, label(c.u.th, 14, colorMuted, status).Layout)
-				}
-				return layout.Center.Layout(gtx, widget.Image{Src: *frame, Fit: widget.Contain}.Layout)
-			}),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+	if v.view.zoom == 0 {
+		v.view.zoom = 1
+	}
+	v.view.openURL = v.source
+	if frame != nil {
+		size := frame.Size()
+		v.view.w, v.view.h = size.X, size.Y
+	} else {
+		v.view.w, v.view.h = 640, 360
+	}
+	footer := func(gtx layout.Context) layout.Dimensions {
+		return rounded(gtx, withAlpha(colorPopup, 0xe0), 8, func(gtx layout.Context) layout.Dimensions {
+			return layout.UniformInset(unit.Dp(6)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				pauseText := "Pause"
 				if v.paused.Load() {
 					pauseText = "Play"
@@ -258,22 +223,27 @@ func (c *chatView) layoutVideoViewer(gtx layout.Context) layout.Dimensions {
 				if v.muted.Load() {
 					muteText = "Unmute"
 				}
-				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if ended {
-							gtx = gtx.Disabled()
-						}
-						return button(gtx, c.u.th, &v.pauseBtn, colorPanel, pauseText)
+						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								if ended || frame == nil {
+									gtx = gtx.Disabled()
+								}
+								return button(gtx, c.u.th, &v.pauseBtn, colorPanel, pauseText)
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return button(gtx, c.u.th, &v.muteBtn, colorPanel, muteText)
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return button(gtx, c.u.th, &v.replayBtn, colorPanel, "Replay")
+							}),
+						)
 					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return button(gtx, c.u.th, &v.muteBtn, colorPanel, muteText)
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return button(gtx, c.u.th, &v.replayBtn, colorPanel, "Replay")
-					}),
-					layout.Flexed(1, label(c.u.th, 12, colorMuted, status).Layout),
+					layout.Rigid(oneLine(label(c.u.th, 12, colorMuted, v.title+" · "+status)).Layout),
 				)
-			}),
-		)
-	})
+			})
+		})
+	}
+	return c.layoutVisualViewer(gtx, &v.view, func(layout.Context) *paint.ImageOp { return frame }, c.closeVideo, footer)
 }

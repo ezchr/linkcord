@@ -105,6 +105,54 @@ func embedPreview(e discord.Embed) (mediaPreview, bool) {
 			}
 		}
 	}
+	// Prefer a real GIF over a static thumbnail or a video rendition.
+	if e.Type == discord.GIFVEmbed {
+		for _, candidate := range []string{
+			func() string {
+				if e.Image != nil {
+					return string(e.Image.URL)
+				}
+				return ""
+			}(),
+			func() string {
+				if e.Thumbnail != nil {
+					return string(e.Thumbnail.URL)
+				}
+				return ""
+			}(),
+			string(e.URL),
+		} {
+			if parsed, err := url.Parse(candidate); err == nil && strings.EqualFold(path.Ext(parsed.Path), ".gif") {
+				p.original = candidate
+				if e.Image != nil {
+					p.width, p.height = int(e.Image.Width), int(e.Image.Height)
+				} else if e.Video != nil {
+					p.width, p.height = int(e.Video.Width), int(e.Video.Height)
+				} else if e.Thumbnail != nil {
+					p.width, p.height = int(e.Thumbnail.Width), int(e.Thumbnail.Height)
+				}
+				if p.openURL == "" {
+					p.openURL = candidate
+				}
+				return p, true
+			}
+		}
+		if e.Video != nil {
+			source := string(e.Video.URL)
+			if source == "" {
+				source = string(e.Video.Proxy)
+			}
+			if parsed, err := url.Parse(source); err == nil && parsed.Host != "" && (parsed.Scheme == "https" || parsed.Scheme == "http") {
+				parsed.Fragment = gifVideoFragment
+				p.original = parsed.String()
+				p.width, p.height = int(e.Video.Width), int(e.Video.Height)
+				if p.openURL == "" {
+					p.openURL = source
+				}
+				return p, true
+			}
+		}
+	}
 	p.video = e.Type == discord.VideoEmbed || e.Video != nil && e.Type != discord.ImageEmbed
 	if p.video && e.Video != nil {
 		p.playURL = string(e.Video.URL)

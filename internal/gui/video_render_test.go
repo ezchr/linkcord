@@ -44,6 +44,8 @@ func TestRenderVideoControls(t *testing.T) {
 	}{
 		{"video-wide", image.Pt(1000, 700), false},
 		{"video-narrow", image.Pt(580, 700), false},
+		{"image-viewer", image.Pt(1000, 700), false},
+		{"gif-viewer", image.Pt(1000, 700), false},
 		{"performance-menu", image.Pt(420, 260), true},
 	} {
 		win, err := headless.NewWindow(tc.size.X, tc.size.Y)
@@ -56,6 +58,17 @@ func TestRenderVideoControls(t *testing.T) {
 			Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}, Constraints: layout.Exact(tc.size)}
 		if tc.profile {
 			u.chat.layoutSelfMenu(gtx, &profileView{self: true})
+		} else if tc.name == "image-viewer" || tc.name == "gif-viewer" {
+			raw := "https://example.test/fixture.gif"
+			entry := &imageEntry{state: imageReady, op: frame}
+			if tc.name == "gif-viewer" {
+				entry.frames = []paint.ImageOp{frame, frame}
+				entry.delays = []time.Duration{100 * time.Millisecond, 100 * time.Millisecond}
+				entry.cycle = 200 * time.Millisecond
+			}
+			u.images.entries["640:"+raw] = entry
+			u.chat.viewer = &imageViewer{original: raw, openURL: raw, w: 640, h: 360, zoom: 1}
+			u.chat.layoutViewer(gtx)
 		} else {
 			u.chat.layoutVideoViewer(gtx)
 		}

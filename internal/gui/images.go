@@ -190,7 +190,7 @@ func (im *images) load(key, url string, size int, e *imageEntry) {
 	im.decode <- struct{}{}
 	frames, delays, err := im.animFromDisk(key, size)
 	var img image.Image
-	if err != nil {
+	if err != nil && (!isGIFVideoURL(url) || im.lowPower) {
 		img, err = im.fromDisk(stillKey(key, url))
 	}
 	if err != nil {
@@ -244,6 +244,12 @@ func (im *images) download(key, url string, size int) ([]image.Image, []time.Dur
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	if isGIFVideoURL(url) {
+		data, err = gifVideoData(data, size)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
 	if isGIF(data) || isAPNG(data) {
 		if im.lowPower {
 			poster, err := decodeAnimationPoster(data, size)
@@ -278,6 +284,9 @@ func (im *images) download(key, url string, size int) ([]image.Image, []time.Dur
 // stills of GIF addresses moved to another key, so those are not taken for
 // the animation.
 func stillKey(key, url string) string {
+	if isGIFVideoURL(url) {
+		return key + "#gifv-still"
+	}
 	path, _, _ := strings.Cut(strings.ToLower(url), "?")
 	if strings.HasSuffix(path, ".gif") {
 		return key + "#still"
@@ -299,7 +308,7 @@ func (im *images) fetch(url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status %s", resp.Status)
 	}
-	if strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "video/") {
+	if strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "video/") && !isGIFVideoURL(url) {
 		return nil, errors.New("media proxy returned a video instead of an image")
 	}
 	// Pictures shown in the chat are resized by Discord; a limit keeps a

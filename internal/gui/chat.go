@@ -2,6 +2,7 @@ package gui
 
 import (
 	"cmp"
+	"context"
 	"image"
 	"log/slog"
 	"slices"
@@ -100,6 +101,13 @@ type chatView struct {
 	loading, loadingOlder bool
 	noOlder               bool
 	loadErr, sendErr      string
+	historyEpoch          uint64
+	refreshing            bool
+	refreshPending        bool
+	refreshFailures       int
+	refreshCancel         context.CancelFunc
+	lastRefresh           time.Time
+	refreshLive           map[discord.MessageID]*discord.Message
 	selectables           map[discord.MessageID]*widget.Selectable
 	// richStates hold the clickable spans of each message, and revealed the
 	// messages whose spoilers were clicked.
@@ -108,6 +116,9 @@ type chatView struct {
 	linkClicks map[string]*widget.Clickable
 
 	guildList, channelList, messageList widget.List
+	panes                               paneSettings
+	panesLoaded                         bool
+	channelResize, memberResize         paneResize
 
 	composer    widget.Editor
 	typingUntil time.Time
@@ -219,6 +230,12 @@ func (c *chatView) pump() {
 			switch ev := ev.(type) {
 			case *gateway.ReadyEvent:
 				c.u.post(func() { c.u.onReady(c.st, ev) })
+			case *gateway.ResumedEvent:
+				c.u.post(func() {
+					if !c.closed && c.u.chat == c {
+						c.refreshCurrentChat()
+					}
+				})
 			case *authTokenRefreshEvent:
 				c.u.post(func() { c.u.tokenRefreshed(c.st, ev.Token) })
 			case *gateway.GuildMemberListUpdateEvent:
@@ -256,6 +273,9 @@ func (c *chatView) close() {
 		return
 	}
 	c.closed = true
+	if c.refreshCancel != nil {
+		c.refreshCancel()
+	}
 	c.closeVideo()
 	// A call does not outlive the session it belongs to.
 	c.u.leaveVoice()
@@ -303,7 +323,15 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 		}
 	}
 	c.guildOrder = append(missing, order...)
-	c.selectGuild(discord.NullGuildID)
+	if c.selChannel != nil {
+		// A fresh READY after reconnect must keep the conversation open.
+		c.rebuildRows()
+		c.rebuildMembers()
+		c.requestMembers(0)
+		c.refreshCurrentChat()
+	} else {
+		c.selectGuild(discord.NullGuildID)
+	}
 }
 
 func (c *chatView) click(id discord.Snowflake) *widget.Clickable {
@@ -532,6 +560,13 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	if c.selChannel != nil && c.selChannel.ID == ch.ID {
 		return
 	}
+	if c.refreshCancel != nil {
+		c.refreshCancel()
+		c.refreshCancel = nil
+	}
+	c.historyEpoch++
+	c.refreshing, c.refreshPending, c.refreshFailures = false, false, 0
+	c.lastRefresh, c.refreshLive = time.Time{}, nil
 	c.selChannel = &ch
 	c.lastChannel[c.selGuild] = ch.ID
 	c.messages, c.loadErr, c.sendErr = nil, "", ""
@@ -555,14 +590,15 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	}
 	c.setTitle(title + " - " + appName)
 
-	id := ch.ID
+	id, epoch := ch.ID, c.historyEpoch
 	go func() {
-		msgs, err := c.st.Messages(id, 50)
+		msgs, err := c.st.Client.Messages(id, 50)
 		c.u.post(func() {
-			if c.selChannel == nil || c.selChannel.ID != id {
+			if c.closed || c.historyEpoch != epoch || c.selChannel == nil || c.selChannel.ID != id {
 				return
 			}
 			c.loading = false
+			defer c.runPendingRefresh()
 			if err != nil {
 				c.loadErr = "Could not load messages: " + err.Error()
 				return
@@ -587,18 +623,19 @@ func (c *chatView) loadOlder() {
 		c.noOlder = true
 		return
 	}
-	if c.selChannel == nil || c.loading || c.loadingOlder || c.noOlder || len(c.messages) == 0 {
+	if c.selChannel == nil || c.loading || c.loadingOlder || c.refreshing || c.noOlder || len(c.messages) == 0 {
 		return
 	}
 	c.loadingOlder = true
-	id, before := c.selChannel.ID, c.messages[0].ID
+	id, before, epoch := c.selChannel.ID, c.messages[0].ID, c.historyEpoch
 	go func() {
 		msgs, err := c.st.MessagesBefore(id, before, 50)
 		c.u.post(func() {
-			if c.selChannel == nil || c.selChannel.ID != id {
+			if c.closed || c.historyEpoch != epoch || c.selChannel == nil || c.selChannel.ID != id {
 				return
 			}
 			c.loadingOlder = false
+			defer c.runPendingRefresh()
 			if err != nil {
 				slog.Error("failed to load older messages", "err", err)
 				// Stop trying until the channel is opened again, instead of
@@ -647,7 +684,8 @@ func (c *chatView) markRead(chID discord.ChannelID) {
 }
 
 func (c *chatView) windowFocused() {
-	if c.selChannel != nil {
+	c.refreshCurrentChat()
+	if c.u.focused && c.selChannel != nil {
 		c.markRead(c.selChannel.ID)
 	}
 }
@@ -662,6 +700,7 @@ func (c *chatView) apply(ev gateway.Event) {
 		return
 	}
 	sel := c.selChannel
+	defer c.recordRefreshEvent(ev)
 	switch ev := ev.(type) {
 	case *gateway.MessageCreateEvent:
 		if sel != nil && ev.ChannelID == sel.ID {
@@ -802,25 +841,31 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 		// Logged out while handling input.
 		return layout.Dimensions{Size: gtx.Constraints.Max}
 	}
+	channels, members, showMembers := c.paneWidths(gtx)
+	serverWidth := min(gtx.Dp(72), gtx.Constraints.Max.X)
+	messageX := serverWidth + channels
 	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return pane(gtx, colorServers, gtx.Dp(72), c.layoutGuilds)
+			return pane(gtx, colorServers, serverWidth, c.layoutGuilds)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return pane(gtx, colorSidebar, gtx.Dp(240), c.layoutChannels)
+			return pane(gtx, colorSidebar, channels, c.layoutChannels)
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			c.comp.paneX, c.comp.paneW = gtx.Dp(72+240), gtx.Constraints.Max.X
+			c.comp.paneX, c.comp.paneW = messageX, gtx.Constraints.Max.X
 			return pane(gtx, colorChat, gtx.Constraints.Max.X, c.layoutMessages)
 		}),
 	}
-	// The member list only fits beside wide enough messages.
-	if c.membersShown() && gtx.Constraints.Max.X >= gtx.Dp(72+240+400+240) {
+	if showMembers {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return pane(gtx, colorSidebar, gtx.Dp(240), c.layoutMembers)
+			return pane(gtx, colorSidebar, members, c.layoutMembers)
 		}))
 	}
 	dims := layout.Flex{}.Layout(gtx, children...)
+	c.channelResize.layout(gtx, messageX)
+	if showMembers {
+		c.memberResize.layout(gtx, gtx.Constraints.Max.X-members)
+	}
 	c.layoutComposerPopups(gtx)
 	if c.profile != nil {
 		c.layoutProfile(gtx)

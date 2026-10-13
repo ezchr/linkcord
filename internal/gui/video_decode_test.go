@@ -99,6 +99,28 @@ func TestVideoDecoderIntegration(t *testing.T) {
 	}); err != nil || rotatedCount != 5 {
 		t.Fatalf("rotated decoding: frames=%d, error=%v", rotatedCount, err)
 	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	animated, err := gifVideoData(data, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frames, delays, err := decodeGIF(animated, 32)
+	if err != nil || len(frames) < 2 || len(delays) != len(frames) {
+		t.Fatalf("GIF video did not produce a looping animation: frames=%d, error=%v", len(frames), err)
+	}
+	if frames[0].Bounds().Dx() > 32 || frames[0].Bounds().Dy() > 32 {
+		t.Fatal("GIF video preview exceeds requested dimensions")
+	}
+	var duration time.Duration
+	for _, delay := range delays {
+		duration += delay
+	}
+	if duration < 400*time.Millisecond || duration > 600*time.Millisecond {
+		t.Fatalf("GIF video timing changed: %v", duration)
+	}
 	cancelCtx, stop := context.WithCancel(ctx)
 	start := time.Now()
 	err = decodeVideo(cancelCtx, ffmpeg, path, meta, func(*image.RGBA, time.Duration) error {

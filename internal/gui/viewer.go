@@ -58,6 +58,7 @@ type imageViewer struct {
 
 // openViewer shows a picture of w×h pixels in the viewer.
 func (c *chatView) openViewer(proxy, original string, w, h int, openURL, thumb string, thumbSize int) {
+	c.closeVideo()
 	c.viewer = &imageViewer{
 		proxy: proxy, original: original, openURL: openURL,
 		thumb: thumb, thumbSize: thumbSize, w: w, h: h, zoom: 1,
@@ -79,12 +80,24 @@ func (v *imageViewer) zoomAt(z float32, p f32.Point) {
 
 func (c *chatView) layoutViewer(gtx layout.Context) layout.Dimensions {
 	v := c.viewer
+	return c.layoutVisualViewer(gtx, v, func(gtx layout.Context) *paint.ImageOp {
+		side := min(max(v.w, v.h), maxViewerSide)
+		img := c.u.images.frame(gtx, mediaURL(v.proxy, v.original, min(v.w, maxViewerSide), min(v.h, maxViewerSide)), side)
+		if img == nil && v.thumb != "" {
+			img = c.u.images.frame(gtx, v.thumb, v.thumbSize)
+		}
+		return img
+	}, func() { c.viewer = nil }, nil)
+}
+
+// layoutVisualViewer gives pictures, GIFs and videos the same canvas and controls.
+func (c *chatView) layoutVisualViewer(gtx layout.Context, v *imageViewer, frame func(layout.Context) *paint.ImageOp, closeViewer func(), footer layout.Widget) layout.Dimensions {
 	th := c.u.th
 	size := gtx.Constraints.Max
 	center := layout.FPt(size).Mul(0.5)
 
 	if v.closeBtn.Clicked(gtx) {
-		c.viewer = nil
+		closeViewer()
 		return layout.Dimensions{Size: size}
 	}
 	if v.openBtn.Clicked(gtx) {
@@ -128,7 +141,7 @@ func (c *chatView) layoutViewer(gtx layout.Context) layout.Dimensions {
 			}
 			switch ev.Name {
 			case key.NameEscape:
-				c.viewer = nil
+				closeViewer()
 				return layout.Dimensions{Size: size}
 			case "+":
 				v.zoomAt(v.zoom*1.5, f32.Point{})
@@ -167,7 +180,7 @@ func (c *chatView) layoutViewer(gtx layout.Context) layout.Dimensions {
 				}
 				pos := ev.Position.Round()
 				if !pos.In(v.imgRect) {
-					c.viewer = nil
+					closeViewer()
 					return layout.Dimensions{Size: size}
 				}
 				if gtx.Now.Sub(v.lastClick) < 400*time.Millisecond {
@@ -189,9 +202,9 @@ func (c *chatView) layoutViewer(gtx layout.Context) layout.Dimensions {
 	paint.FillShape(gtx.Ops, withAlpha(rgb(0x000000), 0xe6), clip.Rect{Max: size}.Op())
 
 	// The size that fits the window, never larger than the picture.
-	margin := gtx.Dp(64)
+	margin := min(gtx.Dp(64), max(min(size.X, size.Y)/4, 0))
 	w, h := float32(max(v.w, 1)), float32(max(v.h, 1))
-	fit := min(float32(size.X-2*margin)/w, float32(size.Y-2*margin)/h, float32(gtx.Dp(1)))
+	fit := min(float32(max(size.X-2*margin, 1))/w, float32(max(size.Y-2*margin, 1))/h, float32(gtx.Dp(1)))
 	dw, dh := w*fit*v.zoom, h*fit*v.zoom
 	// Keep the picture from leaving the window when panning.
 	maxPanX, maxPanY := max((dw-float32(size.X))/2+float32(margin), 0), max((dh-float32(size.Y))/2+float32(margin), 0)
@@ -200,11 +213,7 @@ func (c *chatView) layoutViewer(gtx layout.Context) layout.Dimensions {
 	pos := center.Add(v.pan).Sub(f32.Pt(dw/2, dh/2))
 	v.imgRect = image.Rectangle{Min: pos.Round(), Max: pos.Add(f32.Pt(dw, dh)).Round()}
 
-	side := min(max(v.w, v.h), maxViewerSide)
-	img := c.u.images.frame(gtx, mediaURL(v.proxy, v.original, min(v.w, maxViewerSide), min(v.h, maxViewerSide)), side)
-	if img == nil && v.thumb != "" {
-		img = c.u.images.frame(gtx, v.thumb, v.thumbSize)
-	}
+	img := frame(gtx)
 	if img != nil {
 		t := op.Offset(v.imgRect.Min).Push(gtx.Ops)
 		igtx := gtx
@@ -212,7 +221,7 @@ func (c *chatView) layoutViewer(gtx layout.Context) layout.Dimensions {
 		widget.Image{Src: *img, Fit: widget.Fill}.Layout(igtx)
 		t.Pop()
 	}
-	if c.u.images.get(mediaURL(v.proxy, v.original, min(v.w, maxViewerSide), min(v.h, maxViewerSide)), side) == nil {
+	if img == nil && footer == nil {
 		s := gtx.Dp(36)
 		t := op.Offset(center.Round().Sub(image.Pt(s/2, s/2))).Push(gtx.Ops)
 		lgtx := gtx
@@ -257,7 +266,13 @@ func (c *chatView) layoutViewer(gtx layout.Context) layout.Dimensions {
 
 	hint := label(th, 12, colorMuted, "Mouse wheel: zoom · Drag: pan · Double-click: zoom in · Esc: close")
 	macro = op.Record(gtx.Ops)
-	hd := hint.Layout(bgtx)
+	var hd layout.Dimensions
+	if footer != nil {
+		bgtx.Constraints.Max.X = max(size.X-gtx.Dp(32), 1)
+		hd = footer(bgtx)
+	} else {
+		hd = hint.Layout(bgtx)
+	}
 	call = macro.Stop()
 	t = op.Offset(image.Pt((size.X-hd.Size.X)/2, size.Y-hd.Size.Y-gtx.Dp(16))).Push(gtx.Ops)
 	call.Add(gtx.Ops)

@@ -155,6 +155,8 @@ func (u *ui) runPending() {
 func (u *ui) loop() error {
 	stopProfile := u.startPerformanceProfile()
 	defer stopProfile()
+	stopResumeWatchdog := u.startResumeWatchdog()
+	defer stopResumeWatchdog()
 	var ops op.Ops
 	for {
 		switch e := u.win.Event().(type) {
@@ -169,11 +171,13 @@ func (u *ui) loop() error {
 		case app.ViewEvent:
 			u.viewEvent(e)
 		case app.ConfigEvent:
+			restored := u.minimized && e.Config.Mode != app.Minimized
+			gainedFocus := !u.focused && e.Config.Focused
 			u.minimized = e.Config.Mode == app.Minimized
-			if e.Config.Focused != u.focused {
-				u.focused = e.Config.Focused
+			u.focused = e.Config.Focused
+			if restored || gainedFocus {
 				u.win.Invalidate()
-				if u.focused && u.chat != nil {
+				if u.chat != nil {
 					u.chat.windowFocused()
 				}
 			}

@@ -80,15 +80,23 @@ The repository is currently private. Release checks use `LINKCORD_GITHUB_TOKEN`,
 | `--low-power` or `LINKCORD_LOW_POWER=1` | Shows static GIF/APNG previews to reduce animation CPU and memory use. |
 | `--system-fonts` | Compatibility option; full system font fallback is already enabled. |
 
-Development builds identify themselves as `v1.4.1-dev`; they cannot downgrade to `v1.4.0`. For a release, build the graphical entry point with its exact GitHub tag:
+Development builds identify themselves as `v1.4.2-dev`; they cannot downgrade to an older stable release. For a release, build the graphical entry point with its exact GitHub tag:
 
 ```powershell
-.\build-linkcord.ps1 -Version v1.4.1 -Out ..\linkcord.exe
+.\build-linkcord.ps1 -Version v1.4.2 -Out ..\linkcord.exe
 ```
 
 Publish that executable as `linkcord.exe` on the matching stable release. The helper checks the restarted application's embedded version against the release tag. A fresh build uploaded under an incorrect tag will not acknowledge startup.
 
 If a fixed asset is uploaded under the same tag with a new digest, it can be tried again. The failure record is `%LOCALAPPDATA%\linkcord\updates\failed-version`; release metadata is cached in the same folder.
+
+## Interface and resume behavior
+
+Images, GIFs, and videos share the same full-window viewer with zoom, pan, and corner controls. Videos also have pause, mute, and replay controls. GIF previews play automatically in normal mode; GIF embeds served as videos use FFmpeg to create a cached animation.
+
+Drag the channel pane's right edge or the member pane's left edge to adjust its width. Widths are saved between launches. The interface uses a darker palette.
+
+The active chat refreshes from Discord when the window regains focus, returns from minimization, or the gateway recovers. A lightweight watchdog also detects sleep and hibernation gaps when focus stays unchanged. Refresh closes multi-page message gaps, preserves drafts and older loaded history, and keeps gateway changes received during the request. Temporary failures retry automatically.
 
 ## Resource usage
 
