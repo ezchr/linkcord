@@ -65,6 +65,11 @@ func bold(l material.LabelStyle) material.LabelStyle {
 	return l
 }
 
+func italic(l material.LabelStyle) material.LabelStyle {
+	l.Font.Style = font.Italic
+	return l
+}
+
 func oneLine(l material.LabelStyle) material.LabelStyle {
 	l.MaxLines = 1
 	l.Truncator = "…"
