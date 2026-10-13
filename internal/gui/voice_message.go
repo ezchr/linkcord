@@ -40,6 +40,7 @@ type voicePlayer struct {
 // voiceControls are the widgets of one voice message.
 type voiceControls struct {
 	play  widget.Clickable
+	save  widget.Clickable
 	seek  gesture.Click
 	width int
 }
@@ -192,6 +193,16 @@ func (c *chatView) layoutVoiceMessage(gtx layout.Context, a discord.Attachment) 
 			p.togglePause()
 		}
 	}
+	// Saved as the .ogg it is, to the Downloads folder.
+	if k.save.Clicked(gtx) {
+		c.saveFile(url, a.Filename)
+	}
+	saveIcon := iconDownload
+	if d := c.downloads[url]; d != nil {
+		if _, _, _, err, done := d.state(); done && err == nil {
+			saveIcon = iconDone
+		}
+	}
 	for {
 		e, ok := k.seek.Update(gtx.Source)
 		if !ok {
@@ -255,6 +266,10 @@ func (c *chatView) layoutVoiceMessage(gtx layout.Context, a discord.Attachment) 
 							return label(th, 12, colorRed, "Could not play").Layout(gtx)
 						}
 						return label(th, 13, colorText, formatClock(shown)).Layout(gtx)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return iconButton(gtx, &k.save, saveIcon, colorMuted, colorHeader)
 					}),
 				)
 			})
