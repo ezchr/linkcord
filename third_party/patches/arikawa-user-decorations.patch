@@ -1,0 +1,61 @@
+diff --git a/discord/user.go b/discord/user.go
+index 498f52c..3cd99d1 100644
+--- a/discord/user.go
++++ b/discord/user.go
+@@ -36,6 +36,56 @@ type User struct {
+ 	NSFWAllowed option.Option[bool] `json:"nsfw_allowed,omitempty"`
+ 	Pronouns    string              `json:"pronouns,omitempty"`
+ 	Bio         string              `json:"bio,omitempty"`
++
++	// AvatarDecoration is the frame drawn around the user's avatar, if any.
++	AvatarDecoration *AvatarDecoration `json:"avatar_decoration_data,omitempty"`
++	// Collectibles are what the user decorates their name with, such as the
++	// nameplate behind it in member lists.
++	Collectibles *Collectibles `json:"collectibles,omitempty"`
++	// PrimaryGuild is the tag of a server that the user wears by their name.
++	PrimaryGuild *PrimaryGuild `json:"primary_guild,omitempty"`
++}
++
++// AvatarDecoration is a frame drawn around an avatar.
++type AvatarDecoration struct {
++	// Asset names the picture of the frame.
++	Asset string    `json:"asset"`
++	SKUID Snowflake `json:"sku_id,omitempty"`
++}
++
++// URL returns the picture of the frame: an APNG if animated is true and the
++// frame moves, and a still PNG otherwise.
++func (d AvatarDecoration) URL(animated bool) string {
++	return "https://cdn.discordapp.com/avatar-decoration-presets/" + d.Asset + ".png?size=96&passthrough=" + strconv.FormatBool(animated)
++}
++
++// Collectibles are what a user decorates their name with.
++type Collectibles struct {
++	Nameplate *Nameplate `json:"nameplate,omitempty"`
++}
++
++// Nameplate is the picture behind a user's name in member lists.
++type Nameplate struct {
++	// Asset is the path of the nameplate's pictures, ending with a slash.
++	Asset string `json:"asset"`
++	// Palette names the colors that go with the picture.
++	Palette string    `json:"palette,omitempty"`
++	Label   string    `json:"label,omitempty"`
++	SKUID   Snowflake `json:"sku_id,omitempty"`
++}
++
++// URL returns the still picture of the nameplate.
++func (n Nameplate) URL() string {
++	return "https://cdn.discordapp.com/assets/collectibles/" + n.Asset + "static.png"
++}
++
++// PrimaryGuild is the tag of a server that a user wears by their name.
++type PrimaryGuild struct {
++	GuildID GuildID `json:"identity_guild_id,omitempty"`
++	Enabled bool    `json:"identity_enabled,omitempty"`
++	Tag     string  `json:"tag,omitempty"`
++	// Badge is the hash of the small picture before the tag.
++	Badge string `json:"badge,omitempty"`
+ }
+ 
+ // CreatedAt returns a time object representing when the user was created.

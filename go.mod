@@ -82,3 +82,7 @@ require (
 replace gioui.org => ./third_party/gioui
 
 replace gioui.org/x => ./third_party/giox
+
+replace github.com/thomas-vilte/dave-go => ./third_party/davego
+
+replace github.com/ayn2op/arikawa/v3 => ./third_party/arikawa

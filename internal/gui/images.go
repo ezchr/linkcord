@@ -522,3 +522,17 @@ func (u *ui) picture(gtx layout.Context, url string, size unit.Dp, bg colorT, na
 	gtx.Constraints = layout.Exact(r.Max)
 	return widget.Image{Src: *img, Fit: widget.Cover}.Layout(gtx)
 }
+
+// decoration draws the frame of an avatar of px pixels over it: a fifth
+// wider, centered on it, as Discord draws them. Nothing shows while it loads.
+func (u *ui) decoration(gtx layout.Context, url string, px int) {
+	size := px * 6 / 5
+	img := u.images.frame(gtx, url, size)
+	if img == nil {
+		return
+	}
+	off := (size - px) / 2
+	defer op.Offset(image.Pt(-off, -off)).Push(gtx.Ops).Pop()
+	gtx.Constraints = layout.Exact(image.Pt(size, size))
+	widget.Image{Src: *img, Fit: widget.Contain}.Layout(gtx)
+}

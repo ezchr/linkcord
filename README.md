@@ -18,7 +18,7 @@ Linkcord was created for people on Windows 7 who can no longer run the official 
 | PNG, animated APNG, and GIF stickers; animated Tenor embeds | Lottie sticker rendering |
 | Image viewer with zoom, pan, and animation | |
 | Video thumbnails and a play button that opens the video in the browser | In-client video playback |
-| Cached avatars and server icons, presence, member lists, and profile cards | Settings |
+| Cached avatars and server icons, presence, member lists with avatar decorations, nameplates, server tags, boosts, and who is in voice, and profile cards | Settings |
 | Friends (online, all, pending, blocked), sending, accepting, and canceling friend requests, and message requests | |
 | Attachments, emoji picker, mention autocomplete, and typing indicators | |
 | Voice join/leave, mute/deafen, connection status, and speaking indicators | Verification in a real voice call |
@@ -180,10 +180,12 @@ When merging upstream discordo changes, replace `github.com/ayn2op/discordo` mod
 
 ## Vendored library patches
 
-`go.mod` uses local copies of Gio and its extensions. Patch files are retained in `third_party/patches/` so the changes can be reapplied to newer versions.
+`go.mod` uses local copies of Gio and its extensions, Arikawa and dave-go. Patch files are retained in `third_party/patches/` so the changes can be reapplied to newer versions.
 
 - **Gio v0.10.3:** checks for Windows APIs unavailable on Windows 7 and falls back to classic mouse messages. Direct3D hardware failures fall back to WARP.
 - **gioui.org/x v0.10.3:** draws image glyphs in rich text so color emoji remain visible; also supports the project's rich-text span callback.
+- **Arikawa (ayn2op fork, 2026-10-12):** users carry their avatar decoration, nameplate and server tag (`avatar_decoration_data`, `collectibles`, `primary_guild`), which Discord sends with every user and Arikawa dropped.
+- **dave-go v0.5.1:** adds end-to-end encryption of H264 frames laid out as libdave does, taking a fresh nonce for every retry, for screen sharing. Upstream encrypts Opus only.
 
 ## Fonts and color emoji
 

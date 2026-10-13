@@ -1,0 +1,268 @@
+diff --git a/codecs/h264_libdave.go b/codecs/h264_libdave.go
+index e69de29..968fb27 100644
+--- /dev/null
++++ b/codecs/h264_libdave.go
+@@ -0,0 +1,117 @@
++package codecs
++
++// Added by Linkcord: H264 frames laid out the way libdave, Discord's own DAVE
++// implementation, lays them out, so that Discord clients decrypt them.
++
++import (
++	"errors"
++
++	"github.com/thomas-vilte/dave-go/frame"
++)
++
++var longStartCode = []byte{0, 0, 0, 1}
++
++// H264Frame returns frame, an H264 access unit in Annex B, with every start
++// code written in 4 bytes, and the ranges of it to leave unencrypted, as
++// libdave's ProcessFrameH264 does:
++//
++//   - the receiver's depacketizer rebuilds the frame with 4-byte start codes,
++//     so they must be 4 bytes long for the ranges to match;
++//   - the start code, the NAL header and the start of the slice header up to
++//     the PPS ID of every slice stay readable, for the depacketizer;
++//   - every other NAL unit (SPS, PPS, SEI…) stays readable as a whole.
++func H264Frame(f []byte) ([]byte, []frame.Range, error) {
++	out := make([]byte, 0, len(f)+16)
++	var ranges []frame.Range
++	start, size := nextStartCode(f, 0)
++	if start < 0 {
++		return nil, nil, errors.New("codecs: H264 frame without a start code")
++	}
++	for start >= 0 {
++		nal := start + size
++		next, nextSize := nextStartCode(f, nal+1)
++		end := len(f)
++		if next >= 0 {
++			end = next
++		}
++		unit := f[nal:end]
++		at := len(out)
++		out = append(out, longStartCode...)
++		out = append(out, unit...)
++		clear := len(longStartCode) + len(unit)
++		if len(unit) > 0 {
++			if t := unit[0] & 0x1F; t == 1 || t == 5 {
++				clear = len(longStartCode) + min(len(unit), 1+bytesCoveringH264PPS(unit[1:]))
++			}
++		}
++		ranges = append(ranges, frame.Range{Offset: at, Length: clear})
++		start, size = next, nextSize
++	}
++	return out, mergeRanges(ranges), nil
++}
++
++// nextStartCode returns where the next start code at or after from begins
++// and how long it is, or -1.
++func nextStartCode(f []byte, from int) (int, int) {
++	for i := from; i+2 < len(f); i++ {
++		if f[i] != 0 || f[i+1] != 0 {
++			continue
++		}
++		if f[i+2] == 1 {
++			// A zero before makes it a 4-byte start code.
++			if i > from && f[i-1] == 0 {
++				return i - 1, 4
++			}
++			return i, 3
++		}
++	}
++	return -1, 0
++}
++
++// bytesCoveringH264PPS returns how many bytes of a slice header, after the
++// NAL header, cover its first three values: first_mb_in_slice, slice_type
++// and pic_parameter_set_id, written in exponential Golomb. It skips
++// emulation prevention bytes, as libdave does.
++func bytesCoveringH264PPS(p []byte) int {
++	bit, zeros, values := 0, 0, 0
++	for bit < len(p)*8 && values < 3 {
++		byteIndex, bitIndex := bit/8, bit%8
++		b := p[byteIndex]
++		if bitIndex == 0 && byteIndex >= 2 && b == 3 && p[byteIndex-1] == 0 && p[byteIndex-2] == 0 {
++			bit += 8
++			continue
++		}
++		if b&(1<<(7-bitIndex)) == 0 {
++			zeros++
++			bit++
++			if zeros >= 32 {
++				break
++			}
++			continue
++		}
++		values++
++		bit += 1 + zeros
++		zeros = 0
++	}
++	return bit/8 + 1
++}
++
++// mergeRanges joins ranges that touch, which libdave writes as one.
++func mergeRanges(ranges []frame.Range) []frame.Range {
++	var out []frame.Range
++	for _, r := range ranges {
++		if n := len(out); n > 0 && out[n-1].Offset+out[n-1].Length == r.Offset {
++			out[n-1].Length += r.Length
++			continue
++		}
++		out = append(out, r)
++	}
++	return out
++}
++
++// HasStartCode reports whether b holds an H264 start code, which must not
++// appear in what is encrypted or in the footer of a frame, since packetizers
++// split frames at them.
++func HasStartCode(b []byte) bool {
++	return hasStartCodeSequence(b)
++}
+diff --git a/codecs/h264_libdave_test.go b/codecs/h264_libdave_test.go
+index e69de29..0811aff 100644
+--- /dev/null
++++ b/codecs/h264_libdave_test.go
+@@ -0,0 +1,59 @@
++package codecs
++
++import (
++	"bytes"
++	"crypto/rand"
++	"testing"
++
++	"github.com/thomas-vilte/dave-go/frame"
++)
++
++func TestH264Frame(t *testing.T) {
++	sps := []byte{0x67, 0x42, 0xc0, 0x1f, 0xda}
++	pps := []byte{0x68, 0xce, 0x3c, 0x80}
++	// An IDR slice: first_mb_in_slice 0 ("1"), slice_type 7 ("0001000"),
++	// pic_parameter_set_id 0 ("1"): 9 bits, so 2 bytes cover them.
++	idr := []byte{0x65, 0x88, 0x80, 0x11, 0x22, 0x33, 0x44}
++	in := append(append(append(append(append([]byte{0, 0, 1}, sps...), 0, 0, 0, 1), pps...), 0, 0, 1), idr...)
++
++	out, ranges, err := H264Frame(in)
++	if err != nil {
++		t.Fatal(err)
++	}
++	want := bytes.Join([][]byte{nil, sps, pps, idr}, longStartCode)
++	if !bytes.Equal(out, want) {
++		t.Fatalf("frame = % x, want % x", out, want)
++	}
++	// The SPS, the PPS, the IDR's start code, header and 2 bytes of slice
++	// header are one readable range; the rest of the slice is encrypted.
++	clear := 4 + len(sps) + 4 + len(pps) + 4 + 1 + 2
++	if len(ranges) != 1 || ranges[0] != (frame.Range{Offset: 0, Length: clear}) {
++		t.Fatalf("ranges = %v, want [{0 %d}]", ranges, clear)
++	}
++
++	key := make([]byte, 16)
++	rand.Read(key)
++	enc, err := frame.Encrypt(frame.EncryptParams{Plaintext: out, Key: key, TruncatedNonce: 7, UnencryptedRanges: ranges})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !bytes.Equal(enc[:clear], out[:clear]) {
++		t.Fatal("the readable part was changed")
++	}
++	dec, nonce, err := frame.Decrypt(frame.DecryptParams{Ciphertext: enc, Key: key})
++	if err != nil || nonce != 7 || !bytes.Equal(dec, out) {
++		t.Fatalf("decrypt = % x, %d, %v", dec, nonce, err)
++	}
++}
++
++func TestBytesCoveringH264PPSSkipsEmulationPrevention(t *testing.T) {
++	// first_mb_in_slice with 16 leading zeros, written with an emulation
++	// prevention byte after the two zero bytes.
++	p := []byte{0x00, 0x00, 0x03, 0x80, 0x01, 0xe0}
++	// 16 zeros (2 bytes), skip the 0x03 byte, then "1" + 16 bits of value
++	// end at bit 8*3+17 = 41 of the bytes, then "1" (slice_type) and "1"
++	// (pps) at bits 41 and 42: 43 bits, so 43/8+1 = 6 bytes.
++	if n := bytesCoveringH264PPS(p); n != 6 {
++		t.Fatalf("got %d, want 6", n)
++	}
++}
+diff --git a/session/video.go b/session/video.go
+index e69de29..6087c7c 100644
+--- /dev/null
++++ b/session/video.go
+@@ -0,0 +1,77 @@
++package session
++
++// Added by Linkcord: end-to-end encryption of the H264 frames of a screen
++// share, which upstream leaves out on purpose.
++
++import (
++	"errors"
++	"fmt"
++
++	"github.com/thomas-vilte/dave-go/codecs"
++	"github.com/thomas-vilte/dave-go/frame"
++)
++
++// maxH264Attempts is how many nonces EncryptH264 tries before it gives up
++// on a frame whose encryption keeps holding a start code.
++const maxH264Attempts = 10
++
++// ErrStartCode is returned by EncryptH264 when no nonce it tried gave a
++// frame free of start codes; the frame should be dropped.
++var ErrStartCode = errors.New("dave: encrypted H264 frame kept holding a start code")
++
++// EncryptH264 encrypts f, an H264 access unit in Annex B, as libdave does,
++// and returns it with the DAVE footer. Without keys yet, it returns the
++// frame as it is, which receivers pass through.
++//
++// Unlike upstream's H26x path, every attempt takes a fresh nonce from the
++// send counter, so a retry never reuses one.
++func (s *Session) EncryptH264(f []byte) ([]byte, error) {
++	plain, ranges, err := codecs.H264Frame(f)
++	if err != nil {
++		return nil, err
++	}
++
++	s.mu.Lock()
++	defer s.mu.Unlock()
++
++	ratchet := s.selectSendRatchetLocked()
++	if ratchet == nil {
++		s.stats.PassthroughFrames++
++
++		return plain, nil
++	}
++
++	out := make([]byte, s.MaxEncryptedFrameSize(len(plain)))
++	for range maxH264Attempts {
++		_, truncatedNonce, generation := s.sendCounter.Next()
++		key, err := ratchet.GetKey(generation)
++		if err != nil {
++			s.stats.EncryptFailures++
++
++			return nil, err
++		}
++		ratchet.Commit(generation)
++
++		n, err := frame.EncryptInto(out, frame.EncryptParams{
++			Plaintext:         plain,
++			Key:               key,
++			TruncatedNonce:    truncatedNonce,
++			UnencryptedRanges: ranges,
++		})
++		if err != nil {
++			s.stats.EncryptFailures++
++
++			return nil, fmt.Errorf("dave: encrypt H264: %w", err)
++		}
++
++		// Start codes may stay where the frame is readable, but neither in
++		// what was encrypted nor in the footer.
++		cipher := frame.ExtractCiphertext(out[:len(plain)], ranges)
++		if !codecs.HasStartCode(cipher) && !codecs.HasStartCode(out[len(plain):n]) {
++			return out[:n], nil
++		}
++	}
++	s.stats.EncryptFailures++
++
++	return nil, ErrStartCode
++}

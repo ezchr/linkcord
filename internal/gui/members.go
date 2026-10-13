@@ -3,11 +3,18 @@ package gui
 import (
 	"cmp"
 	"fmt"
+	"image"
 	"slices"
 	"strings"
 
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
+	"gioui.org/op"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
+	"gioui.org/widget"
+	"gioui.org/widget/material"
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/gateway"
 	"github.com/ayn2op/arikawa/v3/state"
@@ -212,7 +219,7 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 		}
 		offline := status == discord.OfflineStatus || status == discord.InvisibleStatus
 		return layout.Inset{Left: unit.Dp(8), Right: unit.Dp(8), Top: unit.Dp(1)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return rowItem(gtx, c.userClick(m.User.ID), func(gtx layout.Context, hovered bool) layout.Dimensions {
+			return c.memberItem(gtx, m, func(gtx layout.Context, hovered bool) layout.Dimensions {
 				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						url := cdnSize(m.User.AvatarURLWithType(discord.PNGImage))
@@ -224,6 +231,11 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 							bg = colorHover
 						}
 						dims := c.u.picture(gtx, url, 32, colorFor(uint64(m.User.ID)), name, -1)
+						// The frame goes over the picture and the status over
+						// both, as in Discord.
+						if d := m.User.AvatarDecoration; d != nil && d.Asset != "" {
+							c.u.decoration(gtx, d.URL(true), dims.Size.X)
+						}
 						statusDot(gtx, status, dims.Size.X, bg)
 						return dims
 					}),
@@ -233,18 +245,126 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 						if offline && !hovered {
 							col = withAlpha(col, 0x80)
 						}
-						rows := []layout.FlexChild{layout.Rigid(oneLine(label(th, 15, col, name)).Layout)}
-						if line := activityLine(presence); line != "" && !offline {
-							rows = append(rows, layout.Rigid(oneLine(label(th, 12, colorMuted, line)).Layout))
+						rows := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return c.layoutMemberName(gtx, m, guildID, label(th, 15, col, name))
+						})}
+						if !offline {
+							if line := activityLine(presence); line != "" {
+								rows = append(rows, layout.Rigid(oneLine(label(th, 12, colorMuted, line)).Layout))
+							} else if c.inVoice(guildID, m.User.ID) {
+								rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconVoice, 12, colorGreen) }),
+										layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
+										layout.Flexed(1, oneLine(label(th, 12, colorMuted, "In a voice channel")).Layout),
+									)
+								}))
+							}
 						}
 						return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
 					}),
 				)
-			}, false)
+			})
 		})
 	})
 	// Ask for the members below the ones shown before they are reached.
 	pos := c.memberList.Position
 	c.requestMembers(member.ChunkFromIndex(pos.First+pos.Count) + 1)
 	return dims
+}
+
+// memberItem is a line of the member list: the member's nameplate behind it,
+// if they have one, under the color of the hover.
+func (c *chatView) memberItem(gtx layout.Context, m *discord.Member, w func(gtx layout.Context, hovered bool) layout.Dimensions) layout.Dimensions {
+	click := c.userClick(m.User.ID)
+	return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		pointer.CursorPointer.Add(gtx.Ops)
+		hovered := click.Hovered()
+		return layout.Background{}.Layout(gtx,
+			func(gtx layout.Context) layout.Dimensions {
+				size := image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Min.Y)
+				rr := clip.UniformRRect(image.Rectangle{Max: size}, gtx.Dp(4))
+				if col := m.User.Collectibles; col != nil && col.Nameplate != nil && col.Nameplate.Asset != "" {
+					if img := c.u.images.frame(gtx, col.Nameplate.URL(), size.X); img != nil {
+						st := rr.Push(gtx.Ops)
+						igtx := gtx
+						igtx.Constraints = layout.Exact(size)
+						widget.Image{Src: *img, Fit: widget.Cover, Position: layout.E}.Layout(igtx)
+						st.Pop()
+					}
+				}
+				if hovered {
+					paint.FillShape(gtx.Ops, withAlpha(colorHover, 0xb0), rr.Op(gtx.Ops))
+				}
+				return layout.Dimensions{Size: size}
+			},
+			func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min.X = gtx.Constraints.Max.X
+				return layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(8), Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return w(gtx, hovered)
+				})
+			},
+		)
+	})
+}
+
+// layoutMemberName is the name of a member, cut short to leave room for the
+// tag of the server they wear and the gem of those who boost the server.
+func (c *chatView) layoutMemberName(gtx layout.Context, m *discord.Member, guildID discord.GuildID, name material.LabelStyle) layout.Dimensions {
+	var after []layout.Widget
+	if pg := m.User.PrimaryGuild; pg != nil && pg.Enabled && pg.Tag != "" {
+		after = append(after, func(gtx layout.Context) layout.Dimensions {
+			return c.guildTag(gtx, pg.GuildID, pg.Badge, pg.Tag)
+		})
+	}
+	if guildID.IsValid() && m.BoostedSince.IsValid() {
+		after = append(after, func(gtx layout.Context) layout.Dimensions {
+			return icon(gtx, iconBoost, 14, colorBoost)
+		})
+	}
+	gap := gtx.Dp(6)
+	// What follows the name is measured first, so that the name gets the rest.
+	var calls []op.CallOp
+	var sizes []image.Point
+	used := 0
+	for _, w := range after {
+		macro := op.Record(gtx.Ops)
+		agtx := gtx
+		agtx.Constraints.Min = image.Point{}
+		dims := w(agtx)
+		calls = append(calls, macro.Stop())
+		sizes = append(sizes, dims.Size)
+		used += gap + dims.Size.X
+	}
+	ngtx := gtx
+	ngtx.Constraints.Min = image.Point{}
+	ngtx.Constraints.Max.X = max(gtx.Constraints.Max.X-used, 0)
+	macro := op.Record(gtx.Ops)
+	ndims := oneLine(name).Layout(ngtx)
+	nameCall := macro.Stop()
+	height := ndims.Size.Y
+	for _, s := range sizes {
+		height = max(height, s.Y)
+	}
+	t := op.Offset(image.Pt(0, (height-ndims.Size.Y)/2)).Push(gtx.Ops)
+	nameCall.Add(gtx.Ops)
+	t.Pop()
+	x := ndims.Size.X
+	for i, call := range calls {
+		x += gap
+		t := op.Offset(image.Pt(x, (height-sizes[i].Y)/2)).Push(gtx.Ops)
+		call.Add(gtx.Ops)
+		t.Pop()
+		x += sizes[i].X
+	}
+	return layout.Dimensions{Size: image.Pt(x, height)}
+}
+
+// inVoice reports whether the user is in a voice channel of guildID.
+func (c *chatView) inVoice(guildID discord.GuildID, id discord.UserID) bool {
+	if !guildID.IsValid() {
+		return false
+	}
+	vs, err := c.st.Cabinet.VoiceState(guildID, id)
+	return err == nil && vs.ChannelID.IsValid()
 }

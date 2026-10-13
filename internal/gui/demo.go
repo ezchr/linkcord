@@ -24,7 +24,7 @@ func (u *ui) startDemo() {
 	me := discord.User{ID: discord.UserID(id(1)), Discriminator: "0", Username: "demo_user", DisplayName: "You (demo)"}
 	cab.MyselfSet(me, false)
 	users := []discord.User{
-		{ID: discord.UserID(id(2)), Discriminator: "0", Username: "ana", DisplayName: "Ana"},
+		{ID: discord.UserID(id(2)), Discriminator: "0", Username: "ana", DisplayName: "Ana", PrimaryGuild: &discord.PrimaryGuild{GuildID: discord.GuildID(id(100)), Enabled: true, Tag: "DEMO"}},
 		{ID: discord.UserID(id(3)), Discriminator: "0", Username: "beto", DisplayName: "Beto"},
 		{ID: discord.UserID(id(4)), Discriminator: "0", Username: "carla", DisplayName: "Carla"},
 		{ID: discord.UserID(id(5)), Discriminator: "0", Username: "dani", DisplayName: "Dani"},
@@ -62,7 +62,12 @@ func (u *ui) startDemo() {
 	memberRoles := [][]discord.RoleID{{roles[0].ID}, {roles[0].ID}, {roles[1].ID}, {roles[1].ID}, {roles[2].ID}, {roles[1].ID}, {roles[1].ID}}
 	cab.MemberSet(guild.ID, &discord.Member{User: me, RoleIDs: []discord.RoleID{roles[0].ID}}, false)
 	for i, user := range users {
-		cab.MemberSet(guild.ID, &discord.Member{User: user, RoleIDs: memberRoles[i]}, false)
+		m := discord.Member{User: user, RoleIDs: memberRoles[i]}
+		if i == 1 {
+			// Beto boosts the server.
+			m.BoostedSince = discord.NewTimestamp(time.Now().Add(-30 * 24 * time.Hour))
+		}
+		cab.MemberSet(guild.ID, &m, false)
 		p := presences[i]
 		p.User, p.GuildID = user, guild.ID
 		cab.PresenceSet(guild.ID, &p, false)
