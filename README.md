@@ -11,14 +11,15 @@ Se hizo para que gente con Windows 7, que ya no puede usar la app oficial, tenga
 | Funciona | Falta |
 |---|---|
 | Inicio de sesión: código QR, correo + contraseña (con código 2FA), token (con un script para copiarlo desde el navegador) | **Voz** (lo más importante: ver más abajo) |
-| La sesión se guarda en el Administrador de credenciales de Windows; se guarda también el token nuevo cuando Discord lo renueva | Editar, borrar, responder y reaccionar a mensajes |
-| Servidores en el orden del usuario, mensajes directos, categorías plegables, permisos, no leídos y menciones | Copiar el texto de un mensaje (el texto con formato no se puede seleccionar) |
+| La sesión se guarda en el Administrador de credenciales de Windows; se guarda también el token nuevo cuando Discord lo renueva | |
+| Servidores en el orden del usuario, mensajes directos, categorías plegables, permisos, no leídos y menciones | |
 | Mensajes con formato de Discord, menciones, citas, código, spoilers, enlaces, imágenes en el chat, vistas previas de enlaces, insignia BOT | Emojis propios de los servidores dentro de los mensajes (se ven como `:nombre:`) |
 | Visor de imágenes con zoom y arrastre | GIF animados, videos en el chat, stickers |
 | Fotos de perfil e iconos (con caché en disco), estado en línea, lista de miembros | Hilos y foros |
 | Perfiles (propios y ajenos), cambiar el estado | Lista de amigos, solicitudes, ajustes |
 | Escribir: adjuntar archivos, selector de emojis, autocompletado de @menciones, "está escribiendo" | Probar en un Windows 7 real (ver "Pendiente") |
 | Emojis a color en toda la app | |
+| Acciones sobre mensajes (al pasar el ratón): reaccionar, responder (con o sin mención), editar en el sitio, copiar el texto y eliminar con confirmación (Mayús + clic la salta). Reacciones bajo los mensajes. ↑ en la caja vacía edita el último mensaje propio | |
 
 ## Compilar
 
@@ -77,7 +78,9 @@ Todo lo nuevo está en `cmd/linkcord`, `internal/gui`, `internal/auth` y `third_
 | `internal/gui/messages.go` | Historial, mensajes, adjuntos, imágenes en el chat, embeds, la barra de arriba. |
 | `internal/gui/markdown.go` | Formato de Discord con `gioui.org/x/richtext`: negrita, cursiva, código, citas, spoilers, enlaces, menciones. |
 | `internal/gui/composer.go` | La caja de texto: enviar, adjuntar, autocompletado de @, "está escribiendo". |
-| `internal/gui/emoji.go` | Selector de emojis (la lista con palabras de búsqueda está ahí). |
+| `internal/gui/emoji.go` | Selector de emojis (la lista con palabras de búsqueda está ahí). También elige la reacción de un mensaje. |
+| `internal/gui/actions.go` | Acciones sobre mensajes: barra al pasar el ratón, responder, editar, eliminar, copiar y reacciones. |
+| `internal/gui/render_test.go` | Dibuja el modo demo sin ventana y guarda imágenes; sirve cuando no hay pantalla. Ver el comentario de `TestRenderDemo`. |
 | `internal/gui/members.go` | Lista de miembros (la lista perezosa de Discord, a través de ningen). |
 | `internal/gui/profile.go` | Tarjetas de perfil y menú de estado. |
 | `internal/gui/presence.go` | Estado en línea, actividades, puntos de estado. |
@@ -123,7 +126,7 @@ Todo lo nuevo está en `cmd/linkcord`, `internal/gui`, `internal/auth` y `third_
 ## Pendiente, por prioridad
 
 1. **Voz.** `internal/voice` (de discordo) ya hace todo lo difícil: conexión, Opus, cifrado DAVE, micrófono y altavoces con miniaudio (que funciona en Windows 7). Falta conectarlo en `internal/gui/voice.go`: unirse al hacer clic en un canal de voz (`joinVoice`), un panel sobre el del usuario con "Conectado a…" y el botón para salir (`layoutVoicePanel`), los botones de silenciar y ensordecer (`layoutVoiceButtons`), y el borde verde de quien habla (`voiceSpeaking`). En discordo se puede ver cómo lo usa: `internal/ui/chat/guildstree`. Necesita compilar con cgo, cosa que el script ya hace.
-2. **Acciones sobre mensajes:** al pasar el ratón, responder, editar, borrar, reaccionar y copiar texto. Mostrar también las reacciones.
+~~2. Acciones sobre mensajes~~ (hecho).
 3. **Probar en un Windows 7 de verdad.** Revisar sobre todo que los certificados raíz del sistema permitan las conexiones TLS. Si un Windows 7 sin actualizaciones no tiene los certificados de Discord, habría que incluir los propios.
 4. Emojis de servidor dentro de los mensajes como imágenes (hoy `:nombre:`), stickers y GIF animados.
 5. Contador de mensajes no leídos y de menciones en servidores y mensajes directos. Notificaciones con vista previa.

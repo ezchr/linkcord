@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"github.com/ayn2op/arikawa/v3/discord"
 	"image"
 	"strings"
 
@@ -141,6 +142,9 @@ type emojiPicker struct {
 	// cells are made once per emoji, so that each keeps its click state.
 	cells   map[string]*emojiCell
 	hovered string
+	// react is the message the picked emoji reacts to; with none, the emoji
+	// goes in the box to write.
+	react discord.MessageID
 }
 
 func newEmojiPicker() *emojiPicker {
@@ -255,7 +259,12 @@ func (c *chatView) layoutEmojiPicker(gtx layout.Context) layout.Dimensions {
 	for _, r := range rows {
 		for _, cl := range r.cells {
 			if cl.click.Clicked(gtx) {
-				c.insertText(cl.text)
+				if id := p.react; id.IsValid() {
+					e := emojiOfCell(cl)
+					c.u.post(func() { c.toggleReaction(id, e) })
+				} else {
+					c.insertText(cl.text)
+				}
 				c.comp.emoji = nil
 				return layout.Dimensions{Size: size}
 			}

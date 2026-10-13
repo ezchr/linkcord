@@ -111,7 +111,9 @@ func (u *ui) startDemo() {
 			m.Attachments = []discord.Attachment{{Filename: "bienvenida.jpg", URL: discord.URL(avatar), Size: 392 * 1024, ContentType: "image/png", Width: 128, Height: 128}}
 		})
 	}
-	add(channels[0].ID, guild.ID, users[1], 5*time.Hour, "hola a todos 🔥🔥", nil)
+	add(channels[0].ID, guild.ID, users[1], 5*time.Hour, "hola a todos 🔥🔥", func(m *discord.Message) {
+		m.Reactions = []discord.Reaction{{Count: 3, Emoji: discord.Emoji{Name: "🔥"}}, {Count: 1, Me: true, Emoji: discord.Emoji{Name: "😂"}}}
+	})
 	add(channels[0].ID, guild.ID, users[1], 5*time.Hour-time.Minute, "alguien para jugar *cs 1.6*? ~~ahora no~~ más tarde", nil)
 	add(channels[0].ID, guild.ID, users[2], 4*time.Hour, "Miren esto: `go build ./...` y luego\n```\nlinkcord.exe --demo\n```\nfunciona en Windows 7 😎", nil)
 	add(channels[0].ID, guild.ID, me, 3*time.Hour, "> esto es una cita\nY esto un ||spoiler|| con https://github.com/ezchr/linkcord", func(m *discord.Message) {
@@ -139,7 +141,7 @@ func (u *ui) startDemo() {
 	ready := &gateway.ReadyEvent{User: me}
 	ready.Guilds = []gateway.GuildCreateEvent{{Guild: guild}}
 	for i := range 6 {
-		g := discord.Guild{ID: discord.GuildID(id(300 + i)), Name: []string{"Juegos", "Música", "Programación", "Anime", "Discordo Club", "Tareas"}[i], OwnerID: me.ID}
+		g := discord.Guild{ID: discord.GuildID(id(300 + i)), Name: []string{"Juegos", "Música", "Programación", "Anime", "Linkcord Club", "Tareas"}[i], OwnerID: me.ID}
 		cab.GuildSet(&g, false)
 		ready.Guilds = append(ready.Guilds, gateway.GuildCreateEvent{Guild: g})
 	}

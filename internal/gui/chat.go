@@ -144,6 +144,9 @@ type chatView struct {
 	// presencePending reports whether a redraw for presence updates is
 	// already queued, so that busy servers do not flood the window.
 	presencePending atomic.Bool
+
+	// act is what can be done to messages: see actions.go.
+	act actionState
 }
 
 // msgClickKey is the avatar (part 0) or the name (part 1) of a message.
@@ -189,6 +192,7 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 		richStates:  make(map[discord.MessageID]*richtextState),
 		revealed:    make(map[discord.MessageID]bool),
 		showMembers: true,
+		act:         newActionState(),
 	}
 	c.memberList.Axis = layout.Vertical
 	c.guildList.Axis = layout.Vertical
@@ -236,7 +240,9 @@ func (c *chatView) pump() {
 				*gateway.TypingStartEvent, *read.UpdateEvent,
 				*gateway.GuildCreateEvent, *gateway.GuildDeleteEvent, *gateway.GuildUpdateEvent,
 				*gateway.ChannelCreateEvent, *gateway.ChannelUpdateEvent, *gateway.ChannelDeleteEvent,
-				*gateway.VoiceStateUpdateEvent, *gateway.GuildMembersChunkEvent:
+				*gateway.VoiceStateUpdateEvent, *gateway.GuildMembersChunkEvent,
+				*gateway.MessageReactionAddEvent, *gateway.MessageReactionRemoveEvent,
+				*gateway.MessageReactionRemoveAllEvent, *gateway.MessageReactionRemoveEmojiEvent:
 				c.u.post(func() { c.apply(ev) })
 			}
 		}
@@ -530,6 +536,7 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	clear(c.richStates)
 	clear(c.revealed)
 	c.comp.files, c.comp.mentions, c.comp.mentionOn, c.comp.emoji = nil, nil, false, nil
+	c.act.reset()
 	c.memberRows, c.memberChunk = nil, 0
 	c.memberList.Position = layout.Position{}
 	c.rebuildMembers()
@@ -678,6 +685,25 @@ func (c *chatView) apply(ev gateway.Event) {
 		}
 	case *gateway.MessageDeleteEvent:
 		c.messages = slices.DeleteFunc(c.messages, func(m discord.Message) bool { return m.ID == ev.ID })
+		c.forgetMessage(ev.ID)
+	case *gateway.MessageReactionAddEvent:
+		c.reactionEvent(ev.ChannelID, ev.MessageID, ev.Emoji, ev.UserID, true)
+	case *gateway.MessageReactionRemoveEvent:
+		c.reactionEvent(ev.ChannelID, ev.MessageID, ev.Emoji, ev.UserID, false)
+	case *gateway.MessageReactionRemoveAllEvent:
+		if sel != nil && ev.ChannelID == sel.ID {
+			if i := c.messageIndex(ev.MessageID); i >= 0 {
+				c.messages[i].Reactions = nil
+			}
+		}
+	case *gateway.MessageReactionRemoveEmojiEvent:
+		if sel != nil && ev.ChannelID == sel.ID {
+			if i := c.messageIndex(ev.MessageID); i >= 0 {
+				c.messages[i].Reactions = slices.DeleteFunc(c.messages[i].Reactions, func(r discord.Reaction) bool {
+					return emojiKey(r.Emoji) == emojiKey(ev.Emoji)
+				})
+			}
+		}
 	case *gateway.TypingStartEvent:
 		if sel != nil && ev.ChannelID == sel.ID && ev.UserID != c.me.ID {
 			c.typers[ev.UserID] = time.Now().Add(10 * time.Second)
@@ -794,6 +820,9 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 	}
 	if c.viewer != nil {
 		c.layoutViewer(gtx)
+	}
+	if c.act.deleting != nil {
+		c.layoutDeleteConfirm(gtx)
 	}
 	return dims
 }

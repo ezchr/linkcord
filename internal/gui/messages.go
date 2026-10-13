@@ -185,7 +185,19 @@ func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
 		}
 	}
 
-	return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16), Top: top}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	// The gap above stays outside, so that the highlight under the pointer
+	// covers only the message.
+	return layout.Inset{Top: top - 2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return c.layoutWithActions(gtx, m, func(gtx layout.Context) layout.Dimensions {
+			return c.layoutMessageBody(gtx, m, grouped, name, nameColor)
+		})
+	})
+}
+
+func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grouped bool, name string, nameColor colorT) layout.Dimensions {
+	th := c.u.th
+	guildID := c.selChannel.GuildID
+	return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16), Top: 2, Bottom: 2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Alignment: layout.Start}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				if grouped {
@@ -237,7 +249,11 @@ func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
 						)
 					}))
 				}
-				if m.Content != "" {
+				if c.act.editing == m.ID {
+					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return c.layoutEditor(gtx, m)
+					}))
+				} else if m.Content != "" {
 					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						if m.EditedTimestamp.IsValid() {
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -267,6 +283,11 @@ func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
 					}
 					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return c.layoutEmbed(gtx, e)
+					}))
+				}
+				if len(m.Reactions) > 0 {
+					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return c.layoutReactions(gtx, m)
 					}))
 				}
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)

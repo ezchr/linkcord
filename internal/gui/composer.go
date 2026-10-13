@@ -25,6 +25,7 @@ import (
 	"gioui.org/widget/material"
 	"github.com/ayn2op/arikawa/v3/api"
 	"github.com/ayn2op/arikawa/v3/discord"
+	"github.com/ayn2op/arikawa/v3/utils/json/option"
 	"github.com/ayn2op/arikawa/v3/utils/sendpart"
 	"github.com/ncruces/zenity"
 	"golang.org/x/exp/shiny/materialdesign/icons"
@@ -123,6 +124,7 @@ func gtxFocus(c *chatView) {
 
 func (c *chatView) updateComposer(gtx layout.Context) {
 	cs := &c.comp
+	c.updateReply(gtx)
 	if c.focusComposer {
 		gtx.Execute(key.FocusCmd{Tag: &c.composer})
 		c.focusComposer = false
@@ -182,6 +184,34 @@ func (c *chatView) updateComposer(gtx layout.Context) {
 			if i < len(cs.mentionItems) && cs.mentionClicks[i].Clicked(gtx) {
 				c.pickMention(cs.mentionItems[i])
 				break
+			}
+		}
+	}
+
+	// Escape stops replying, and the up arrow in an empty box edits the
+	// newest message of the user, as in Discord. Both are asked for before
+	// the box reads the keys.
+	if !cs.mentionOn || len(cs.mentionItems) == 0 {
+		if c.act.replyTo != nil {
+			for {
+				ev, ok := gtx.Event(key.Filter{Focus: &c.composer, Name: key.NameEscape})
+				if !ok {
+					break
+				}
+				if e, ok := ev.(key.Event); ok && e.State == key.Press {
+					c.act.replyTo = nil
+				}
+			}
+		}
+		if c.composer.Len() == 0 {
+			for {
+				ev, ok := gtx.Event(key.Filter{Focus: &c.composer, Name: key.NameUpArrow})
+				if !ok {
+					break
+				}
+				if e, ok := ev.(key.Event); ok && e.State == key.Press {
+					c.editLast()
+				}
 			}
 		}
 	}
@@ -385,6 +415,12 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				if !canSend {
+					return layout.Dimensions{}
+				}
+				return c.layoutReplyBar(gtx)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if !canSend {
 					return rounded(gtx, colorInput, 8, func(gtx layout.Context) layout.Dimensions {
 						gtx.Constraints.Min.X = gtx.Constraints.Max.X
 						return layout.UniformInset(unit.Dp(14)).Layout(gtx,
@@ -435,6 +471,9 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 			// The line below the box says who is typing, or why sending failed.
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				txt, col := c.typingText(), colorText
+				if c.act.notice != "" && time.Now().Before(c.act.noticeUntil) {
+					txt, col = c.act.notice, colorGreen
+				}
 				if cs.sending {
 					txt, col = "Subiendo archivos…", colorMuted
 				}
@@ -555,6 +594,8 @@ func (c *chatView) send() {
 	}
 	content := c.withMarkup(text)
 	files := cs.files
+	reply, ping := c.act.replyTo, c.act.replyPing
+	c.act.replyTo = nil
 	c.composer.SetText("")
 	cs.files, cs.mentions, cs.mentionOn = nil, nil, false
 	c.sendErr = ""
@@ -567,6 +608,7 @@ func (c *chatView) send() {
 		c.messages = append(c.messages, discord.Message{
 			ID: discord.MessageID(discord.NewSnowflake(time.Now())), ChannelID: id, GuildID: c.selChannel.GuildID,
 			Author: c.me, Content: content, Timestamp: discord.NewTimestamp(time.Now()),
+			ReferencedMessage: reply,
 		})
 		return
 	}
@@ -575,6 +617,16 @@ func (c *chatView) send() {
 		data := api.SendMessageData{
 			Content: content,
 			Nonce:   strconv.FormatInt(time.Now().UnixNano(), 10),
+		}
+		if reply != nil {
+			data.Reference = &discord.MessageReference{MessageID: reply.ID, ChannelID: id, GuildID: reply.GuildID}
+			if !ping {
+				// Everything else in the message still mentions as usual.
+				data.AllowedMentions = &api.AllowedMentions{
+					Parse:       []api.AllowedMentionType{api.AllowUserMention, api.AllowRoleMention, api.AllowEveryoneMention},
+					RepliedUser: option.Some(false),
+				}
+			}
 		}
 		var opened []*os.File
 		defer func() {
@@ -603,6 +655,9 @@ func (c *chatView) send() {
 			}
 			if len(cs.files) == 0 {
 				cs.files = files
+			}
+			if c.act.replyTo == nil {
+				c.act.replyTo = reply
 			}
 		})
 	}()
