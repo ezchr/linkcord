@@ -2,6 +2,7 @@ package gui
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/ayn2op/arikawa/v3/discord"
@@ -122,6 +123,12 @@ func (u *ui) startDemo() {
 		m.Embeds = []discord.Embed{{Title: "GitHub - ezchr/linkcord", Description: "Lightweight Discord client for Windows 7, 8, 10, and 11. - ezchr/linkcord", URL: "https://github.com/ezchr/linkcord", Color: 0x1f2328}}
 	})
 	add(channels[0].ID, guild.ID, users[5], 2*time.Hour, "<@"+me.ID.String()+"> reply when you can 🙏", nil)
+	// A video to test playback with, from LINKCORD_DEMO_VIDEO.
+	if video := os.Getenv("LINKCORD_DEMO_VIDEO"); video != "" {
+		add(channels[0].ID, guild.ID, users[2], 90*time.Minute, "look at this clip", func(m *discord.Message) {
+			m.Attachments = []discord.Attachment{{Filename: "clip.mp4", URL: discord.URL(video), Size: 2 << 20, ContentType: "video/mp4", Width: 1920, Height: 1080}}
+		})
+	}
 	add(channels[0].ID, guild.ID, me, time.Hour, "on my way", func(m *discord.Message) {
 		ref := discord.Message{Author: users[5], Content: "reply when you can 🙏"}
 		m.ReferencedMessage = &ref

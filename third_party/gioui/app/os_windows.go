@@ -209,7 +209,9 @@ func (w *window) init() error {
 	if err != nil {
 		return err
 	}
-	if windows.HasPointerAPI() {
+	// LINKCORD_LEGACY_MOUSE takes the mouse as WM_MOUSE* messages, which test
+	// tools can post to the window; WM_POINTER* only comes from real input.
+	if windows.HasPointerAPI() && os.Getenv("LINKCORD_LEGACY_MOUSE") == "" {
 		if err := windows.RegisterTouchWindow(hwnd, 0); err != nil {
 			return err
 		}
