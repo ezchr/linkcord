@@ -69,9 +69,26 @@ func TestDecodeGIF(t *testing.T) {
 	}
 }
 
+func TestDecodeGIFViewerBudget(t *testing.T) {
+	frames, _, err := decodeGIF(testGIF(t, 2, 1500, 1500, 4), 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var retained int64
+	for _, frame := range frames {
+		retained += imageBytes(frame)
+		if frame.Bounds().Dx() > animationMaxSide || frame.Bounds().Dy() > animationMaxSide {
+			t.Fatal("viewer animation exceeds the resolution limit")
+		}
+	}
+	if retained > animBudget {
+		t.Fatalf("retained %d bytes, budget %d", retained, animBudget)
+	}
+}
+
 func TestDecodeGIFBudget(t *testing.T) {
-	// 1000×1000 frames take 4 MB each; the budget keeps 12 of 30 and merges
-	// the delays of the others, so the animation lasts as long.
+	// 1000×1000 frames take 4 MB each; the budget limits retained frames and
+	// merges the delays of the others, so the animation lasts as long.
 	frames, delays, err := decodeGIF(testGIF(t, 30, 1000, 1000, 4), 1000)
 	if err != nil {
 		t.Fatal(err)

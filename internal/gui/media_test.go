@@ -77,7 +77,7 @@ func TestEmbedPreview(t *testing.T) {
 		Thumbnail: &discord.EmbedThumbnail{URL: "https://example.org/poster.jpg"},
 	}
 	p, ok = embedPreview(e)
-	if !ok || !p.video || p.original != string(e.Thumbnail.URL) || p.openURL != string(e.URL) {
+	if !ok || !p.video || p.original != string(e.Thumbnail.URL) || p.openURL != string(e.URL) || p.playURL != string(e.Video.URL) {
 		t.Fatalf("video thumbnail or watch link lost: %+v", p)
 	}
 	e.Thumbnail, e.URL = nil, ""

@@ -85,8 +85,9 @@ const (
 )
 
 type ui struct {
-	win *app.Window
-	th  *material.Theme
+	win        *app.Window
+	th         *material.Theme
+	frameCount uint64
 
 	// pending holds work posted from other goroutines, run on the window's
 	// goroutine before the next frame.
@@ -99,7 +100,8 @@ type ui struct {
 	startup startupState
 
 	// focused reports whether the window has the keyboard focus.
-	focused bool
+	focused   bool
+	minimized bool
 	// hwnd is the native window, once known.
 	hwnd uintptr
 
@@ -151,6 +153,8 @@ func (u *ui) runPending() {
 }
 
 func (u *ui) loop() error {
+	stopProfile := u.startPerformanceProfile()
+	defer stopProfile()
 	var ops op.Ops
 	for {
 		switch e := u.win.Event().(type) {
@@ -165,8 +169,10 @@ func (u *ui) loop() error {
 		case app.ViewEvent:
 			u.viewEvent(e)
 		case app.ConfigEvent:
+			u.minimized = e.Config.Mode == app.Minimized
 			if e.Config.Focused != u.focused {
 				u.focused = e.Config.Focused
+				u.win.Invalidate()
 				if u.focused && u.chat != nil {
 					u.chat.windowFocused()
 				}
@@ -176,6 +182,7 @@ func (u *ui) loop() error {
 			gtx := app.NewContext(&ops, e)
 			u.layout(gtx)
 			e.Frame(gtx.Ops)
+			u.frameCount++
 			u.markHealthy()
 		}
 	}

@@ -121,6 +121,7 @@ type chatView struct {
 
 	// viewer shows a picture over everything, if open.
 	viewer *imageViewer
+	video  *videoViewer
 
 	// The profile card, if open, and the profiles already loaded.
 	profile   *profileView
@@ -255,6 +256,7 @@ func (c *chatView) close() {
 		return
 	}
 	c.closed = true
+	c.closeVideo()
 	// A call does not outlive the session it belongs to.
 	c.u.leaveVoice()
 	c.u.voice.demoChannel = 0
@@ -825,6 +827,9 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 	}
 	if c.viewer != nil {
 		c.layoutViewer(gtx)
+	}
+	if c.video != nil {
+		c.layoutVideoViewer(gtx)
 	}
 	if c.act.deleting != nil {
 		c.layoutDeleteConfirm(gtx)

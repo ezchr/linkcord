@@ -23,6 +23,7 @@ const stickerFormatGIF discord.StickerFormatType = 4
 
 type mediaPreview struct {
 	proxy, original, openURL string
+	playURL                  string
 	width, height            int
 	video                    bool
 	title                    string
@@ -105,6 +106,12 @@ func embedPreview(e discord.Embed) (mediaPreview, bool) {
 		}
 	}
 	p.video = e.Type == discord.VideoEmbed || e.Video != nil && e.Type != discord.ImageEmbed
+	if p.video && e.Video != nil {
+		p.playURL = string(e.Video.URL)
+		if p.playURL == "" {
+			p.playURL = string(e.Video.Proxy)
+		}
+	}
 	if !p.video && e.Type != discord.ImageEmbed && e.Type != discord.GIFVEmbed {
 		return mediaPreview{}, false
 	}
@@ -240,8 +247,12 @@ func previewSize(gtx layout.Context, w, h int) image.Point {
 func (c *chatView) layoutVideo(gtx layout.Context, p mediaPreview) layout.Dimensions {
 	size := previewSize(gtx, p.width, p.height)
 	cl := c.linkClick("video:" + p.openURL)
-	if p.openURL != "" && cl.Clicked(gtx) {
-		openLink(p.openURL)
+	if cl.Clicked(gtx) {
+		title := p.title
+		if title == "" {
+			title = "Video"
+		}
+		c.openVideo(p.playURL, title)
 	}
 	return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -272,7 +283,7 @@ func (c *chatView) layoutVideo(gtx layout.Context, p mediaPreview) layout.Dimens
 			layout.S.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return rounded(gtx, colorServers, 0, func(gtx layout.Context) layout.Dimensions {
 					return layout.UniformInset(unit.Dp(6)).Layout(gtx,
-						oneLine(label(c.u.th, 12, colorHeader, title+" · click to open")).Layout)
+						oneLine(label(c.u.th, 12, colorHeader, title+" · play in Linkcord")).Layout)
 				})
 			})
 			return layout.Dimensions{Size: size}

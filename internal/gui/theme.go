@@ -54,13 +54,9 @@ func rgb(c uint32) color.NRGBA {
 //go:embed fonts/NotoColorEmoji.ttf
 var colorEmoji []byte
 
-// fallbackFonts are Windows fonts for what the bundled fonts lack, which the
-// text shaper does not fall back to on its own. Segoe UI Symbol, which
-// Windows 7 has too, draws the symbols and fancy letters that many names
-// use; it goes before Segoe UI Emoji, whose color glyphs the shaper cannot
-// draw and would leave blank. Cambria Math covers the rest of the
-// mathematical alphabets.
-var fallbackFonts = []string{"seguisym.ttf", "cambria.ttc", "seguiemj.ttf"}
+// Selected Windows fonts cover common scripts, symbols, and mathematical
+// alphabets without loading the full system font catalog. Noto supplies emoji.
+var fallbackFonts = []string{"segoeui.ttf", "seguisym.ttf", "cambria.ttc"}
 
 // narrowSpace returns a copy of a font whose space glyph is a quarter of an
 // em wide, as in text fonts. Noto Color Emoji has a space as wide as an
@@ -111,8 +107,8 @@ func narrowSpace(font []byte) []byte {
 	return font
 }
 
-// newTheme returns a dark material theme that shapes text with the bundled Go
-// fonts first, then the fallback fonts, then any other system font.
+// newTheme uses bundled and selected fonts, with full system fallback
+// for scripts not covered by the explicit collection.
 func newTheme() *material.Theme {
 	collection := gofont.Collection()
 	if faces, err := opentype.ParseCollection(narrowSpace(colorEmoji)); err == nil {

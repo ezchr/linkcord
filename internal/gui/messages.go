@@ -434,7 +434,7 @@ func (c *chatView) layoutAttachment(gtx layout.Context, a discord.Attachment) la
 	}
 	if isVideo(a) {
 		return c.layoutVideo(gtx, mediaPreview{
-			proxy: videoPosterURL(string(a.Proxy)), openURL: string(a.URL),
+			proxy: videoPosterURL(string(a.Proxy)), openURL: string(a.URL), playURL: string(a.URL),
 			width: int(a.Width), height: int(a.Height), video: true,
 			title: a.Filename + " · " + formatSize(a.Size),
 		})

@@ -77,16 +77,32 @@ The repository is currently private. Release checks use `LINKCORD_GITHUB_TOKEN`,
 | `--check-updates` | Checks GitHub and Discord metadata, prints a JSON report, and exits without installing. |
 | `--no-update` or `LINKCORD_NO_UPDATE=1` | Skips executable update checks but still refreshes Discord metadata. |
 | `--demo` or `LINKCORD_DEMO=1` | Shows account-free demo data and performs no startup update requests. |
+| `--low-power` or `LINKCORD_LOW_POWER=1` | Shows static GIF/APNG previews to reduce animation CPU and memory use. |
+| `--system-fonts` | Compatibility option; full system font fallback is already enabled. |
 
-Development builds identify themselves as `v1.4.0-dev`; they cannot downgrade to `v1.3.0`. For a release, build the graphical entry point with its exact GitHub tag:
+Development builds identify themselves as `v1.4.1-dev`; they cannot downgrade to `v1.4.0`. For a release, build the graphical entry point with its exact GitHub tag:
 
 ```powershell
-.\build-linkcord.ps1 -Version v1.4.0 -Out ..\linkcord.exe
+.\build-linkcord.ps1 -Version v1.4.1 -Out ..\linkcord.exe
 ```
 
 Publish that executable as `linkcord.exe` on the matching stable release. The helper checks the restarted application's embedded version against the release tag. A fresh build uploaded under an incorrect tag will not acknowledge startup.
 
 If a fixed asset is uploaded under the same tag with a new digest, it can be tried again. The failure record is `%LOCALAPPDATA%\linkcord\updates\failed-version`; release metadata is cached in the same folder.
+
+## Resource usage
+
+Normal mode retains full system font fallback, bundled Go and Noto Color Emoji fonts, and animated GIF/APNG previews. Visible animations retain their original frame scheduling even when the window is unfocused; minimized windows do not request animation redraws.
+
+Decoded images use a 64 MiB cache budget with eviction of older completed entries. Up to two image loads decode at once, with at most 64 pending loads. Each animation retains at most 48 MiB of frames, with a maximum decoded side of 2048 pixels. Animations that exceed the retained-frame budget merge frame delays, preserving duration with fewer retained frames. The currently requested entry is protected from eviction.
+
+Open your own user profile and click **Performance Mode** to toggle still GIF/APNG previews. The choice is saved locally and applies immediately. On uses the first animation frame without retaining subsequent frames or scheduling animation redraws. Off restores animation loading. Both modes retain full font fallback. `--low-power` or `LINKCORD_LOW_POWER=1` overrides the saved startup preference; `LINKCORD_LOW_POWER=0` starts in normal mode.
+
+Video attachments and direct video embeds open inside Linkcord with pause, mute, replay, and close controls. Closing the viewer or logging out cancels playback. Playback requires `ffmpeg` and `ffprobe` on PATH, beside `linkcord.exe`, or in its `media` subfolder. Videos download to a temporary file before playback; closing the viewer removes the file after decoder shutdown. The current limits are 256 MiB per download, a 4K pixel count, and 120 fps. Provider watch pages without direct media URLs and DRM streams are unsupported. Variable-frame-rate input is normalized to its reported average frame rate. Builds with `no_voice` play video silently.
+
+These are application cache limits, not a limit on total process memory. Fonts, message state, the Go runtime, and graphics-driver allocations also consume memory.
+
+For a controlled diagnostic session, set `LINKCORD_PROFILE` to an output folder. On a normal window close it writes `cpu.pprof`, `heap.pprof`, and `summary.json`, including rendered frame count and heap statistics. Ordinary launches do not enable profiling.
 
 ## Test without an account
 

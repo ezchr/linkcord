@@ -22,6 +22,8 @@ func main() {
 	showVersion := flag.Bool("version", false, "print the embedded version and exit")
 	demo := flag.Bool("demo", false, "show demo data without connecting or checking for updates")
 	noUpdate := flag.Bool("no-update", false, "skip executable updates; still refresh Discord metadata")
+	systemFonts := flag.Bool("system-fonts", false, "enable full system font fallback for additional scripts")
+	lowPower := flag.Bool("low-power", false, "show static animation previews to reduce CPU and memory use")
 	check := flag.Bool("check-updates", false, "check release and Discord metadata, print JSON, and exit without installing")
 	flag.Parse()
 	if *showVersion {
@@ -33,6 +35,12 @@ func main() {
 			log.Fatal(err)
 		}
 		return
+	}
+	if *systemFonts {
+		os.Setenv("LINKCORD_SYSTEM_FONTS", "1")
+	}
+	if *lowPower {
+		os.Setenv("LINKCORD_LOW_POWER", "1")
 	}
 	if *demo {
 		os.Setenv("LINKCORD_DEMO", "1")

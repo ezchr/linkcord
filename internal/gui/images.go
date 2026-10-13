@@ -42,6 +42,8 @@ const (
 
 type imageEntry struct {
 	state imageState
+	bytes int64
+	used  uint64
 	// op is the picture, or the first frame of an animation.
 	op paint.ImageOp
 	// frames and delays are the frames of a GIF or APNG and how long each
@@ -55,9 +57,17 @@ type imageEntry struct {
 // moves in step.
 var animEpoch = time.Now()
 
-// animBudget is how many bytes the decoded frames of one animation may take;
-// longer or bigger ones keep fewer frames.
+// animBudget limits retained frames per animation. Source canvas limits are
+// separate so that reducing retained frames does not reject normal APNGs.
 const animBudget = 48 << 20
+
+const (
+	imageCacheBudget      = 64 << 20
+	imageCacheEntries     = 512
+	imagePendingLoads     = 64
+	animationMaxSide      = 2048
+	animationCanvasBudget = 48 << 20
+)
 
 // images loads small pictures such as avatars and server icons in the
 // background, scales them to the size they are shown at, and keeps them in
@@ -65,8 +75,11 @@ const animBudget = 48 << 20
 type images struct {
 	u *ui
 
-	mu      sync.Mutex
-	entries map[string]*imageEntry
+	mu           sync.Mutex
+	entries      map[string]*imageEntry
+	cacheBytes   int64
+	clock        uint64
+	pendingLoads int
 
 	// sem limits the downloads at once, for slow connections.
 	sem chan struct{}
@@ -74,9 +87,10 @@ type images struct {
 	// scroll doesn't start dozens of decodes competing with the window.
 	decode chan struct{}
 	// redraw is set while a redraw for loaded images is pending.
-	redraw atomic.Bool
-	client *http.Client
-	dir    string
+	redraw   atomic.Bool
+	client   *http.Client
+	dir      string
+	lowPower bool
 }
 
 func newImages(u *ui) *images {
@@ -91,12 +105,13 @@ func newImages(u *ui) *images {
 		dir = ""
 	}
 	return &images{
-		u:       u,
-		entries: make(map[string]*imageEntry),
-		sem:     make(chan struct{}, 6),
-		decode:  make(chan struct{}, 2),
-		client:  &http.Client{Timeout: 30 * time.Second},
-		dir:     dir,
+		u:        u,
+		entries:  make(map[string]*imageEntry),
+		sem:      make(chan struct{}, 6),
+		decode:   make(chan struct{}, 2),
+		client:   &http.Client{Timeout: 30 * time.Second},
+		dir:      dir,
+		lowPower: performanceModeEnabled(),
 	}
 }
 
@@ -112,10 +127,17 @@ func (im *images) get(url string, size int) *paint.ImageOp {
 	defer im.mu.Unlock()
 	e, ok := im.entries[key]
 	if !ok {
+		if im.pendingLoads >= imagePendingLoads {
+			return nil
+		}
 		e = &imageEntry{state: imageLoading}
 		im.entries[key] = e
+		im.pendingLoads++
 		go im.load(key, url, size, e)
 	}
+	im.clock++
+	e.used = im.clock
+	im.trimCacheLocked(e)
 	if e.state != imageReady {
 		return nil
 	}
@@ -133,7 +155,11 @@ func (im *images) frame(gtx layout.Context, url string, size int) *paint.ImageOp
 	im.mu.Lock()
 	defer im.mu.Unlock()
 	e := im.entries[fmt.Sprintf("%d:%s", size, url)]
-	if len(e.frames) < 2 || e.cycle <= 0 {
+	if e == nil || len(e.frames) < 2 || e.cycle <= 0 {
+		return img
+	}
+	// Only optional low-power mode or a minimized window pauses playback.
+	if im.lowPower || (im.u != nil && im.u.minimized) {
 		return img
 	}
 	now := gtx.Now
@@ -167,9 +193,11 @@ func (im *images) load(key, url string, size int, e *imageEntry) {
 	if err != nil {
 		img, err = im.fromDisk(stillKey(key, url))
 	}
-	<-im.decode
 	if err != nil {
 		frames, delays, img, err = im.download(key, url, size)
+	}
+	if err == nil && len(frames) == 1 {
+		img = frames[0]
 	}
 	im.mu.Lock()
 	switch {
@@ -179,6 +207,7 @@ func (im *images) load(key, url string, size int, e *imageEntry) {
 	case len(frames) > 1:
 		for _, f := range frames {
 			e.frames = append(e.frames, paint.NewImageOp(f))
+			e.bytes += imageBytes(f)
 		}
 		e.delays = delays
 		for _, d := range delays {
@@ -188,9 +217,14 @@ func (im *images) load(key, url string, size int, e *imageEntry) {
 		e.state = imageReady
 	default:
 		e.op = paint.NewImageOp(img)
+		e.bytes = imageBytes(img)
 		e.state = imageReady
 	}
+	im.cacheBytes += e.bytes
+	im.pendingLoads--
+	im.trimCacheLocked(e)
 	im.mu.Unlock()
+	<-im.decode
 	// One redraw at most every 50 ms, including failed loads so that their
 	// fallback appears without waiting for another user event.
 	if im.u != nil && im.redraw.CompareAndSwap(false, true) {
@@ -205,12 +239,21 @@ func (im *images) load(key, url string, size int, e *imageEntry) {
 // animated GIF, or a still picture.
 func (im *images) download(key, url string, size int) ([]image.Image, []time.Duration, image.Image, error) {
 	im.sem <- struct{}{}
+	defer func() { <-im.sem }()
 	data, err := im.fetch(url)
-	<-im.sem
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	if isGIF(data) || isAPNG(data) {
+		if im.lowPower {
+			poster, err := decodeAnimationPoster(data, size)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			im.animToDisk(key, data)
+			im.toDisk(stillKey(key, url), poster)
+			return nil, nil, poster, nil
+		}
 		frames, delays, err := decodeAnimation(data, size)
 		if err == nil && len(frames) > 1 {
 			im.animToDisk(key, data)
@@ -282,6 +325,7 @@ func isGIF(data []byte) bool {
 // returns no frames. Frames beyond what animBudget allows are merged into
 // the ones kept, so the animation keeps its speed.
 func decodeGIF(data []byte, size int) ([]image.Image, []time.Duration, error) {
+	size = min(size, animationMaxSide)
 	g, err := gif.DecodeAll(bytes.NewReader(data))
 	if err != nil {
 		return nil, nil, err
@@ -417,6 +461,13 @@ func (im *images) animFromDisk(key string, size int) ([]image.Image, []time.Dura
 	data, err := os.ReadFile(im.animPath(key))
 	if err != nil {
 		return nil, nil, err
+	}
+	if im.lowPower {
+		poster, err := decodeAnimationPoster(data, size)
+		if err != nil {
+			return nil, nil, err
+		}
+		return []image.Image{poster}, nil, nil
 	}
 	frames, delays, err := decodeAnimation(data, size)
 	if err == nil && len(frames) < 2 {

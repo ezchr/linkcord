@@ -81,17 +81,19 @@ type profileView struct {
 	data    *profileData
 	loading bool
 
-	backdrop   widget.Clickable
-	closeBtn   widget.Clickable
-	message    widget.Clickable
-	copyID     widget.Clickable
-	logout     widget.Clickable
-	statusBtn  widget.Clickable
-	statusMenu bool
-	statusOpts [4]widget.Clickable
-	copied     bool
-	scroll     widget.List
-	bio        widget.Selectable
+	backdrop         widget.Clickable
+	closeBtn         widget.Clickable
+	message          widget.Clickable
+	copyID           widget.Clickable
+	logout           widget.Clickable
+	statusBtn        widget.Clickable
+	performanceBtn   widget.Clickable
+	performanceError string
+	statusMenu       bool
+	statusOpts       [4]widget.Clickable
+	copied           bool
+	scroll           widget.List
+	bio              widget.Selectable
 }
 
 // openProfile shows the card of user, as a member of guildID if valid.
@@ -148,6 +150,13 @@ func (c *chatView) updateProfile(gtx layout.Context) {
 	}
 	if p.statusBtn.Clicked(gtx) {
 		p.statusMenu = !p.statusMenu
+	}
+	if p.self && p.performanceBtn.Clicked(gtx) {
+		p.performanceError = ""
+		if err := c.u.setPerformanceMode(!c.u.images.lowPower); err != nil {
+			p.performanceError = "Could not save Performance Mode"
+			slog.Warn("could not save performance mode", "err", err)
+		}
 	}
 	for i := range p.statusOpts {
 		if p.statusOpts[i].Clicked(gtx) {
@@ -681,6 +690,13 @@ func (c *chatView) layoutSelfMenu(gtx layout.Context, p *profileView) layout.Dim
 			}, click == &p.statusBtn && p.statusMenu)
 		})
 	}
+	performanceText := "Performance Mode: Off"
+	if c.u.images.lowPower {
+		performanceText = "Performance Mode: On"
+	}
+	if p.performanceError != "" {
+		performanceText = p.performanceError
+	}
 	copyTxt := "Copy user ID"
 	if p.copied {
 		copyTxt = "ID copied!"
@@ -694,6 +710,14 @@ func (c *chatView) layoutSelfMenu(gtx layout.Context, p *profileView) layout.Dim
 						return dot(gtx, statusColor(status), 10)
 					})
 				}, statusName(status), colorText, true),
+				item(&p.performanceBtn, func(gtx layout.Context) layout.Dimensions {
+					col := colorMuted
+					if c.u.images.lowPower {
+						col = colorText
+					}
+					return dot(gtx, col, 10)
+				}, performanceText, colorText, false),
+				layout.Rigid(label(th, 11, colorMuted, "On uses still GIF/APNG previews.").Layout),
 				item(&p.copyID, func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconCopy, 18, colorMuted) }, copyTxt, colorText, false),
 				item(&p.logout, func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconLogout, 18, colorRed) }, "Log out", colorRed, false),
 			)

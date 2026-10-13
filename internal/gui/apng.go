@@ -68,9 +68,29 @@ func appendPNGChunk(buf *bytes.Buffer, kind string, data []byte) {
 // transparent canvas. The default PNG poster need not be animation frame 0.
 // https://www.w3.org/TR/png-3/#11fcTL
 func decodeAPNG(data []byte, size int) ([]image.Image, []time.Duration, error) {
+	return decodeAPNGFrames(data, size, false)
+}
+
+func decodeAnimationPoster(data []byte, size int) (image.Image, error) {
+	size = min(size, animationMaxSide)
+	if !isAPNG(data) {
+		return decodeScaled(data, size)
+	}
+	frames, _, err := decodeAPNGFrames(data, size, true)
+	if err != nil {
+		return nil, err
+	}
+	if len(frames) == 0 {
+		return nil, errors.New("animation has no preview")
+	}
+	return frames[0], nil
+}
+
+func decodeAPNGFrames(data []byte, size int, posterOnly bool) ([]image.Image, []time.Duration, error) {
 	if !bytes.HasPrefix(data, []byte(pngSignature)) || size <= 0 {
 		return nil, nil, errors.New("invalid APNG")
 	}
+	size = min(size, animationMaxSide)
 	var header []byte
 	var shared bytes.Buffer
 	var frames []apngFrame
@@ -111,7 +131,7 @@ func decodeAPNG(data []byte, size int) ([]image.Image, []time.Duration, error) {
 				return nil, nil, errors.New("invalid APNG header")
 			}
 			w, h := binary.BigEndian.Uint32(payload[:4]), binary.BigEndian.Uint32(payload[4:8])
-			if w == 0 || h == 0 || w > 4096 || h > 4096 || uint64(w)*uint64(h)*4 > animBudget {
+			if w == 0 || h == 0 || w > 4096 || h > 4096 || uint64(w)*uint64(h)*4 > animationCanvasBudget {
 				return nil, nil, errors.New("APNG canvas exceeds memory limit")
 			}
 			header = payload
@@ -199,6 +219,9 @@ func decodeAPNG(data []byte, size int) ([]image.Image, []time.Duration, error) {
 	var result []image.Image
 	var delays []time.Duration
 	for i, f := range frames {
+		if posterOnly && i > 0 {
+			break
+		}
 		var buf bytes.Buffer
 		buf.WriteString(pngSignature)
 		ihdr := bytes.Clone(header)
