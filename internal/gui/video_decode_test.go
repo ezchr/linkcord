@@ -45,7 +45,7 @@ func TestVideoDecoderIntegration(t *testing.T) {
 		t.Fatalf("unexpected metadata: %+v", meta)
 	}
 	count := 0
-	err = decodeVideo(ctx, ffmpeg, path, meta, func(frame *image.RGBA, at time.Duration) error {
+	err = decodeVideo(ctx, ffmpeg, path, meta, 0, func(frame *image.RGBA, at time.Duration) error {
 		if frame.Bounds() != image.Rect(0, 0, 64, 48) {
 			t.Fatal("incorrect frame dimensions")
 		}
@@ -64,7 +64,7 @@ func TestVideoDecoderIntegration(t *testing.T) {
 	}
 	audio := &videoAudio{queue: make(chan []byte, 16)}
 	audioResult := make(chan error, 1)
-	go func() { audioResult <- decodeVideoAudio(ctx, ffmpeg, path, audio) }()
+	go func() { audioResult <- decodeVideoAudio(ctx, ffmpeg, path, 0, audio) }()
 	bytes := 0
 	for chunk := range audio.queue {
 		bytes += len(chunk)
@@ -90,7 +90,7 @@ func TestVideoDecoderIntegration(t *testing.T) {
 		t.Fatalf("rotation dimensions incorrect: %+v", rotatedMeta)
 	}
 	rotatedCount := 0
-	if err := decodeVideo(ctx, ffmpeg, rotatedPath, rotatedMeta, func(frame *image.RGBA, at time.Duration) error {
+	if err := decodeVideo(ctx, ffmpeg, rotatedPath, rotatedMeta, 0, func(frame *image.RGBA, at time.Duration) error {
 		if frame.Bounds() != image.Rect(0, 0, 48, 64) {
 			t.Fatal("rotated frame dimensions incorrect")
 		}
@@ -123,7 +123,7 @@ func TestVideoDecoderIntegration(t *testing.T) {
 	}
 	cancelCtx, stop := context.WithCancel(ctx)
 	start := time.Now()
-	err = decodeVideo(cancelCtx, ffmpeg, path, meta, func(*image.RGBA, time.Duration) error {
+	err = decodeVideo(cancelCtx, ffmpeg, path, meta, 0, func(*image.RGBA, time.Duration) error {
 		stop()
 		return context.Canceled
 	})

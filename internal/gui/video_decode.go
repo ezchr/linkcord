@@ -19,6 +19,7 @@ type videoMetadata struct {
 	width, height int
 	fps           float64
 	audio         bool
+	duration      time.Duration // zero when unknown
 }
 
 func probeVideo(ctx context.Context, executable, path string) (videoMetadata, error) {
@@ -27,7 +28,7 @@ func probeVideo(ctx context.Context, executable, path string) (videoMetadata, er
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 	args := append([]string{"-v", "error"}, mediaInput(path)...)
-	args = append(args, "-show_entries", "stream=codec_type,width,height,avg_frame_rate:stream_side_data=rotation",
+	args = append(args, "-show_entries", "stream=codec_type,width,height,avg_frame_rate:stream_side_data=rotation:format=duration",
 		"-of", "json")
 	cmd := exec.CommandContext(ctx, executable, args...)
 	hideMediaProcess(cmd)
@@ -45,11 +46,17 @@ func probeVideo(ctx context.Context, executable, path string) (videoMetadata, er
 				Rotation float64 `json:"rotation"`
 			} `json:"side_data_list"`
 		} `json:"streams"`
+		Format struct {
+			Duration string `json:"duration"`
+		} `json:"format"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return videoMetadata{}, errors.New("invalid video metadata")
 	}
 	meta := videoMetadata{fps: 30}
+	if d, err := strconv.ParseFloat(result.Format.Duration, 64); err == nil && d > 0 && d < 24*3600 {
+		meta.duration = time.Duration(d * float64(time.Second))
+	}
 	for _, stream := range result.Streams {
 		if stream.CodecType == "audio" {
 			meta.audio = true
@@ -121,7 +128,16 @@ func (m videoMetadata) scaled() (int, int) {
 }
 
 func mediaDecodeCommand(ctx context.Context, executable, path string, output ...string) *exec.Cmd {
-	args := append([]string{"-nostdin", "-v", "error", "-threads", "0"}, mediaInput(path)...)
+	return mediaDecodeCommandAt(ctx, executable, path, 0, output...)
+}
+
+// mediaDecodeCommandAt decodes from start onwards.
+func mediaDecodeCommandAt(ctx context.Context, executable, path string, start time.Duration, output ...string) *exec.Cmd {
+	args := []string{"-nostdin", "-v", "error", "-threads", "0"}
+	if start > 0 {
+		args = append(args, "-ss", fmt.Sprintf("%.3f", start.Seconds()))
+	}
+	args = append(args, mediaInput(path)...)
 	args = append(args, output...)
 	cmd := exec.CommandContext(ctx, executable, args...)
 	hideMediaProcess(cmd)
@@ -130,7 +146,7 @@ func mediaDecodeCommand(ctx context.Context, executable, path string, output ...
 
 // decodeVideo publishes frames synchronously to a bounded consumer. Only the
 // current frame and pipe buffers are retained, regardless of clip duration.
-func decodeVideo(ctx context.Context, executable, path string, meta videoMetadata, publish func(*image.RGBA, time.Duration) error) error {
+func decodeVideo(ctx context.Context, executable, path string, meta videoMetadata, start time.Duration, publish func(*image.RGBA, time.Duration) error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	width, height := meta.scaled()
@@ -138,7 +154,7 @@ func decodeVideo(ctx context.Context, executable, path string, meta videoMetadat
 	if width != meta.width || height != meta.height {
 		filter += fmt.Sprintf(",scale=%d:%d:flags=bilinear", width, height)
 	}
-	cmd := mediaDecodeCommand(ctx, executable, path,
+	cmd := mediaDecodeCommandAt(ctx, executable, path, start,
 		"-map", "0:v:0", "-an", "-sn", "-dn", "-vf", filter,
 		"-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1")
 	pipe, err := cmd.StdoutPipe()
@@ -172,7 +188,7 @@ func decodeVideo(ctx context.Context, executable, path string, meta videoMetadat
 	var decodeErr error
 	index := int64(0)
 	for frame := range frames {
-		at := time.Duration(float64(index) * float64(time.Second) / meta.fps)
+		at := start + time.Duration(float64(index)*float64(time.Second)/meta.fps)
 		index++
 		if err := publish(frame, at); err != nil {
 			decodeErr = err
@@ -198,10 +214,10 @@ func decodeVideo(ctx context.Context, executable, path string, meta videoMetadat
 	return nil
 }
 
-func decodeVideoAudio(ctx context.Context, executable, path string, audio *videoAudio) error {
+func decodeVideoAudio(ctx context.Context, executable, path string, start time.Duration, audio *videoAudio) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := mediaDecodeCommand(ctx, executable, path,
+	cmd := mediaDecodeCommandAt(ctx, executable, path, start,
 		"-map", "0:a:0", "-vn", "-sn", "-dn", "-ac", "2", "-ar", "48000",
 		"-acodec", "pcm_s16le", "-f", "s16le", "pipe:1")
 	pipe, err := cmd.StdoutPipe()

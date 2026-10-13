@@ -36,7 +36,7 @@ func TestRenderVideoControls(t *testing.T) {
 		}
 	}
 	frame := paint.NewImageOp(picture)
-	u.chat.video = &videoViewer{title: "Video playback", frame: &frame, status: "2.5 s", cancel: func() {}}
+	u.chat.video = &videoViewer{title: "Video playback", frame: &frame, shown: true, pos: 4 * time.Second, dur: 20 * time.Second, cancel: func() {}}
 	for _, tc := range []struct {
 		name    string
 		size    image.Point
@@ -80,8 +80,8 @@ func TestRenderVideoControls(t *testing.T) {
 			u.chat.layoutVideo(gtx, mediaPreview{playURL: "https://example.test/clip.mp4", width: 400, height: 225})
 		} else if tc.name == "video-tile" {
 			// A playing video plays in its tile, with its controls.
-			v := &videoViewer{source: "https://example.test/clip.mp4", frame: &frame, status: "2.5 s", cancel: func() {}}
-			v.tileVolume.Value = 0.6
+			v := &videoViewer{source: "https://example.test/clip.mp4", frame: &frame, pos: 4 * time.Second, dur: 20 * time.Second, cancel: func() {}}
+			v.paused.Store(true)
 			u.chat.video = v
 			u.chat.layoutVideo(gtx, mediaPreview{playURL: "https://example.test/clip.mp4", width: 400, height: 225})
 		} else {

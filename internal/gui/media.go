@@ -2,7 +2,6 @@ package gui
 
 import (
 	"image"
-	"image/color"
 	"net/url"
 	"path"
 	"strings"
@@ -299,38 +298,31 @@ func (c *chatView) layoutVideo(gtx layout.Context, p mediaPreview) layout.Dimens
 	if title == "" {
 		title = "Video"
 	}
-	// The video playing here, if it is this one and not in the fullscreen
-	// layer, whose controls then belong to the layer.
+	// The video playing here, if it is this one; while it is in the
+	// fullscreen layer, the tile only shows its poster.
 	v := c.video
 	if v != nil && v.source != p.playURL {
 		v = nil
 	}
-	inTile := v != nil && !v.visible()
-	cl := c.linkClick("video:" + p.openURL)
-	if inTile {
-		if v.tileVolume.Update(gtx) {
-			c.setVolume(v, v.tileVolume.Value)
-		}
-		if v.tilePause.Clicked(gtx) {
-			v.togglePause()
-		}
-		if v.tileFull.Clicked(gtx) {
-			v.setShown(true)
+	active := v != nil && !v.visible()
+	if active {
+		c.updateControls(gtx, v, inTile)
+		if c.video != v {
+			v, active = nil, false
+		} else {
+			active = !v.visible()
 		}
 	}
+	cl := c.linkClick("video:" + p.openURL)
 	if cl.Clicked(gtx) {
 		switch {
 		case v == nil:
 			c.openVideo(p.playURL, title, false)
-			v = c.video
-			inTile = true
+			v, active = c.video, true
 		case c.videoLoading(p.playURL):
 			// A click while it loads gives up on it.
 			c.closeVideo()
-			v, inTile = nil, false
-		case v.isEnded():
-			c.openVideo(p.playURL, title, false)
-			v = c.video
+			v, active = nil, false
 		default:
 			v.togglePause()
 		}
@@ -342,18 +334,16 @@ func (c *chatView) layoutVideo(gtx layout.Context, p mediaPreview) layout.Dimens
 		frame, status, ended = v.frame, v.status, v.ended
 		v.mu.Unlock()
 	}
-	loading := v != nil && frame == nil && !ended
+	loading := v != nil && frame == nil && !ended && status == ""
+	hovered := active && v.tileHover.Update(gtx.Source)
 	return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		r := image.Rectangle{Max: size}
+		defer clip.UniformRRect(r, gtx.Dp(8)).Push(gtx.Ops).Pop()
+		gtx.Constraints = layout.Exact(size)
 		cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			if p.openURL != "" {
-				pointer.CursorPointer.Add(gtx.Ops)
-			}
-			defer clip.UniformRRect(r, gtx.Dp(8)).Push(gtx.Ops).Pop()
-			gtx.Constraints = layout.Exact(size)
-			if inTile && frame != nil {
-				paint.FillShape(gtx.Ops, color.NRGBA{A: 0xff}, clip.Rect(r).Op())
-				widget.Image{Src: *frame, Fit: widget.Contain}.Layout(gtx)
+			pointer.CursorPointer.Add(gtx.Ops)
+			if active && frame != nil {
+				layoutVideoPicture(gtx, frame)
 			} else {
 				paint.FillShape(gtx.Ops, colorSidebar, clip.Rect(r).Op())
 				source := mediaURL(p.proxy, p.original, size.X, size.Y)
@@ -361,43 +351,62 @@ func (c *chatView) layoutVideo(gtx layout.Context, p mediaPreview) layout.Dimens
 					widget.Image{Src: *img, Fit: widget.Cover}.Layout(gtx)
 				}
 			}
-			// The play button, a spinner while loading, nothing while playing.
-			playing := inTile && frame != nil && !ended && !v.paused.Load()
-			if !playing {
+			// The big play button, a spinner while loading, or why it cannot
+			// play; nothing while it plays.
+			switch {
+			case status != "" && active:
 				layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return rounded(gtx, colorServers, 28, func(gtx layout.Context) layout.Dimensions {
-						return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return rounded(gtx, withAlpha(colorServers, 0xe0), 6, func(gtx layout.Context) layout.Dimensions {
+						return layout.UniformInset(unit.Dp(8)).Layout(gtx, label(c.u.th, 13, colorHeader, status).Layout)
+					})
+				})
+			case loading || !active || ended || v.paused.Load():
+				layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return rounded(gtx, withAlpha(colorServers, 0xd0), 28, func(gtx layout.Context) layout.Dimensions {
+						return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 							if loading {
 								gtx.Constraints = layout.Exact(image.Pt(gtx.Dp(32), gtx.Dp(32)))
 								return loader(c.u.th).Layout(gtx)
 							}
-							return icon(gtx, iconPlay, 32, colorHeader)
+							ic := iconPlay
+							if ended {
+								ic = iconReplay
+							}
+							return icon(gtx, ic, 32, colorHeader)
 						})
 					})
 				})
 			}
 			return layout.Dimensions{Size: size}
 		})
-		// The bar at the bottom: the title, or the controls once it plays.
-		gtx.Constraints = layout.Exact(size)
-		defer clip.UniformRRect(r, gtx.Dp(8)).Push(gtx.Ops).Pop()
-		layout.S.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return rounded(gtx, withAlpha(colorServers, 0xe0), 0, func(gtx layout.Context) layout.Dimensions {
+		if active && (frame != nil || ended) {
+			k := &v.ctl[inTile]
+			if hovered || ended || v.paused.Load() || k.bar.Dragging() || k.volume.Dragging() {
+				layout.S.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = gtx.Constraints.Max.X
+					return c.layoutControls(gtx, v, inTile)
+				})
+			}
+		} else if !loading {
+			// The name of the file, as on Discord before it plays.
+			layout.NW.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.UniformInset(unit.Dp(6)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					if inTile && (frame != nil || ended) {
-						return c.layoutVideoControls(gtx, v, &v.tilePause, &v.tileFull, &v.tileVolume, "Fullscreen", status)
-					}
-					text := title + " · click to play"
-					switch {
-					case loading:
-						text = title + " · loading…"
-					case v != nil && v.visible():
-						text = title + " · playing fullscreen"
-					}
-					return oneLine(label(c.u.th, 12, colorHeader, text)).Layout(gtx)
+					return rounded(gtx, withAlpha(colorServers, 0xc0), 4, func(gtx layout.Context) layout.Dimensions {
+						return layout.Inset{Left: unit.Dp(6), Right: unit.Dp(6), Top: unit.Dp(2), Bottom: unit.Dp(2)}.Layout(gtx,
+							oneLine(label(c.u.th, 12, colorHeader, title)).Layout)
+					})
 				})
 			})
-		})
+		}
+		// Whether the mouse is over the tile, controls included, which shows
+		// the controls while it plays.
+		if active {
+			pass := pointer.PassOp{}.Push(gtx.Ops)
+			area := clip.Rect(r).Push(gtx.Ops)
+			v.tileHover.Add(gtx.Ops)
+			area.Pop()
+			pass.Pop()
+		}
 		return layout.Dimensions{Size: size}
 	})
 }

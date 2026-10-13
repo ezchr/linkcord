@@ -84,7 +84,7 @@ func testStreamVideo(t *testing.T, faststart bool) {
 	}
 	var first time.Duration
 	frames := 0
-	err = decodeVideo(ctx, ffmpeg, stream.url, meta, func(frame *image.RGBA, at time.Duration) error {
+	err = decodeVideo(ctx, ffmpeg, stream.url, meta, 0, func(frame *image.RGBA, at time.Duration) error {
 		if frames == 0 {
 			first = time.Since(start)
 			if got := frame.Bounds().Size(); got != image.Pt(1280, 720) {
