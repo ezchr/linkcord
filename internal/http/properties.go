@@ -5,7 +5,7 @@ import (
 
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/gateway"
-	"github.com/ayn2op/discordo/internal/tls"
+	"github.com/ezchr/linkcord/internal/tls"
 )
 
 //go:generate go run generator.go

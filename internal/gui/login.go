@@ -16,7 +16,7 @@ import (
 	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
-	"github.com/ayn2op/discordo/internal/auth"
+	"github.com/ezchr/linkcord/internal/auth"
 	"github.com/skip2/go-qrcode"
 )
 
@@ -122,7 +122,7 @@ func (l *loginView) startQR() {
 				case errors.Is(err, auth.ErrQRCanceled):
 					l.qrStatus = err.Error() + "."
 				case errors.Is(err, auth.ErrCaptcha):
-					l.qrStatus = "Discord pidió un captcha (\"no soy un robot\") y reDiscord no puede mostrarlo. " +
+					l.qrStatus = "Discord pidió un captcha (\"no soy un robot\") y Linkcord no puede mostrarlo. " +
 						"Prueba a generar otro código; si vuelve a pasar, entra con tu token (pestaña Token, ahí te explico cómo)."
 				default:
 					l.qrStatus = "No se pudo usar el código QR: " + err.Error()
@@ -155,7 +155,7 @@ func (l *loginView) run(f func() (string, error)) {
 				l.mfa = mfa
 				l.code.SetText("")
 			case errors.Is(err, auth.ErrCaptcha):
-				l.err = "Discord pidió un captcha (\"no soy un robot\") y reDiscord no puede mostrarlo. Usa el código QR o tu token."
+				l.err = "Discord pidió un captcha (\"no soy un robot\") y Linkcord no puede mostrarlo. Usa el código QR o tu token."
 			case err != nil:
 				l.err = err.Error()
 			default:
@@ -268,7 +268,7 @@ func (l *loginView) layoutCard(gtx layout.Context) layout.Dimensions {
 						return bold(label(th, 24, colorHeader, "¡Hola de nuevo!")).Layout(gtx)
 					}),
 					layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-					layout.Rigid(label(th, 14, colorMuted, "Inicia sesión en reDiscord con tu cuenta de Discord").Layout),
+					layout.Rigid(label(th, 14, colorMuted, "Inicia sesión en Linkcord con tu cuenta de Discord").Layout),
 					layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
 					layout.Rigid(l.layoutTabs),
 					layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
@@ -393,7 +393,7 @@ func (l *loginView) layoutPassword(gtx layout.Context) layout.Dimensions {
 // It asks the modules of the web client for the token, and falls back to
 // the copy that Discord keeps in the local storage, which the page hides
 // from itself but a new frame can read.
-const tokenScript = `// reDiscord: copia tu token al portapapeles. No lo envía a ningún sitio.
+const tokenScript = `// Linkcord: copia tu token al portapapeles. No lo envía a ningún sitio.
 (() => {
   let token;
   try {
@@ -417,9 +417,9 @@ const tokenScript = `// reDiscord: copia tu token al portapapeles. No lo envía 
       f.remove();
     } catch {}
   }
-  if (!token) return console.log("reDiscord: no encontré el token. ¿Iniciaste sesión en esta pestaña?");
+  if (!token) return console.log("Linkcord: no encontré el token. ¿Iniciaste sesión en esta pestaña?");
   copy(token);
-  console.log("reDiscord: ¡listo! Token copiado. Vuelve a reDiscord y pégalo con Ctrl+V.");
+  console.log("Linkcord: ¡listo! Token copiado. Vuelve a Linkcord y pégalo con Ctrl+V.");
 })();`
 
 // tokenSteps explain how to copy the token from Discord in a browser, where
@@ -502,7 +502,7 @@ func (l *loginView) layoutToken(gtx layout.Context) layout.Dimensions {
 	}
 	children = append(children,
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
-		layout.Rigid(label(th, 12, colorRed, "Nunca le des tu token a nadie: quien lo tenga puede entrar a tu cuenta. reDiscord solo lo guarda en tu PC.").Layout),
+		layout.Rigid(label(th, 12, colorRed, "Nunca le des tu token a nadie: quien lo tenga puede entrar a tu cuenta. Linkcord solo lo guarda en tu PC.").Layout),
 	)
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }

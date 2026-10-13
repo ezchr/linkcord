@@ -3,12 +3,12 @@ package login
 import (
 	"github.com/ayn2op/tview/tabs"
 
-	"github.com/ayn2op/discordo/internal/config"
-	"github.com/ayn2op/discordo/internal/ui"
-	"github.com/ayn2op/discordo/internal/ui/login/password"
-	"github.com/ayn2op/discordo/internal/ui/login/qr"
-	"github.com/ayn2op/discordo/internal/ui/login/token"
 	"github.com/ayn2op/tview"
+	"github.com/ezchr/linkcord/internal/config"
+	"github.com/ezchr/linkcord/internal/ui"
+	"github.com/ezchr/linkcord/internal/ui/login/password"
+	"github.com/ezchr/linkcord/internal/ui/login/qr"
+	"github.com/ezchr/linkcord/internal/ui/login/token"
 )
 
 // tab is a login method shown as a tab.

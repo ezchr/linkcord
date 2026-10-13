@@ -3,10 +3,10 @@ package root
 import (
 	"log/slog"
 
-	"github.com/ayn2op/discordo/internal/consts"
-	"github.com/ayn2op/discordo/internal/ui/chat"
-	"github.com/ayn2op/discordo/internal/ui/login"
 	"github.com/ayn2op/tview"
+	"github.com/ezchr/linkcord/internal/consts"
+	"github.com/ezchr/linkcord/internal/ui/chat"
+	"github.com/ezchr/linkcord/internal/ui/login"
 	"github.com/zalando/go-keyring"
 	"golang.design/x/clipboard"
 )

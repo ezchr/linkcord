@@ -9,10 +9,10 @@ import (
 	"github.com/ayn2op/arikawa/v3/gateway"
 	"github.com/ayn2op/arikawa/v3/state"
 	"github.com/ayn2op/arikawa/v3/utils/sendpart"
-	"github.com/ayn2op/discordo/internal/config"
 	"github.com/ayn2op/ningen/v3"
 	"github.com/ayn2op/tview"
 	"github.com/ayn2op/tview/keybind"
+	"github.com/ezchr/linkcord/internal/config"
 	"github.com/gdamore/tcell/v3"
 )
 

@@ -8,7 +8,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/ayn2op/discordo/internal/consts"
+	"github.com/ezchr/linkcord/internal/consts"
 )
 
 func TestDefaultPath(t *testing.T) {

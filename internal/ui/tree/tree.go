@@ -1,15 +1,15 @@
-// Package tree holds what discordo's trees share.
+// Package tree holds what the trees share.
 package tree
 
 import (
-	"github.com/ayn2op/discordo/internal/config"
-	"github.com/ayn2op/discordo/internal/ui"
 	"github.com/ayn2op/tview"
 	"github.com/ayn2op/tview/box"
 	"github.com/ayn2op/tview/keybind"
 	"github.com/ayn2op/tview/layout"
 	"github.com/ayn2op/tview/tree"
 	"github.com/ayn2op/tview/viewport"
+	"github.com/ezchr/linkcord/internal/config"
+	"github.com/ezchr/linkcord/internal/ui"
 	"github.com/gdamore/tcell/v3"
 )
 

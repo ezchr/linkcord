@@ -10,9 +10,9 @@ import (
 	"github.com/ayn2op/arikawa/v3/utils/handler"
 	"github.com/ayn2op/arikawa/v3/utils/httputil"
 	"github.com/ayn2op/arikawa/v3/utils/ws"
-	clientgateway "github.com/ayn2op/discordo/internal/gateway"
-	"github.com/ayn2op/discordo/internal/http"
 	"github.com/ayn2op/ningen/v3"
+	clientgateway "github.com/ezchr/linkcord/internal/gateway"
+	"github.com/ezchr/linkcord/internal/http"
 )
 
 // closeCodeAuthenticationFailed is the close code of the gateway for a token

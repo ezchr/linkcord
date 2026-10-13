@@ -4,10 +4,10 @@ import (
 	"slices"
 
 	"github.com/ayn2op/arikawa/v3/discord"
-	uitree "github.com/ayn2op/discordo/internal/ui/tree"
 	"github.com/ayn2op/tview/help"
 	"github.com/ayn2op/tview/keybind"
 	"github.com/ayn2op/tview/tree"
+	uitree "github.com/ezchr/linkcord/internal/ui/tree"
 )
 
 var _ help.KeyMap = Model{}

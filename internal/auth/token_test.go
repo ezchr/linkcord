@@ -3,7 +3,8 @@ package auth
 import "testing"
 
 func TestTokenRoundTrip(t *testing.T) {
-	keyringService = "rediscord-test"
+	keyringService = "linkcord-test"
+	legacyKeyringService = "linkcord-test-legacy"
 	t.Cleanup(func() { DeleteToken() })
 
 	if err := DeleteToken(); err != nil {

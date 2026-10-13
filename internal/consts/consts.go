@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-const Name = "discordo"
+const Name = "linkcord"
 
 // CacheDir returns the cache directory, creating it on first use.
 var CacheDir = sync.OnceValue(func() string {

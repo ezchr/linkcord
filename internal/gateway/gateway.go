@@ -4,7 +4,7 @@ import (
 	"github.com/ayn2op/arikawa/v3/api"
 	discordgateway "github.com/ayn2op/arikawa/v3/gateway"
 	"github.com/ayn2op/arikawa/v3/utils/ws"
-	"github.com/ayn2op/discordo/internal/http"
+	"github.com/ezchr/linkcord/internal/http"
 )
 
 const gatewayURL = "wss://gateway.discord.gg"

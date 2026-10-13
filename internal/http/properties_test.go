@@ -6,7 +6,7 @@ import (
 	"uuid"
 
 	"github.com/ayn2op/arikawa/v3/gateway"
-	"github.com/ayn2op/discordo/internal/tls"
+	"github.com/ezchr/linkcord/internal/tls"
 )
 
 func TestCommonProperties(t *testing.T) {

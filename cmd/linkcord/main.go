@@ -1,4 +1,4 @@
-// Command rediscord is a lightweight graphical Discord client that runs on
+// Command linkcord is a lightweight graphical Discord client that runs on
 // Windows 7 and later.
 package main
 
@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/ayn2op/discordo/internal/gui"
+	"github.com/ezchr/linkcord/internal/gui"
 )
 
 func main() {

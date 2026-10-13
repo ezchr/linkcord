@@ -1,11 +1,11 @@
 package ui
 
 import (
-	"github.com/ayn2op/discordo/internal/config"
 	"github.com/ayn2op/tview"
 	"github.com/ayn2op/tview/keybind"
 	"github.com/ayn2op/tview/list"
 	"github.com/ayn2op/tview/viewport"
+	"github.com/ezchr/linkcord/internal/config"
 )
 
 // SelectionKeybind binds kbs to moving a list's selection.

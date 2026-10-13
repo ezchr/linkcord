@@ -9,17 +9,31 @@ import (
 
 // The token is kept in the Windows Credential Manager under this name. Tests
 // change the service so they do not touch the real one.
-var keyringService = "rediscord"
+var keyringService = "linkcord"
+
+// legacyKeyringService is where versions named reDiscord kept the token.
+// LoadToken moves a token found there to keyringService.
+var legacyKeyringService = "rediscord"
 
 const keyringUser = "token"
 
 // LoadToken returns the saved token, or "" if there is none.
 func LoadToken() (string, error) {
 	token, err := keyring.Get(keyringService, keyringUser)
+	if !errors.Is(err, keyring.ErrNotFound) {
+		return token, err
+	}
+	token, err = keyring.Get(legacyKeyringService, keyringUser)
 	if errors.Is(err, keyring.ErrNotFound) {
 		return "", nil
 	}
-	return token, err
+	if err != nil {
+		return "", err
+	}
+	if err := SaveToken(token); err == nil {
+		_ = keyring.Delete(legacyKeyringService, keyringUser)
+	}
+	return token, nil
 }
 
 // SaveToken remembers token for the next start.

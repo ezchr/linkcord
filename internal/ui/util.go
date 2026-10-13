@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"github.com/ayn2op/arikawa/v3/discord"
-	"github.com/ayn2op/discordo/internal/config"
 	"github.com/ayn2op/ningen/v3"
 	"github.com/ayn2op/tview"
 	"github.com/ayn2op/tview/box"
+	"github.com/ezchr/linkcord/internal/config"
 )
 
 // Box returns child in a box laid out and styled by cfg, highlighted while focused.

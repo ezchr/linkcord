@@ -8,9 +8,9 @@ import (
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
 	md "github.com/ayn2op/arikawa/v3/markdown"
-	"github.com/ayn2op/discordo/internal/config"
 	"github.com/ayn2op/tview"
 	"github.com/ayn2op/tview/richtext"
+	"github.com/ezchr/linkcord/internal/config"
 	"github.com/gdamore/tcell/v3"
 	"github.com/yuin/goldmark/ast"
 )

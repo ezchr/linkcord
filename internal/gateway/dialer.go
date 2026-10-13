@@ -3,8 +3,8 @@
 package gateway
 
 import (
-	"github.com/ayn2op/discordo/internal/tls"
 	tls_client "github.com/bogdanfinn/tls-client"
+	"github.com/ezchr/linkcord/internal/tls"
 	"github.com/gorilla/websocket"
 )
 

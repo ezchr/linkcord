@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/ayn2op/arikawa/v3/api"
-	"github.com/ayn2op/discordo/internal/gateway"
-	"github.com/ayn2op/discordo/internal/http"
+	"github.com/ezchr/linkcord/internal/gateway"
+	"github.com/ezchr/linkcord/internal/http"
 	"github.com/gorilla/websocket"
 )
 

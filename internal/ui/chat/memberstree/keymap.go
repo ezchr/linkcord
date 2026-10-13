@@ -1,9 +1,9 @@
 package memberstree
 
 import (
-	uitree "github.com/ayn2op/discordo/internal/ui/tree"
 	"github.com/ayn2op/tview/help"
 	"github.com/ayn2op/tview/keybind"
+	uitree "github.com/ezchr/linkcord/internal/ui/tree"
 )
 
 var _ help.KeyMap = Model{}

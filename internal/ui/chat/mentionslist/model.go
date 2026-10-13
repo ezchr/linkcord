@@ -1,13 +1,13 @@
 package mentionslist
 
 import (
-	"github.com/ayn2op/discordo/internal/config"
-	"github.com/ayn2op/discordo/internal/ui"
 	"github.com/ayn2op/tview"
 	"github.com/ayn2op/tview/layout"
 	"github.com/ayn2op/tview/list"
 	"github.com/ayn2op/tview/scrollbar"
 	"github.com/ayn2op/tview/viewport"
+	"github.com/ezchr/linkcord/internal/config"
+	"github.com/ezchr/linkcord/internal/ui"
 	"github.com/rivo/uniseg"
 )
 

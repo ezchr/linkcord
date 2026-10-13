@@ -7,12 +7,12 @@ import (
 
 	"github.com/ayn2op/arikawa/v3/api"
 	"github.com/ayn2op/arikawa/v3/utils/httputil"
-	"github.com/ayn2op/discordo/internal/http"
+	"github.com/ezchr/linkcord/internal/http"
 )
 
 // ErrCaptcha is returned when Discord asks to solve a captcha, which this
 // client cannot show.
-var ErrCaptcha = errors.New("Discord pidió un captcha (la verificación de \"no soy un robot\"), que reDiscord no puede mostrar")
+var ErrCaptcha = errors.New("Discord pidió un captcha (la verificación de \"no soy un robot\"), que Linkcord no puede mostrar")
 
 // newLoginClient returns a client for logging in that behaves like the login
 // page of a browser: it first loads the experiments, as the page does, which

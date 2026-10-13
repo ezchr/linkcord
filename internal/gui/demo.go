@@ -10,7 +10,7 @@ import (
 
 // demoEnvVar shows made-up servers, people and messages without connecting
 // to Discord, to check the interface without an account.
-const demoEnvVar = "REDISCORD_DEMO"
+const demoEnvVar = "LINKCORD_DEMO"
 
 // startDemo fills a state that never connects with made-up data and shows it.
 func (u *ui) startDemo() {
@@ -41,7 +41,7 @@ func (u *ui) startDemo() {
 		{Status: discord.OfflineStatus},
 	}
 	cab.PresenceSet(discord.NullGuildID, &discord.Presence{User: me, Status: discord.OnlineStatus, Activities: []discord.Activity{
-		{Type: discord.CustomActivity, Name: "Custom Status", State: "Probando reDiscord"},
+		{Type: discord.CustomActivity, Name: "Custom Status", State: "Probando Linkcord"},
 		{Type: discord.ListeningActivity, Name: "YouTube Music", Details: "Canción de prueba", State: "Artista de prueba", Timestamps: &discord.ActivityTimestamps{Start: discord.UnixMsTimestamp(time.Now().Add(-3 * time.Minute).UnixMilli())}},
 	}}, false)
 
@@ -113,9 +113,9 @@ func (u *ui) startDemo() {
 	}
 	add(channels[0].ID, guild.ID, users[1], 5*time.Hour, "hola a todos 🔥🔥", nil)
 	add(channels[0].ID, guild.ID, users[1], 5*time.Hour-time.Minute, "alguien para jugar *cs 1.6*? ~~ahora no~~ más tarde", nil)
-	add(channels[0].ID, guild.ID, users[2], 4*time.Hour, "Miren esto: `go build ./...` y luego\n```\nrediscord.exe --demo\n```\nfunciona en Windows 7 😎", nil)
-	add(channels[0].ID, guild.ID, me, 3*time.Hour, "> esto es una cita\nY esto un ||spoiler|| con https://github.com/ayn2op/discordo", func(m *discord.Message) {
-		m.Embeds = []discord.Embed{{Title: "GitHub - ayn2op/discordo: A lightweight, secure, and feature-rich Discord terminal (TUI) client.", Description: "A lightweight, secure, and feature-rich Discord terminal (TUI) client. - ayn2op/discordo", URL: "https://github.com/ayn2op/discordo", Color: 0x1f2328}}
+	add(channels[0].ID, guild.ID, users[2], 4*time.Hour, "Miren esto: `go build ./...` y luego\n```\nlinkcord.exe --demo\n```\nfunciona en Windows 7 😎", nil)
+	add(channels[0].ID, guild.ID, me, 3*time.Hour, "> esto es una cita\nY esto un ||spoiler|| con https://github.com/ezchr/linkcord", func(m *discord.Message) {
+		m.Embeds = []discord.Embed{{Title: "GitHub - ezchr/linkcord", Description: "Cliente de Discord liviano para Windows 7, 8, 10 y 11. - ezchr/linkcord", URL: "https://github.com/ezchr/linkcord", Color: 0x1f2328}}
 	})
 	add(channels[0].ID, guild.ID, users[5], 2*time.Hour, "<@"+me.ID.String()+"> respóndeme cuando puedas 🙏", nil)
 	add(channels[0].ID, guild.ID, me, time.Hour, "ya voy", func(m *discord.Message) {

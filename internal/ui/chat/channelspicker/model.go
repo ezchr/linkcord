@@ -4,12 +4,12 @@ import (
 	"log/slog"
 
 	"github.com/ayn2op/arikawa/v3/discord"
-	"github.com/ayn2op/discordo/internal/config"
-	"github.com/ayn2op/discordo/internal/ui"
-	uipicker "github.com/ayn2op/discordo/internal/ui/picker"
 	"github.com/ayn2op/ningen/v3"
 	"github.com/ayn2op/tview"
 	"github.com/ayn2op/tview/picker"
+	"github.com/ezchr/linkcord/internal/config"
+	"github.com/ezchr/linkcord/internal/ui"
+	uipicker "github.com/ezchr/linkcord/internal/ui/picker"
 )
 
 type Model struct {

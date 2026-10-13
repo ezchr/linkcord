@@ -10,10 +10,6 @@ import (
 
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/gateway"
-	"github.com/ayn2op/discordo/internal/config"
-	"github.com/ayn2op/discordo/internal/ui"
-	uitree "github.com/ayn2op/discordo/internal/ui/tree"
-	"github.com/ayn2op/discordo/internal/voice"
 	"github.com/ayn2op/ningen/v3"
 	"github.com/ayn2op/ningen/v3/states/read"
 	"github.com/ayn2op/tview"
@@ -21,6 +17,10 @@ import (
 	"github.com/ayn2op/tview/richtext"
 	"github.com/ayn2op/tview/tree"
 	"github.com/ayn2op/tview/viewport"
+	"github.com/ezchr/linkcord/internal/config"
+	"github.com/ezchr/linkcord/internal/ui"
+	uitree "github.com/ezchr/linkcord/internal/ui/tree"
+	"github.com/ezchr/linkcord/internal/voice"
 	"github.com/gdamore/tcell/v3"
 )
 

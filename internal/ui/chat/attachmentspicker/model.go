@@ -1,10 +1,10 @@
 package attachmentspicker
 
 import (
-	"github.com/ayn2op/discordo/internal/config"
-	uipicker "github.com/ayn2op/discordo/internal/ui/picker"
 	"github.com/ayn2op/tview"
 	"github.com/ayn2op/tview/picker"
+	"github.com/ezchr/linkcord/internal/config"
+	uipicker "github.com/ezchr/linkcord/internal/ui/picker"
 )
 
 type Model struct {

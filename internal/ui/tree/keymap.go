@@ -1,9 +1,9 @@
 package tree
 
 import (
-	"github.com/ayn2op/discordo/internal/config"
 	"github.com/ayn2op/tview/keybind"
 	"github.com/ayn2op/tview/tree"
+	"github.com/ezchr/linkcord/internal/config"
 )
 
 // SelectHelp returns the up and down keybinds that move the selection away from current.

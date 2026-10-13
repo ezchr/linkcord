@@ -9,14 +9,14 @@ import (
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/gateway"
 	"github.com/ayn2op/arikawa/v3/state"
-	"github.com/ayn2op/discordo/internal/config"
-	uitree "github.com/ayn2op/discordo/internal/ui/tree"
 	"github.com/ayn2op/ningen/v3"
 	"github.com/ayn2op/tview"
 	"github.com/ayn2op/tview/keybind"
 	"github.com/ayn2op/tview/richtext"
 	"github.com/ayn2op/tview/tree"
 	"github.com/ayn2op/tview/viewport"
+	"github.com/ezchr/linkcord/internal/config"
+	uitree "github.com/ezchr/linkcord/internal/ui/tree"
 	"github.com/gdamore/tcell/v3"
 )
 

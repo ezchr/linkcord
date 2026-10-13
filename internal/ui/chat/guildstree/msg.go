@@ -4,10 +4,10 @@ import (
 	"log/slog"
 
 	"github.com/ayn2op/arikawa/v3/discord"
-	"github.com/ayn2op/discordo/internal/ui"
 	"github.com/ayn2op/ningen/v3"
 	"github.com/ayn2op/tview"
 	"github.com/ayn2op/tview/tree"
+	"github.com/ezchr/linkcord/internal/ui"
 )
 
 // Msg moves the tree.

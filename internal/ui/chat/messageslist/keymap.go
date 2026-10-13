@@ -1,9 +1,9 @@
 package messageslist
 
 import (
-	"github.com/ayn2op/discordo/internal/ui"
 	"github.com/ayn2op/tview/help"
 	"github.com/ayn2op/tview/keybind"
+	"github.com/ezchr/linkcord/internal/ui"
 )
 
 var _ help.KeyMap = Model{}

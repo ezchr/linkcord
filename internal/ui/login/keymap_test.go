@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/ayn2op/discordo/internal/config"
 	"github.com/ayn2op/tview/keybind"
+	"github.com/ezchr/linkcord/internal/config"
 )
 
 func TestModelShortHelp(t *testing.T) {

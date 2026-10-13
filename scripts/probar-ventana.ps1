@@ -1,4 +1,4 @@
-# Drives rediscord.exe by posting window messages straight to its window, in
+# Drives linkcord.exe by posting window messages straight to its window, in
 # the Windows 7 mouse mode, without touching the real mouse or keyboard, and
 # saves screenshots of its window with PrintWindow, which works even when other
 # windows cover it.
@@ -11,7 +11,7 @@
 # Snap "name" (saves <Out>\<Tag>-<name>.png). Coordinates are in the client
 # area of the window.
 param(
-	[string]$Exe = (Join-Path $PSScriptRoot "..\..\rediscord.exe"),
+	[string]$Exe = (Join-Path $PSScriptRoot "..\..\linkcord.exe"),
 	[string]$Out = (Join-Path $PSScriptRoot "..\capturas"),
 	[string]$Tag = "prueba",
 	# Shows made-up data instead of logging in.
@@ -37,7 +37,7 @@ public static class P {
 # Windows 7 mouse messages, which can be posted, unlike the pointer messages
 # of Windows 8 and later.
 $env:GIO_LEGACY_MOUSE = "1"
-if ($Demo) { $env:REDISCORD_DEMO = "1" } else { Remove-Item Env:REDISCORD_DEMO -ErrorAction SilentlyContinue }
+if ($Demo) { $env:LINKCORD_DEMO = "1" } else { Remove-Item Env:LINKCORD_DEMO -ErrorAction SilentlyContinue }
 if ($Warp) { $env:GIO_D3D11_WARP = "1" } else { Remove-Item Env:GIO_D3D11_WARP -ErrorAction SilentlyContinue }
 
 $p = Start-Process $Exe -PassThru -RedirectStandardError (Join-Path $Out "$Tag-stderr.txt")

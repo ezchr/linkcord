@@ -551,7 +551,7 @@ func (c *chatView) systemText(m discord.Message) string {
 	if m.Content != "" {
 		return name + ": " + c.renderContent(m)
 	}
-	return name + " hizo algo que reDiscord aún no sabe mostrar."
+	return name + " hizo algo que Linkcord aún no sabe mostrar."
 }
 
 // formatTime shows when a message was sent, as Discord does in Spanish.

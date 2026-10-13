@@ -4,14 +4,6 @@ import (
 	"github.com/ayn2op/tview/layout"
 	"os"
 
-	"github.com/ayn2op/discordo/internal/config"
-	"github.com/ayn2op/discordo/internal/consts"
-	"github.com/ayn2op/discordo/internal/ui"
-	"github.com/ayn2op/discordo/internal/ui/chat"
-	"github.com/ayn2op/discordo/internal/ui/login"
-	"github.com/ayn2op/discordo/internal/ui/login/password"
-	"github.com/ayn2op/discordo/internal/ui/login/qr"
-	"github.com/ayn2op/discordo/internal/ui/login/token"
 	"github.com/ayn2op/tview"
 	"github.com/ayn2op/tview/backdrop"
 	"github.com/ayn2op/tview/box"
@@ -21,10 +13,18 @@ import (
 	"github.com/ayn2op/tview/inert"
 	"github.com/ayn2op/tview/keybind"
 	"github.com/ayn2op/tview/stack"
+	"github.com/ezchr/linkcord/internal/config"
+	"github.com/ezchr/linkcord/internal/consts"
+	"github.com/ezchr/linkcord/internal/ui"
+	"github.com/ezchr/linkcord/internal/ui/chat"
+	"github.com/ezchr/linkcord/internal/ui/login"
+	"github.com/ezchr/linkcord/internal/ui/login/password"
+	"github.com/ezchr/linkcord/internal/ui/login/qr"
+	"github.com/ezchr/linkcord/internal/ui/login/token"
 	"github.com/gdamore/tcell/v3"
 )
 
-const tokenEnvVarKey = "DISCORDO_TOKEN"
+const tokenEnvVarKey = "LINKCORD_TOKEN"
 
 // screen is what is shown above help.
 type screen int

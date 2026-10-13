@@ -1,13 +1,13 @@
-// Package picker holds what discordo's pickers share.
+// Package picker holds what the pickers share.
 package picker
 
 import (
-	"github.com/ayn2op/discordo/internal/config"
-	"github.com/ayn2op/discordo/internal/ui"
 	"github.com/ayn2op/tview"
 	"github.com/ayn2op/tview/keybind"
 	"github.com/ayn2op/tview/picker"
 	"github.com/ayn2op/tview/scrollbar"
+	"github.com/ezchr/linkcord/internal/config"
+	"github.com/ezchr/linkcord/internal/ui"
 )
 
 // Model is a picker of items shown in a box titled title.

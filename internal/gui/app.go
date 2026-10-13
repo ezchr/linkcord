@@ -1,4 +1,4 @@
-// Package gui is the graphical interface of reDiscord, drawn with Gio so that
+// Package gui is the graphical interface of Linkcord, drawn with Gio so that
 // it runs on Windows 7 and later.
 package gui
 
@@ -20,18 +20,19 @@ import (
 	"gioui.org/widget/material"
 	"github.com/ayn2op/arikawa/v3/gateway"
 	"github.com/ayn2op/arikawa/v3/utils/ws"
-	"github.com/ayn2op/discordo/internal/auth"
-	"github.com/ayn2op/discordo/internal/logger"
 	"github.com/ayn2op/ningen/v3"
+	"github.com/ezchr/linkcord/internal/auth"
+	"github.com/ezchr/linkcord/internal/logger"
 )
 
-const appName = "reDiscord"
+const appName = "Linkcord"
 
 // tokenEnvVar overrides the saved token, which helps testing.
-const tokenEnvVar = "REDISCORD_TOKEN"
+const tokenEnvVar = "LINKCORD_TOKEN"
 
 // Run opens the main window and blocks until it is closed.
 func Run() error {
+	moveLegacyDir()
 	if closer, err := logger.Load(logPath(), slog.LevelInfo); err == nil {
 		defer closer.Close()
 	}
@@ -51,13 +52,27 @@ func Run() error {
 	return <-errc
 }
 
-// logPath is where the log is written: %LocalAppData%\rediscord\logs.txt.
+// logPath is where the log is written: %LocalAppData%\linkcord\logs.txt.
 func logPath() string {
 	dir, err := os.UserCacheDir()
 	if err != nil {
 		dir = os.TempDir()
 	}
-	return filepath.Join(dir, "rediscord", "logs.txt")
+	return filepath.Join(dir, "linkcord", "logs.txt")
+}
+
+// moveLegacyDir renames the folder that versions named reDiscord used
+// (%LocalAppData%\rediscord: logs and the image cache) to the current one.
+func moveLegacyDir() {
+	dir := filepath.Dir(logPath())
+	old := filepath.Join(filepath.Dir(dir), "rediscord")
+	if _, err := os.Stat(dir); err == nil {
+		return
+	}
+	if _, err := os.Stat(old); err != nil {
+		return
+	}
+	_ = os.Rename(old, dir)
 }
 
 type screen int

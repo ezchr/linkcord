@@ -13,7 +13,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/ayn2op/arikawa/v3/discord"
-	"github.com/ayn2op/discordo/internal/consts"
+	"github.com/ezchr/linkcord/internal/consts"
 )
 
 const fileName = "config.toml"
