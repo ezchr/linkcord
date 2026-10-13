@@ -77,8 +77,10 @@ func (c *chatView) myPerms(chID discord.ChannelID) discord.Permissions {
 	if c.demo {
 		return allPermissions
 	}
-	p, err := c.st.Permissions(chID, c.me.ID)
-	if err != nil {
+	// From the cache: the menu is built while drawing, which must not wait
+	// for Discord. Until it has loaded, no moderation shows.
+	p, ok := c.cachedPerms(chID)
+	if !ok {
 		return 0
 	}
 	// Arikawa's PermissionAll, which owners and administrators get, lacks
