@@ -166,9 +166,40 @@ func (c *chatView) grouped(i int) bool {
 		return false
 	}
 	m, prev := c.messages[i], c.messages[i-1]
+	// A message only this user sees keeps its header, as in Discord.
+	if isEphemeral(m) || isEphemeral(prev) {
+		return false
+	}
 	return m.Author.ID == prev.Author.ID &&
 		isRegular(m) && isRegular(prev) && m.ReferencedMessage == nil &&
 		m.Timestamp.Time().Sub(prev.Timestamp.Time()) < groupWindow
+}
+
+// layoutEphemeralNote is the line under a message only this user sees, with
+// the link that dismisses it, as Discord has.
+func (c *chatView) layoutEphemeralNote(gtx layout.Context, m discord.Message) layout.Dimensions {
+	th := c.u.th
+	cl := c.linkClick(fmt.Sprintf("dismiss:%d", m.ID))
+	if cl.Clicked(gtx) {
+		c.dismissMessage(m.ID)
+	}
+	return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconVisible, 16, colorMuted) }),
+			layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
+			layout.Rigid(label(th, 12, colorMuted, "Only you can see this · ").Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					dims := label(th, 12, colorLink, "Dismiss message").Layout(gtx)
+					if cl.Hovered() {
+						paint.FillShape(gtx.Ops, colorLink, clip.Rect{Min: image.Pt(0, dims.Size.Y-gtx.Dp(1)), Max: dims.Size}.Op())
+					}
+					return dims
+				})
+			}),
+		)
+	})
 }
 
 func isRegular(m discord.Message) bool {
@@ -292,6 +323,11 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 				if len(m.Reactions) > 0 {
 					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return c.layoutReactions(gtx, m)
+					}))
+				}
+				if isEphemeral(m) {
+					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return c.layoutEphemeralNote(gtx, m)
 					}))
 				}
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
@@ -869,7 +905,7 @@ func botTag(th *material.Theme) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		return rounded(gtx, colorAccent, 3, func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Left: unit.Dp(4), Right: unit.Dp(4), Top: unit.Dp(1), Bottom: unit.Dp(1)}.Layout(gtx,
-				bold(label(th, 10, colorHeader, "BOT")).Layout)
+				bold(label(th, 10, colorHeader, "APP")).Layout)
 		})
 	}
 }

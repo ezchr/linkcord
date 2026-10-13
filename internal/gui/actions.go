@@ -209,7 +209,8 @@ func (c *chatView) layoutWithActions(gtx layout.Context, m discord.Message, w la
 	}
 	over := a.hover == m.ID || a.barOver == m.ID
 	// A deleted message is gone from Discord: nothing can be done with it.
-	showBar := over && a.editing != m.ID && a.deleting == nil && !c.deleted.has(m.ID)
+	// Neither can one that only this user sees, which Discord never stored.
+	showBar := over && a.editing != m.ID && a.deleting == nil && !c.deleted.has(m.ID) && !isEphemeral(m)
 	if !showBar && a.barOver == m.ID {
 		// A toolbar that is not drawn gets no Leave; forget it.
 		a.barOver = 0
@@ -218,6 +219,11 @@ func (c *chatView) layoutWithActions(gtx layout.Context, m discord.Message, w la
 	macro := op.Record(gtx.Ops)
 	dims := w(gtx)
 	call := macro.Stop()
+	if isEphemeral(m) {
+		// Messages only this user sees have a tint and a bar on their left.
+		paint.FillShape(gtx.Ops, withAlpha(colorAccent, 0x14), clip.Rect{Max: dims.Size}.Op())
+		paint.FillShape(gtx.Ops, colorAccent, clip.Rect{Max: image.Pt(gtx.Dp(2), dims.Size.Y)}.Op())
+	}
 	if over || a.editing == m.ID {
 		paint.FillShape(gtx.Ops, colorMessageHover, clip.Rect{Max: dims.Size}.Op())
 	}
@@ -544,7 +550,22 @@ func (c *chatView) askDelete(m discord.Message, skipConfirm bool) {
 	c.u.win.Invalidate()
 }
 
+// isEphemeral reports whether only this user sees m, as with some answers of
+// bots. Discord keeps no such message, so it can only be dismissed here.
+func isEphemeral(m discord.Message) bool {
+	return m.Flags&discord.EphemeralMessage != 0
+}
+
+// dismissMessage removes a message that only this user sees.
+func (c *chatView) dismissMessage(id discord.MessageID) {
+	c.messages = slices.DeleteFunc(c.messages, func(m discord.Message) bool { return m.ID == id })
+}
+
 func (c *chatView) deleteMessage(m discord.Message) {
+	if isEphemeral(m) {
+		c.dismissMessage(m.ID)
+		return
+	}
 	c.act.deleting = nil
 	gtxFocus(c)
 	remove := func() {

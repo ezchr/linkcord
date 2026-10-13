@@ -209,6 +209,9 @@ func (u *ui) startDemo() {
 			Timestamp: discord.NewTimestamp(time.Now().Add(-24 * time.Minute)),
 		}}
 	})
+	add(channels[0].ID, guild.ID, users[4], 22*time.Minute, "Nothing is playing right now.", func(m *discord.Message) {
+		m.Flags = discord.EphemeralMessage
+	})
 	add(channels[0].ID, guild.ID, users[4], 23*time.Minute, "", func(m *discord.Message) {
 		m.Flags = discord.IsComponentsV2
 		m.Components = discord.TopLevelComponents{

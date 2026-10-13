@@ -25,7 +25,10 @@ import (
 	"golang.org/x/exp/shiny/materialdesign/icons"
 )
 
-var iconCollapse = mustIcon(icons.NavigationExpandLess)
+var (
+	iconCollapse = mustIcon(icons.NavigationExpandLess)
+	iconVisible  = mustIcon(icons.ActionVisibility)
+)
 
 // Interaction types that a user sends.
 const (
