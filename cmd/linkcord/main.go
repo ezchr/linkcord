@@ -12,8 +12,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"gioui.org/app"
 	"github.com/ezchr/linkcord/internal/gui"
 	discordhttp "github.com/ezchr/linkcord/internal/http"
+	"github.com/ezchr/linkcord/internal/instance"
 	"github.com/ezchr/linkcord/internal/update"
 	"github.com/ezchr/linkcord/internal/version"
 )
@@ -47,6 +49,15 @@ func main() {
 	}
 	if *noUpdate {
 		os.Setenv("LINKCORD_NO_UPDATE", "1")
+	}
+	// A fixed window class lets a second start find this window whatever
+	// the executable is called.
+	app.ID = instance.WindowClass
+	// Only one Linkcord runs per session; starting it again brings the open
+	// one to the front. The demo is left out, so that test tools can run it
+	// beside a signed-in Linkcord.
+	if os.Getenv("LINKCORD_DEMO") != "1" && !instance.Acquire() {
+		return
 	}
 	if err := gui.Run(); err != nil {
 		log.SetOutput(os.Stderr)
