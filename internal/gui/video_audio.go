@@ -19,7 +19,7 @@ type videoAudio struct {
 	paused  atomic.Bool
 	held    atomic.Bool // silent until the picture starts
 	muted   atomic.Bool
-	volume  atomic.Uint32 // out of 1000
+	cut     atomic.Uint32 // how far the volume is turned down, out of 1000
 	played  atomic.Int64
 	eof     atomic.Bool
 	stop    func()
@@ -27,7 +27,6 @@ type videoAudio struct {
 
 func newVideoAudio() (*videoAudio, error) {
 	audio := &videoAudio{queue: make(chan []byte, 16)}
-	audio.volume.Store(1000)
 	stop, err := voice.StartMediaAudio(audio.fill)
 	if err != nil {
 		return nil, err
@@ -60,8 +59,8 @@ func (a *videoAudio) fill(output []byte) {
 		n := min(len(output), len(a.current))
 		if !a.muted.Load() {
 			copy(output[:n], a.current[:n])
-			if vol := a.volume.Load(); vol < 1000 {
-				scaleSamples(output[:n], vol)
+			if cut := a.cut.Load(); cut > 0 {
+				scaleSamples(output[:n], 1000-min(cut, 1000))
 			}
 		}
 		output = output[n:]

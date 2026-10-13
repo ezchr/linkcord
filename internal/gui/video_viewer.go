@@ -116,7 +116,7 @@ func (v *videoViewer) run(ctx context.Context, u *ui) {
 			// otherwise run behind and have its frames dropped at first.
 			audio.held.Store(true)
 			audio.paused.Store(v.paused.Load())
-			audio.volume.Store(uint32(v.tileVolume.Value * 1000))
+			audio.cut.Store(1000 - uint32(v.tileVolume.Value*1000))
 			audio.muted.Store(v.muted.Load())
 			v.mu.Lock()
 			v.audio = audio
@@ -249,7 +249,7 @@ func (c *chatView) setVolume(v *videoViewer, value float32) {
 	c.lastVolume, c.volumeSet = value, true
 	v.mu.Lock()
 	if v.audio != nil {
-		v.audio.volume.Store(uint32(value * 1000))
+		v.audio.cut.Store(1000 - uint32(value*1000))
 	}
 	v.mu.Unlock()
 }
