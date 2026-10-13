@@ -2,6 +2,7 @@ package gui
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -60,4 +61,21 @@ func (u *ui) startPerformanceProfile() func() {
 		}
 		runtime.KeepAlive(u)
 	}
+}
+
+// slowFrame writes frames slower than 30 ms to frames.log in the profile
+// folder: how long the posted work, the layout and the drawing took.
+func (u *ui) slowFrame(start time.Time, pending, laid time.Duration) {
+	dir := os.Getenv("LINKCORD_PROFILE")
+	total := time.Since(start)
+	if dir == "" || total < 30*time.Millisecond {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "frames.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s total=%v pending=%v layout=%v draw=%v\n", start.Format("15:04:05.000"),
+		total.Round(time.Millisecond), pending.Round(time.Millisecond), (laid - pending).Round(time.Millisecond), (total - laid).Round(time.Millisecond))
 }

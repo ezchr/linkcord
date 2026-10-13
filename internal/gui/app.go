@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"gioui.org/app"
 	"gioui.org/layout"
@@ -200,10 +201,14 @@ func (u *ui) loop() error {
 				}
 			}
 		case app.FrameEvent:
+			start := time.Now()
 			u.runPending()
+			pending := time.Since(start)
 			gtx := app.NewContext(&ops, e)
 			u.layout(gtx)
+			laid := time.Since(start)
 			e.Frame(gtx.Ops)
+			u.slowFrame(start, pending, laid)
 			u.frameCount++
 			u.markHealthy()
 		}
