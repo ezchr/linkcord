@@ -319,7 +319,7 @@ func selectOf(c *chatView, comp discord.Component) (selectMenu, bool) {
 		var out []discord.SelectOption
 		chs, _ := c.st.Cabinet.Channels(guildID)
 		for _, ch := range chs {
-			if ch.Type != discord.GuildCategory && c.st.HasPermissions(ch.ID, discord.PermissionViewChannel) {
+			if ch.Type != discord.GuildCategory && c.can(ch.ID, discord.PermissionViewChannel) {
 				out = append(out, discord.SelectOption{Label: "#" + ch.Name, Value: ch.ID.String()})
 			}
 		}

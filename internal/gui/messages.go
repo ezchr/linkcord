@@ -225,7 +225,7 @@ func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
 	name := c.memberName(guildID, m.Author.ID, nil)
 	nameColor := colorHeader
 	if guildID.IsValid() {
-		if col, ok := c.st.MemberColor(guildID, m.Author.ID); ok && col != 0 && col != discord.NullColor {
+		if col, ok := c.memberColor(guildID, m.Author.ID); ok && col != 0 && col != discord.NullColor {
 			nameColor = rgb(uint32(col))
 		}
 	}
@@ -420,7 +420,7 @@ func (c *chatView) layoutReply(gtx layout.Context, ref discord.Message) layout.D
 	guildID := c.selChannel.GuildID
 	nameColor := colorHeader
 	if guildID.IsValid() {
-		if col, ok := c.st.MemberColor(guildID, ref.Author.ID); ok && col != 0 && col != discord.NullColor {
+		if col, ok := c.memberColor(guildID, ref.Author.ID); ok && col != 0 && col != discord.NullColor {
 			nameColor = rgb(uint32(col))
 		}
 	}

@@ -373,7 +373,7 @@ func (c *chatView) rebuildMentions() {
 		}
 		col := colorHeader
 		if guildID.IsValid() {
-			if mc, ok := c.st.MemberColor(guildID, u.ID); ok && mc != 0 && mc != discord.NullColor {
+			if mc, ok := c.memberColor(guildID, u.ID); ok && mc != 0 && mc != discord.NullColor {
 				col = rgb(uint32(mc))
 			}
 		}
@@ -385,7 +385,7 @@ func (c *chatView) rebuildMentions() {
 		for i := range members {
 			addUser(members[i].User, &members[i])
 		}
-		canEveryone := c.st.HasPermissions(ch.ID, discord.PermissionMentionEveryone)
+		canEveryone := c.can(ch.ID, discord.PermissionMentionEveryone)
 		guildRoles, _ := c.st.Cabinet.Roles(guildID)
 		for _, r := range guildRoles {
 			if discord.Snowflake(r.ID) == discord.Snowflake(guildID) || !r.Mentionable && !canEveryone {
@@ -480,7 +480,7 @@ func (c *chatView) withMarkup(text string) string {
 func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 	th := c.u.th
 	cs := &c.comp
-	canSend := !c.selChannel.GuildID.IsValid() || c.st.HasPermissions(c.selChannel.ID, discord.PermissionSendMessages)
+	canSend := !c.selChannel.GuildID.IsValid() || c.can(c.selChannel.ID, discord.PermissionSendMessages)
 	dims := layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {

@@ -149,12 +149,12 @@ func emojiKey(e discord.Emoji) string {
 
 func (c *chatView) canSendHere() bool {
 	ch := c.selChannel
-	return ch != nil && (!ch.GuildID.IsValid() || c.st.HasPermissions(ch.ID, discord.PermissionSendMessages))
+	return ch != nil && (!ch.GuildID.IsValid() || c.can(ch.ID, discord.PermissionSendMessages))
 }
 
 func (c *chatView) canReact() bool {
 	ch := c.selChannel
-	return ch != nil && (!ch.GuildID.IsValid() || c.st.HasPermissions(ch.ID, discord.PermissionAddReactions))
+	return ch != nil && (!ch.GuildID.IsValid() || c.can(ch.ID, discord.PermissionAddReactions))
 }
 
 func (c *chatView) canDelete(m discord.Message) bool {
@@ -162,7 +162,7 @@ func (c *chatView) canDelete(m discord.Message) bool {
 		return true
 	}
 	ch := c.selChannel
-	return ch != nil && ch.GuildID.IsValid() && c.st.HasPermissions(ch.ID, discord.PermissionManageMessages)
+	return ch != nil && ch.GuildID.IsValid() && c.can(ch.ID, discord.PermissionManageMessages)
 }
 
 func (c *chatView) messageIndex(id discord.MessageID) int {

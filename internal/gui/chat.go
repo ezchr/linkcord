@@ -520,7 +520,7 @@ func (c *chatView) rebuildRows() {
 		if len(c.friends.requests) > 0 {
 			c.rows = append(c.rows, channelRow{kind: rowHome, ch: discord.Channel{ID: requestsRowID}, label: "Message Requests"})
 		}
-		channels, err := c.st.PrivateChannels()
+		channels, err := c.privateChannels(), error(nil)
 		if err != nil {
 			slog.Error("failed to get private channels", "err", err)
 		}
@@ -552,7 +552,7 @@ func (c *chatView) rebuildRows() {
 		case !isTextual(ch.Type) && !isVoice(ch.Type):
 			// Forums and other kinds are not supported yet.
 		case ch.Type == discord.GuildPublicThread || ch.Type == discord.GuildPrivateThread || ch.Type == discord.GuildAnnouncementThread:
-		case !c.st.HasPermissions(ch.ID, discord.PermissionViewChannel):
+		case !c.can(ch.ID, discord.PermissionViewChannel):
 		case ch.ParentID.IsValid():
 			children[ch.ParentID] = append(children[ch.ParentID], ch)
 		default:
@@ -1177,7 +1177,7 @@ func (c *chatView) dmsUnread() ningen.UnreadIndication {
 	if c.incomingRequests() > 0 {
 		return ningen.ChannelMentioned
 	}
-	channels, _ := c.st.PrivateChannels()
+	channels := c.privateChannels()
 	for _, ch := range channels {
 		if c.friends.requestIDs[ch.ID] {
 			continue

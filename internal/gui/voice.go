@@ -287,10 +287,10 @@ func (c *chatView) joinable(ch discord.Channel) error {
 	if c.demo || !ch.GuildID.IsValid() {
 		return nil
 	}
-	if !c.st.HasPermissions(ch.ID, discord.PermissionConnect) {
+	if !c.can(ch.ID, discord.PermissionConnect) {
 		return errors.New("you do not have permission to connect")
 	}
-	if ch.VoiceUserLimit > 0 && !c.st.HasPermissions(ch.ID, discord.PermissionMoveMembers) {
+	if ch.VoiceUserLimit > 0 && !c.can(ch.ID, discord.PermissionMoveMembers) {
 		states, _ := c.st.Cabinet.VoiceStates(ch.GuildID)
 		n := 0
 		for _, vs := range states {
@@ -322,7 +322,7 @@ func (c *chatView) joinVoice(ch discord.Channel) {
 	}
 	s := u.voiceSession(c.st)
 	muted, deafened := u.voice.muted, u.voice.deafened
-	canSpeak := !ch.GuildID.IsValid() || c.st.HasPermissions(ch.ID, discord.PermissionSpeak|discord.PermissionUseVAD)
+	canSpeak := !ch.GuildID.IsValid() || c.can(ch.ID, discord.PermissionSpeak|discord.PermissionUseVAD)
 	go func() {
 		// Joining leaves the user muted; the buttons' choice applies after.
 		err := s.Join(ch.ID)
