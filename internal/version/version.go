@@ -3,7 +3,7 @@ package version
 
 // Version is overridden by release builds with -ldflags -X.
 // Development builds must not identify themselves as an older stable release.
-var Version = "v1.4.3-dev"
+var Version = "v1.4.4-dev"
 
 func String() string {
 	return Version
