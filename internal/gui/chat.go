@@ -66,8 +66,9 @@ type channelRow struct {
 	label string
 	// user is who a voice member row stands for.
 	user discord.UserID
-	// muted reports whether a voice member is muted or deafened.
-	muted bool
+	// muted reports whether a voice member is muted or deafened, and deaf
+	// whether deafened.
+	muted, deaf bool
 	// avatar is the picture of a voice member, "" when it isn't known.
 	avatar string
 }
@@ -254,6 +255,9 @@ func (c *chatView) close() {
 		return
 	}
 	c.closed = true
+	// A call does not outlive the session it belongs to.
+	c.u.leaveVoice()
+	c.u.voice.demoChannel = 0
 	c.stopEvents()
 	close(c.done)
 	st := c.st
@@ -418,6 +422,7 @@ func (c *chatView) rebuildRows() {
 						user:   vs.UserID,
 						label:  c.memberName(c.selGuild, vs.UserID, vs.Member),
 						muted:  vs.Mute || vs.SelfMute || vs.Deaf || vs.SelfDeaf,
+						deaf:   vs.Deaf || vs.SelfDeaf,
 						avatar: c.voiceAvatarURL(c.selGuild, vs),
 					})
 				}
@@ -987,10 +992,13 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Flexed(1, oneLine(label(th, 14, col, r.label)).Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !r.muted {
-						return layout.Dimensions{}
+					switch {
+					case r.deaf:
+						return icon(gtx, iconDeafened, 14, colorRed)
+					case r.muted:
+						return icon(gtx, iconMicOff, 14, colorRed)
 					}
-					return icon(gtx, iconMicOff, 14, colorRed)
+					return layout.Dimensions{}
 				}),
 			)
 		})
