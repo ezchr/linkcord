@@ -69,12 +69,22 @@ func (v *videoViewer) run(ctx context.Context, u *ui) {
 		fail(err)
 		return
 	}
-	path, err := downloadVideo(ctx, &http.Client{Timeout: 3 * time.Minute}, v.source)
+	stream, err := streamVideo(ctx, http.DefaultClient, v.source)
 	if err != nil {
 		fail(err)
 		return
 	}
-	defer removeVideoFile(path)
+	defer stream.Close()
+	path := stream.url
+	// A failed download is the better reason when the decoder gives up.
+	fail = func(err error) {
+		if ctx.Err() == nil {
+			if derr := stream.Error(); derr != nil {
+				err = derr
+			}
+			v.setStatus(u, err.Error(), true)
+		}
+	}
 	meta, err := probeVideo(ctx, ffprobe, path)
 	if err != nil {
 		fail(err)

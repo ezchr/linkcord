@@ -22,12 +22,14 @@ type videoMetadata struct {
 }
 
 func probeVideo(ctx context.Context, executable, path string) (videoMetadata, error) {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	// A streamed video whose index sits at its end is probed once it has all
+	// downloaded, which the download limit bounds.
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, executable, "-v", "error",
-		"-protocol_whitelist", "file,pipe",
-		"-show_entries", "stream=codec_type,width,height,avg_frame_rate:stream_side_data=rotation",
-		"-of", "json", path)
+	args := append([]string{"-v", "error"}, mediaInput(path)...)
+	args = append(args, "-show_entries", "stream=codec_type,width,height,avg_frame_rate:stream_side_data=rotation",
+		"-of", "json")
+	cmd := exec.CommandContext(ctx, executable, args...)
 	hideMediaProcess(cmd)
 	data, err := cmd.Output()
 	if err != nil {
@@ -85,9 +87,41 @@ func probeVideo(ctx context.Context, executable, path string) (videoMetadata, er
 	return meta, nil
 }
 
+// streamFormats are the containers a streamed video may use; formats such as
+// playlists, which point the decoder at other addresses, are not allowed.
+const streamFormats = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,ogg,flv"
+
+// mediaInput gives the decoder its input: a local file, or a video streamed
+// from this program on the loopback address while it downloads.
+func mediaInput(path string) []string {
+	if strings.HasPrefix(path, "http://127.0.0.1:") {
+		return []string{"-protocol_whitelist", "http,tcp", "-format_whitelist", streamFormats, "-i", path}
+	}
+	return []string{"-protocol_whitelist", "file,pipe", "-i", path}
+}
+
+// videoBox is the largest frame decoded for the viewer, which never shows
+// videos much bigger; full 1080p frames are 8 MB each to copy and upload.
+const videoBoxLong, videoBoxShort = 1280, 720
+
+// scaled returns the frame size the video is decoded at: its own, or that
+// fitted in the box, kept even as the decoder wants.
+func (m videoMetadata) scaled() (int, int) {
+	boxW, boxH := videoBoxLong, videoBoxShort
+	if m.height > m.width {
+		boxW, boxH = boxH, boxW
+	}
+	if m.width <= boxW && m.height <= boxH {
+		return m.width, m.height
+	}
+	k := math.Min(float64(boxW)/float64(m.width), float64(boxH)/float64(m.height))
+	w := max(2, int(float64(m.width)*k)&^1)
+	h := max(2, int(float64(m.height)*k)&^1)
+	return w, h
+}
+
 func mediaDecodeCommand(ctx context.Context, executable, path string, output ...string) *exec.Cmd {
-	args := []string{"-nostdin", "-v", "error", "-threads", "2",
-		"-protocol_whitelist", "file,pipe", "-i", path}
+	args := append([]string{"-nostdin", "-v", "error", "-threads", "0"}, mediaInput(path)...)
 	args = append(args, output...)
 	cmd := exec.CommandContext(ctx, executable, args...)
 	hideMediaProcess(cmd)
@@ -99,7 +133,11 @@ func mediaDecodeCommand(ctx context.Context, executable, path string, output ...
 func decodeVideo(ctx context.Context, executable, path string, meta videoMetadata, publish func(*image.RGBA, time.Duration) error) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	width, height := meta.scaled()
 	filter := fmt.Sprintf("fps=%.9f", meta.fps)
+	if width != meta.width || height != meta.height {
+		filter += fmt.Sprintf(",scale=%d:%d:flags=bilinear", width, height)
+	}
 	cmd := mediaDecodeCommand(ctx, executable, path,
 		"-map", "0:v:0", "-an", "-sn", "-dn", "-vf", filter,
 		"-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1")
@@ -110,22 +148,42 @@ func decodeVideo(ctx context.Context, executable, path string, meta videoMetadat
 	if err := cmd.Start(); err != nil {
 		return errors.New("could not start video decoder")
 	}
-	var decodeErr error
-	for index := int64(0); ; index++ {
-		frame := image.NewRGBA(image.Rect(0, 0, meta.width, meta.height))
-		_, err := io.ReadFull(pipe, frame.Pix)
-		if err != nil {
-			if err != io.EOF {
-				decodeErr = errors.New("video decoding stopped unexpectedly")
+	// A few frames are read ahead, so that one slow to decode does not hold
+	// up the picture.
+	frames := make(chan *image.RGBA, 4)
+	var readErr error
+	go func() {
+		defer close(frames)
+		for {
+			frame := image.NewRGBA(image.Rect(0, 0, width, height))
+			if _, err := io.ReadFull(pipe, frame.Pix); err != nil {
+				if err != io.EOF {
+					readErr = errors.New("video decoding stopped unexpectedly")
+				}
+				return
 			}
-			break
+			select {
+			case frames <- frame:
+			case <-ctx.Done():
+				return
+			}
 		}
+	}()
+	var decodeErr error
+	index := int64(0)
+	for frame := range frames {
 		at := time.Duration(float64(index) * float64(time.Second) / meta.fps)
+		index++
 		if err := publish(frame, at); err != nil {
 			decodeErr = err
 			cancel()
 			break
 		}
+	}
+	for range frames {
+	}
+	if decodeErr == nil {
+		decodeErr = readErr
 	}
 	waitErr := cmd.Wait()
 	if ctx.Err() != nil {
