@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: Unlicense OR MIT
+image: debian/stable
+packages:
+ - curl
+ - pkg-config
+ - libwayland-dev
+ - libx11-dev
+ - libx11-xcb-dev
+ - libxkbcommon-dev
+ - libxkbcommon-x11-dev
+ - libgles2-mesa-dev
+ - libegl1-mesa-dev
+ - libffi-dev
+ - libxcursor-dev
+ - libxrandr-dev
+ - libxinerama-dev
+ - libxi-dev
+ - libxxf86vm-dev
+ - libvulkan-dev
+ - wine
+ - xvfb
+ - xdotool
+ - scrot
+ - sway
+ - grim
+ - wine
+ - unzip
+sources:
+ - https://git.sr.ht/~whereswaldon/gio-x
+triggers:
+ - action: email
+   condition: failure
+   to: ~whereswaldon/public-inbox@lists.sr.ht
+environment:
+ GOFLAGS: -mod=readonly
+ PATH: /home/build/sdk/go/bin:/usr/bin:/home/build/go/bin
+ github_mirror: git@github.com:gioui/gio-x
+secrets:
+ - 4d571621-ab6e-457e-a8d9-a4fab24a9794
+tasks:
+ - install_go: |
+     mkdir -p /home/build/sdk
+     cd /home/build/sdk
+     curl -Lso go.tar.gz https://golang.org/dl/go1.21.0.linux-amd64.tar.gz
+     echo "d0398903a16ba2232b389fb31032ddf57cac34efda306a0eebac34f0965a0742 go.tar.gz" | sha256sum -c -
+     tar xzf go.tar.gz
+ - test_gio: |
+     cd gio-x
+     go test -race ./...
+ - check_gofmt: |
+     cd gio-x
+     test -z "$(gofmt -s -l .)"
+ - check_sign_off: |
+     set +x -e
+     cd gio-x
+     for hash in $(git log -n 10 --format="%H"); do
+        message=$(git log -1 --format=%B $hash)
+        if [[ ! "$message" =~ "Signed-off-by: " ]]; then
+            echo "Missing 'Signed-off-by' in commit $hash"
+            exit 1
+        fi
+     done
+ - mirror: |
+     # mirror to github
+     ssh-keyscan github.com > "$HOME"/.ssh/known_hosts && cd gio-x && git push --mirror "$github_mirror" || echo "failed mirroring"

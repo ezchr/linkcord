@@ -1,0 +1,280 @@
+Only in gioui.org@v0.10.3: .gitattributes
+diff -ru --strip-trailing-cr gioui.org@v0.10.3/app/d3d11_windows.go third_party/gioui/app/d3d11_windows.go
+--- gioui.org@v0.10.3/app/d3d11_windows.go	2026-10-12 18:31:05.392256600 -0500
++++ third_party/gioui/app/d3d11_windows.go	2026-10-12 18:34:02.948857800 -0500
+@@ -4,6 +4,7 @@
+ 
+ import (
+ 	"fmt"
++	"os"
+ 	"unsafe"
+ 
+ 	"gioui.org/gpu"
+@@ -35,8 +36,22 @@
+ 				d3d11.DRIVER_TYPE_HARDWARE,
+ 				flags,
+ 			)
+-			if err != nil {
+-				return nil, fmt.Errorf("NewContext: %v", err)
++			if err != nil || os.Getenv("GIO_D3D11_WARP") == "1" {
++				// Old machines without a Direct3D 11 capable driver, such as
++				// many Windows 7 installs and virtual machines, can still
++				// render with the WARP software rasterizer.
++				if dev != nil {
++					d3d11.IUnknownRelease(unsafe.Pointer(ctx), ctx.Vtbl.Release)
++					d3d11.IUnknownRelease(unsafe.Pointer(dev), dev.Vtbl.Release)
++				}
++				var werr error
++				dev, ctx, _, werr = d3d11.CreateDevice(d3d11.DRIVER_TYPE_WARP, flags)
++				if werr != nil {
++					if err == nil {
++						err = werr
++					}
++					return nil, fmt.Errorf("NewContext: %v", err)
++				}
+ 			}
+ 			swchain, err := d3d11.CreateSwapChain(dev, hwnd)
+ 			if err != nil {
+diff -ru --strip-trailing-cr gioui.org@v0.10.3/app/internal/windows/windows.go third_party/gioui/app/internal/windows/windows.go
+--- gioui.org@v0.10.3/app/internal/windows/windows.go	2026-10-12 18:31:05.417427300 -0500
++++ third_party/gioui/app/internal/windows/windows.go	2026-10-12 18:33:09.360546100 -0500
+@@ -6,6 +6,7 @@
+ 
+ import (
+ 	"fmt"
++	"os"
+ 	"runtime"
+ 	"time"
+ 	"unicode/utf16"
+@@ -377,6 +378,15 @@
+ 	WM_QUIT                  = 0x0012
+ 	WM_RBUTTONDOWN           = 0x0204
+ 	WM_RBUTTONUP             = 0x0205
++	WM_XBUTTONDOWN           = 0x020B
++	WM_XBUTTONUP             = 0x020C
++	WM_CAPTURECHANGED        = 0x0215
++
++	MK_LBUTTON  = 0x0001
++	MK_RBUTTON  = 0x0002
++	MK_MBUTTON  = 0x0010
++	MK_XBUTTON1 = 0x0020
++	MK_XBUTTON2 = 0x0040
+ 	WM_SETCURSOR             = 0x0020
+ 	WM_SETFOCUS              = 0x0007
+ 	WM_SHOWWINDOW            = 0x0018
+@@ -491,6 +501,7 @@
+ 	_SetForegroundWindow          = user32.NewProc("SetForegroundWindow")
+ 	_SetFocus                     = user32.NewProc("SetFocus")
+ 	_SetThreadDpiAwarenessContext = user32.NewProc("SetThreadDpiAwarenessContext")
++	_SetProcessDPIAware           = user32.NewProc("SetProcessDPIAware")
+ 	_SetTimer                     = user32.NewProc("SetTimer")
+ 	_SetWindowLong                = user32.NewProc("SetWindowLongPtrW")
+ 	_SetWindowLong32              = user32.NewProc("SetWindowLongW")
+@@ -575,7 +586,20 @@
+ 	return nil
+ }
+ 
++// HasPointerAPI reports whether the WM_POINTER input API, introduced in
++// Windows 8, is available. Setting GIO_LEGACY_MOUSE=1 forces it off so the
++// Windows 7 mouse path can be tested on newer systems.
++func HasPointerAPI() bool {
++	if os.Getenv("GIO_LEGACY_MOUSE") == "1" {
++		return false
++	}
++	return _EnableMouseInPointer.Find() == nil && _GetPointerInfo.Find() == nil
++}
++
+ func EnableMouseInPointer(enable uint) error {
++	if err := _EnableMouseInPointer.Find(); err != nil {
++		return err
++	}
+ 	r1, _, err := _EnableMouseInPointer.Call(uintptr(enable))
+ 	if r1 == 0 {
+ 		return fmt.Errorf("EnableMouseInPointer failed: %v", err)
+@@ -955,7 +979,13 @@
+ }
+ 
+ func SetThreadDpiAwarenessContext() {
+-	_SetThreadDpiAwarenessContext.Call(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
++	// SetThreadDpiAwarenessContext was introduced in Windows 10; fall back
++	// to the system-wide DPI awareness of Windows Vista and 7.
++	if _SetThreadDpiAwarenessContext.Find() == nil {
++		_SetThreadDpiAwarenessContext.Call(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
++	} else if _SetProcessDPIAware.Find() == nil {
++		_SetProcessDPIAware.Call()
++	}
+ }
+ 
+ func SetCapture(hwnd syscall.Handle) syscall.Handle {
+diff -ru --strip-trailing-cr gioui.org@v0.10.3/app/os_windows.go third_party/gioui/app/os_windows.go
+--- gioui.org@v0.10.3/app/os_windows.go	2026-10-12 18:31:05.451707800 -0500
++++ third_party/gioui/app/os_windows.go	2026-10-12 18:33:49.943962200 -0500
+@@ -54,6 +54,14 @@
+ 	// frameDims stores the last seen window frame width and height.
+ 	frameDims image.Point
+ 	loop      *eventLoop
++
++	// legacyMouse reports whether mouse input arrives as the WM_MOUSE*
++	// messages of Windows 7 instead of the WM_POINTER* messages of
++	// Windows 8 and later.
++	legacyMouse bool
++	// legacyCapture reports whether the window captured the mouse for a
++	// legacy button press that is not yet released.
++	legacyCapture bool
+ }
+ 
+ const _WM_WAKEUP = windows.WM_USER + iota
+@@ -201,11 +209,15 @@
+ 	if err != nil {
+ 		return err
+ 	}
+-	if err := windows.RegisterTouchWindow(hwnd, 0); err != nil {
+-		return err
+-	}
+-	if err := windows.EnableMouseInPointer(1); err != nil {
+-		return err
++	if windows.HasPointerAPI() {
++		if err := windows.RegisterTouchWindow(hwnd, 0); err != nil {
++			return err
++		}
++		if err := windows.EnableMouseInPointer(1); err != nil {
++			return err
++		}
++	} else {
++		w.legacyMouse = true
+ 	}
+ 	w.hdc, err = windows.GetDC(hwnd)
+ 	if err != nil {
+@@ -362,6 +374,48 @@
+ 		w.scrollEvent(wParam, lParam, false, getModifiers())
+ 	case windows.WM_POINTERHWHEEL:
+ 		w.scrollEvent(wParam, lParam, true, getModifiers())
++	case windows.WM_MOUSEMOVE,
++		windows.WM_LBUTTONDOWN, windows.WM_LBUTTONUP,
++		windows.WM_RBUTTONDOWN, windows.WM_RBUTTONUP,
++		windows.WM_MBUTTONDOWN, windows.WM_MBUTTONUP,
++		windows.WM_XBUTTONDOWN, windows.WM_XBUTTONUP:
++		if !w.legacyMouse {
++			break
++		}
++		kind := pointer.Move
++		switch msg {
++		case windows.WM_LBUTTONDOWN, windows.WM_RBUTTONDOWN, windows.WM_MBUTTONDOWN, windows.WM_XBUTTONDOWN:
++			kind = pointer.Press
++			w.legacyCapture = true
++			windows.SetCapture(w.hwnd)
++		case windows.WM_LBUTTONUP, windows.WM_RBUTTONUP, windows.WM_MBUTTONUP, windows.WM_XBUTTONUP:
++			kind = pointer.Release
++			if getLegacyButtons(wParam) == 0 && w.legacyCapture {
++				w.legacyCapture = false
++				windows.ReleaseCapture()
++			}
++		}
++		w.legacyPointerUpdate(kind, wParam, lParam)
++		if msg == windows.WM_XBUTTONDOWN || msg == windows.WM_XBUTTONUP {
++			// XBUTTON messages must return TRUE when handled.
++			return 1
++		}
++		return 0
++	case windows.WM_CAPTURECHANGED:
++		// Another window took the mouse in the middle of a press.
++		if w.legacyMouse && w.legacyCapture && syscall.Handle(lParam) != w.hwnd {
++			w.legacyCapture = false
++			w.ProcessEvent(pointer.Event{
++				Kind:   pointer.Cancel,
++				Source: pointer.Mouse,
++			})
++		}
++	case windows.WM_MOUSEWHEEL, windows.WM_MOUSEHWHEEL:
++		if !w.legacyMouse {
++			break
++		}
++		w.legacyScrollEvent(wParam, lParam, msg == windows.WM_MOUSEHWHEEL, getModifiers())
++		return 0
+ 	case windows.WM_DESTROY:
+ 		w.ProcessEvent(Win32ViewEvent{})
+ 		w.ProcessEvent(DestroyEvent{})
+@@ -714,6 +768,72 @@
+ 	})
+ }
+ 
++// legacyPointerUpdate processes a Windows 7 WM_MOUSEMOVE or WM_*BUTTON*
++// message, whose coordinates are in client space.
++func (w *window) legacyPointerUpdate(kind pointer.Kind, wParam, lParam uintptr) {
++	if kind == pointer.Press && !w.config.Focused {
++		windows.SetFocus(w.hwnd)
++	}
++	x, y := coordsFromlParam(lParam)
++	w.ProcessEvent(pointer.Event{
++		Kind:      kind,
++		Source:    pointer.Mouse,
++		Position:  f32.Point{X: float32(x), Y: float32(y)},
++		Buttons:   getLegacyButtons(wParam),
++		Time:      windows.GetMessageTime(),
++		Modifiers: getModifiers(),
++	})
++}
++
++// legacyScrollEvent processes a Windows 7 WM_MOUSEWHEEL or WM_MOUSEHWHEEL
++// message, whose coordinates are in screen space.
++func (w *window) legacyScrollEvent(wParam, lParam uintptr, horizontal bool, kmods key.Modifiers) {
++	x, y := coordsFromlParam(lParam)
++	np := windows.Point{X: int32(x), Y: int32(y)}
++	windows.ScreenToClient(w.hwnd, &np)
++	dist := float32(int16(wParam >> 16))
++	var sp f32.Point
++	if horizontal {
++		sp.X = dist
++	} else if kmods == key.ModShift {
++		sp.X = -dist
++	} else {
++		sp.Y = -dist
++	}
++	w.ProcessEvent(pointer.Event{
++		Kind:      pointer.Scroll,
++		Source:    pointer.Mouse,
++		Position:  f32.Point{X: float32(np.X), Y: float32(np.Y)},
++		Buttons:   getLegacyButtons(wParam),
++		Scroll:    sp,
++		Modifiers: kmods,
++		Time:      windows.GetMessageTime(),
++	})
++}
++
++// getLegacyButtons returns the buttons held according to the MK_* flags in
++// the low word of wParam of a Windows 7 mouse message.
++func getLegacyButtons(wParam uintptr) pointer.Buttons {
++	var btns pointer.Buttons
++	flags := wParam & 0xffff
++	if flags&windows.MK_LBUTTON != 0 {
++		btns |= pointer.ButtonPrimary
++	}
++	if flags&windows.MK_RBUTTON != 0 {
++		btns |= pointer.ButtonSecondary
++	}
++	if flags&windows.MK_MBUTTON != 0 {
++		btns |= pointer.ButtonTertiary
++	}
++	if flags&windows.MK_XBUTTON1 != 0 {
++		btns |= pointer.ButtonQuaternary
++	}
++	if flags&windows.MK_XBUTTON2 != 0 {
++		btns |= pointer.ButtonQuinary
++	}
++	return btns
++}
++
+ // Adapted from https://blogs.msdn.microsoft.com/oldnewthing/20060126-00/?p=32513/
+ func (w *window) runLoop() {
+ 	msg := new(windows.Msg)
+diff -ru --strip-trailing-cr gioui.org@v0.10.3/internal/d3d11/d3d11_windows.go third_party/gioui/internal/d3d11/d3d11_windows.go
+--- gioui.org@v0.10.3/internal/d3d11/d3d11_windows.go	2026-10-12 18:31:05.683183800 -0500
++++ third_party/gioui/internal/d3d11/d3d11_windows.go	2026-10-12 18:33:58.074523500 -0500
+@@ -634,6 +634,7 @@
+ const (
+ 	SDK_VERSION          = 7
+ 	DRIVER_TYPE_HARDWARE = 1
++	DRIVER_TYPE_WARP     = 5
+ 
+ 	DXGI_FORMAT_UNKNOWN             = 0
+ 	DXGI_FORMAT_R16_FLOAT           = 54

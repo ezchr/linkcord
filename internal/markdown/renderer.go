@@ -1,0 +1,287 @@
+package markdown
+
+import (
+	"strconv"
+	"strings"
+
+	"github.com/alecthomas/chroma/v2"
+	"github.com/alecthomas/chroma/v2/lexers"
+	"github.com/alecthomas/chroma/v2/styles"
+	md "github.com/ayn2op/arikawa/v3/markdown"
+	"github.com/ayn2op/discordo/internal/config"
+	"github.com/ayn2op/tview"
+	"github.com/ayn2op/tview/richtext"
+	"github.com/gdamore/tcell/v3"
+	"github.com/yuin/goldmark/ast"
+)
+
+type Renderer struct {
+	cfg *config.Config
+
+	listIx     *int
+	listNested int
+}
+
+const codeBlockIndent = "    "
+
+func NewRenderer(cfg *config.Config) *Renderer {
+	return &Renderer{cfg: cfg}
+}
+
+func (r *Renderer) RenderText(source []byte, node ast.Node, base tview.Style) richtext.Text {
+	r.listIx = nil
+	r.listNested = 0
+
+	builder := new(richtext.Builder)
+	styleStack := []tview.Style{base}
+	linkDepth := 0
+
+	currentStyle := func() tview.Style {
+		return styleStack[len(styleStack)-1]
+	}
+	pushStyle := func(style tview.Style) {
+		styleStack = append(styleStack, style)
+	}
+	popStyle := func() {
+		if len(styleStack) > 1 {
+			styleStack = styleStack[:len(styleStack)-1]
+		}
+	}
+
+	theme := r.cfg.Theme.MessagesList
+	_ = ast.Walk(node, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		switch node := node.(type) {
+		case *ast.Document:
+			// noop
+		case *ast.Heading:
+			if entering {
+				builder.Write(strings.Repeat("#", node.Level)+" ", currentStyle())
+			} else {
+				builder.NewLine()
+			}
+		case *ast.Text:
+			if entering {
+				builder.Write(string(node.Segment.Value(source)), currentStyle())
+				switch {
+				case node.HardLineBreak():
+					builder.NewLine()
+					builder.NewLine()
+				case node.SoftLineBreak():
+					builder.NewLine()
+				}
+			}
+		case *ast.FencedCodeBlock:
+			if entering {
+				builder.NewLine()
+				r.renderFencedCodeBlock(builder, source, node, currentStyle())
+			}
+		case *ast.AutoLink:
+			if entering {
+				url := string(node.URL(source))
+				style := tview.MergeStyle(currentStyle(), theme.URLStyle.Style).Url(url)
+				builder.Write(url, style)
+			}
+		case *ast.Link:
+			if entering {
+				url := string(node.Destination)
+				linkDepth++
+				pushStyle(tview.MergeStyle(currentStyle(), theme.URLStyle.Style).Url(url))
+			} else {
+				if linkDepth > 0 {
+					linkDepth--
+				}
+				popStyle()
+			}
+		case *ast.List:
+			if node.IsOrdered() {
+				start := node.Start
+				r.listIx = &start
+			} else {
+				r.listIx = nil
+			}
+
+			if entering {
+				builder.NewLine()
+				r.listNested++
+			} else {
+				r.listNested--
+			}
+		case *ast.ListItem:
+			if entering {
+				builder.Write(strings.Repeat("  ", r.listNested-1), currentStyle())
+				if r.listIx != nil {
+					builder.Write(strconv.Itoa(*r.listIx)+". ", currentStyle())
+					*r.listIx++
+				} else {
+					builder.Write("- ", currentStyle())
+				}
+			} else {
+				builder.NewLine()
+			}
+		case *md.Inline:
+			if r.cfg.Markdown.MaskSpoilers && node.Attr&md.AttrSpoiler != 0 {
+				if entering {
+					builder.Write("[spoiler]", currentStyle())
+				}
+				return ast.WalkSkipChildren, nil
+			}
+			if entering {
+				pushStyle(applyInlineAttr(currentStyle(), node.Attr, linkDepth > 0))
+			} else {
+				popStyle()
+			}
+		case *md.Mention:
+			if entering {
+				builder.Write(mentionText(node), tview.MergeStyle(currentStyle(), theme.MentionStyle.Style))
+			}
+		case *md.Emoji:
+			if entering {
+				builder.Write(":"+node.Name+":", tview.MergeStyle(currentStyle(), theme.EmojiStyle.Style))
+			}
+		}
+		return ast.WalkContinue, nil
+	})
+
+	return builder.Finish()
+}
+
+func (r *Renderer) renderFencedCodeBlock(builder *richtext.Builder, source []byte, node *ast.FencedCodeBlock, base tview.Style) {
+	var code strings.Builder
+	lines := node.Lines()
+	for i := range lines.Len() {
+		line := lines.At(i)
+		code.Write(line.Value(source))
+	}
+
+	language := strings.TrimSpace(string(node.Language(source)))
+	lexer := lexers.Get(language)
+	declaredLanguageSupported := lexer != nil
+
+	// Detect the language from its content.
+	var analyzed bool
+	if lexer == nil {
+		lexer = lexers.Analyse(code.String())
+		analyzed = lexer != nil
+	}
+	if lexer == nil {
+		lexer = lexers.Fallback
+	}
+
+	// Some lexers emit many tiny tokens; coalesce runs of the same type.
+	lexer = chroma.Coalesce(lexer)
+
+	var header string
+	switch {
+	case analyzed:
+		header = "code: analyzed"
+	case language == "":
+		header = "code"
+	case !declaredLanguageSupported:
+		header = "code: " + language
+	}
+	if header != "" {
+		builder.Write(codeBlockIndent+header, base.Dim(true))
+		builder.NewLine()
+	}
+
+	iterator, err := lexer.Tokenise(nil, code.String())
+	if err != nil {
+		for i := range lines.Len() {
+			line := lines.At(i)
+			builder.Write(codeBlockIndent+string(line.Value(source)), base)
+		}
+		return
+	}
+
+	theme := styles.Get(r.cfg.Markdown.Theme)
+	if theme == nil {
+		theme = styles.Fallback
+	}
+
+	builder.Write(codeBlockIndent, base)
+	for token := iterator(); token != chroma.EOF; token = iterator() {
+		style := applyChromaStyle(base, theme.Get(token.Type))
+		// Chroma tokens may include embedded newlines, so split and re-emit with indentation on each visual line.
+		parts := strings.Split(token.Value, "\n")
+		for i, part := range parts {
+			if i > 0 {
+				builder.NewLine()
+				builder.Write(codeBlockIndent, base)
+			}
+			if part != "" {
+				builder.Write(part, style)
+			}
+		}
+	}
+}
+
+func applyChromaStyle(base tview.Style, entry chroma.StyleEntry) tview.Style {
+	style := base
+	if entry.Colour.IsSet() {
+		style = style.Foreground(tcell.NewRGBColor(
+			int32(entry.Colour.Red()),
+			int32(entry.Colour.Green()),
+			int32(entry.Colour.Blue()),
+		))
+	}
+	// Token background colors are not applied, so code blocks keep the user's terminal/chat background.
+	switch entry.Bold {
+	case chroma.Yes:
+		style = style.Bold(true)
+	case chroma.No:
+		style = style.Bold(false)
+	}
+	switch entry.Italic {
+	case chroma.Yes:
+		style = style.Italic(true)
+	case chroma.No:
+		style = style.Italic(false)
+	}
+	switch entry.Underline {
+	case chroma.Yes:
+		style = style.Underline(true)
+	case chroma.No:
+		style = style.Underline(false)
+	}
+	return style
+}
+
+func mentionText(node *md.Mention) string {
+	switch {
+	case node.Channel != nil:
+		return "#" + node.Channel.Name
+	case node.GuildUser != nil:
+		name := node.GuildUser.DisplayOrUsername()
+		if member := node.GuildUser.Member; member != nil && member.Nick != "" {
+			name = member.Nick
+		}
+		return "@" + name
+	case node.GuildRole != nil:
+		return "@" + node.GuildRole.Name
+	default:
+		return ""
+	}
+}
+
+func applyInlineAttr(style tview.Style, attr md.Attribute, inLink bool) tview.Style {
+	if attr&md.AttrBold != 0 {
+		style = style.Bold(true)
+	}
+	if attr&md.AttrItalics != 0 {
+		style = style.Italic(true)
+	}
+	if attr&md.AttrUnderline != 0 {
+		style = style.Underline(true)
+	}
+	if attr&md.AttrStrikethrough != 0 {
+		style = style.StrikeThrough(true)
+	}
+	if attr&md.AttrMonospace != 0 {
+		// Avoid reverse-video inside links.
+		// Link labels like `hash` should still look like links, not highlighted blocks.
+		if !inLink {
+			style = style.Reverse(true)
+		}
+	}
+	return style
+}

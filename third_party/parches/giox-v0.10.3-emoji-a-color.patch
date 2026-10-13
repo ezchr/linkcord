@@ -1,0 +1,50 @@
+Only in gioui.org/x@v0.10.3: .gitignore
+diff -ru --strip-trailing-cr gioui.org/x@v0.10.3/styledtext/iterator.go third_party/giox/styledtext/iterator.go
+--- gioui.org/x@v0.10.3/styledtext/iterator.go	2026-10-12 19:44:30.836182100 -0500
++++ third_party/giox/styledtext/iterator.go	2026-10-12 20:15:51.259002600 -0500
+@@ -2,9 +2,11 @@
+ 
+ import (
+ 	"image"
++	"image/color"
+ 
+ 	"gioui.org/layout"
+ 	"gioui.org/op"
++	gioop "gioui.org/op"
+ 	"gioui.org/op/clip"
+ 	"gioui.org/op/paint"
+ 	"gioui.org/text"
+@@ -15,6 +17,9 @@
+ // textIterator computes the bounding box of and paints text. This iterator is
+ // specialized to laying out single lines of text.
+ type textIterator struct {
++	// color is the color of the text, set again after drawing bitmap glyphs,
++	// which replace the paint material.
++	color color.NRGBA
+ 	// viewport is the rectangle of document coordinates that the iterator is
+ 	// trying to fill with text.
+ 	viewport image.Rectangle
+@@ -145,6 +150,12 @@
+ 		op := clip.Outline{Path: shaper.Shape(line)}.Op().Push(gtx.Ops)
+ 		paint.PaintOp{}.Add(gtx.Ops)
+ 		op.Pop()
++		// Color emoji fonts have their glyphs as pictures, which the
++		// outline above leaves out.
++		if call := shaper.Bitmaps(line); call != (gioop.CallOp{}) {
++			call.Add(gtx.Ops)
++			paint.ColorOp{Color: it.color}.Add(gtx.Ops)
++		}
+ 		t.Pop()
+ 		line = line[:0]
+ 	}
+diff -ru --strip-trailing-cr gioui.org/x@v0.10.3/styledtext/styledtext.go third_party/giox/styledtext/styledtext.go
+--- gioui.org/x@v0.10.3/styledtext/styledtext.go	2026-10-12 19:44:30.837926500 -0500
++++ third_party/giox/styledtext/styledtext.go	2026-10-12 20:15:39.608696500 -0500
+@@ -122,6 +122,7 @@
+ 	ti := textIterator{
+ 		viewport: image.Rectangle{Max: gtx.Constraints.Max},
+ 		maxLines: 1,
++		color:    span.Color,
+ 	}
+ 
+ 	line := glyphs[:0]
