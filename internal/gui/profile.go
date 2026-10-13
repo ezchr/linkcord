@@ -26,6 +26,7 @@ import (
 var (
 	iconChevron = mustIcon(icons.NavigationChevronRight)
 	iconCopy    = mustIcon(icons.ContentContentCopy)
+	iconQuit    = mustIcon(icons.ActionPowerSettingsNew)
 	iconClose   = mustIcon(icons.NavigationClose)
 	iconMembers = mustIcon(icons.SocialPeople)
 )
@@ -86,6 +87,7 @@ type profileView struct {
 	message          widget.Clickable
 	copyID           widget.Clickable
 	logout           widget.Clickable
+	quit             widget.Clickable
 	statusBtn        widget.Clickable
 	performanceBtn   widget.Clickable
 	performanceError string
@@ -163,6 +165,11 @@ func (c *chatView) updateProfile(gtx layout.Context) {
 			c.setStatus(statusChoices[i].status)
 			p.statusMenu = false
 		}
+	}
+	if p.quit.Clicked(gtx) {
+		c.profile = nil
+		c.u.quit()
+		return
 	}
 	if p.logout.Clicked(gtx) {
 		c.profile = nil
@@ -719,6 +726,7 @@ func (c *chatView) layoutSelfMenu(gtx layout.Context, p *profileView) layout.Dim
 				}, performanceText, colorText, false),
 				layout.Rigid(label(th, 11, colorMuted, "On uses still GIF/APNG previews.").Layout),
 				item(&p.copyID, func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconCopy, 18, colorMuted) }, copyTxt, colorText, false),
+				item(&p.quit, func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconQuit, 18, colorMuted) }, "Quit "+appName, colorText, false),
 				item(&p.logout, func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconLogout, 18, colorRed) }, "Log out", colorRed, false),
 			)
 		})

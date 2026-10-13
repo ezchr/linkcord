@@ -27,6 +27,7 @@ Linkcord was created for people on Windows 7 who can no longer run the official 
 | React, reply, edit, copy, delete, and inline reaction controls | |
 | Bot buttons, select menus, and forms; components V2 layouts; embeds with formatting, fields, authors, and footers | Multi-value select menus |
 | Server boost goal, boost levels and perks, and scheduled events | |
+| Closing the window keeps Linkcord running, voice included, with an icon in the notification area; clicking it, or starting Linkcord again, brings the window back, and its menu or the profile menu quits | |
 | English interface and project documentation | Testing on a physical Windows 7 machine |
 
 Shift-click Delete skips confirmation. Up Arrow in an empty composer edits your most recent message.

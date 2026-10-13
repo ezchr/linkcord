@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	"gioui.org/app"
 	"gioui.org/layout"
@@ -23,6 +24,7 @@ import (
 	"github.com/ayn2op/ningen/v3"
 	"github.com/ezchr/linkcord/internal/auth"
 	"github.com/ezchr/linkcord/internal/logger"
+	"github.com/ezchr/linkcord/internal/tray"
 )
 
 const appName = "Linkcord"
@@ -108,6 +110,13 @@ type ui struct {
 	voice  voiceState
 	images *images
 
+	// tray is the icon in the notification area, made when the window is
+	// first closed, and trayHinted reports whether its balloon was shown.
+	tray       *tray.Tray
+	trayHinted bool
+	// quitting is set to close Linkcord rather than hide it.
+	quitting atomic.Bool
+
 	// The connecting screen.
 	connectErr string
 	retry      widget.Clickable
@@ -160,7 +169,16 @@ func (u *ui) loop() error {
 	var ops op.Ops
 	for {
 		switch e := u.win.Event().(type) {
+		case *app.ClosingEvent:
+			// Closing the window leaves Linkcord running in the
+			// notification area, as Discord does, unless quitting.
+			if !u.quitting.Load() && u.hideToTray() {
+				e.Abort()
+			}
 		case app.DestroyEvent:
+			if u.tray != nil {
+				u.tray.Close()
+			}
 			if u.startup.cancel != nil {
 				u.startup.cancel()
 			}
@@ -342,4 +360,45 @@ func (u *ui) layoutConnecting(gtx layout.Context) layout.Dimensions {
 			}),
 		)
 	})
+}
+
+// hideToTray hides the window and shows Linkcord's icon in the
+// notification area, from which it opens again, as does starting it again.
+// It reports false when there is no icon to come back from.
+func (u *ui) hideToTray() bool {
+	if u.hwnd == 0 {
+		return false
+	}
+	if u.tray == nil {
+		t, err := tray.Start(appName, "Open "+appName, "Quit "+appName, u.showFromTray, u.quit)
+		if err != nil {
+			slog.Warn("could not make the notification area icon", "err", err)
+			return false
+		}
+		u.tray = t
+	}
+	hint := ""
+	if !u.trayHinted {
+		hint = appName + " is still running. Click its icon to open it, or right-click it to quit."
+		u.trayHinted = true
+	}
+	if err := u.tray.Show(appName, hint); err != nil {
+		slog.Warn("could not show the notification area icon", "err", err)
+		return false
+	}
+	tray.HideWindow(u.hwnd)
+	return true
+}
+
+// showFromTray shows the window again. It is called from the icon's thread.
+func (u *ui) showFromTray() {
+	tray.ShowWindow(u.hwnd)
+	u.win.Invalidate()
+}
+
+// quit closes Linkcord, leaving the voice channel and the icon. It may be
+// called from any goroutine.
+func (u *ui) quit() {
+	u.quitting.Store(true)
+	tray.CloseWindow(u.hwnd)
 }
