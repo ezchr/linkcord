@@ -715,6 +715,15 @@ func (w *window) pointerUpdate(pi windows.PointerInfo, pid pointer.ID, kind poin
 
 	x, y := coordsFromlParam(lParam)
 	np := windows.Point{X: int32(x), Y: int32(y)}
+	// While a mouse button is held, Windows can give the position unscaled
+	// for the display (1294 for a pointer at 1619 at 125%), in the message
+	// and the pointer's record alike, which made drags leap. The cursor's
+	// own position is in pixels.
+	if pi.PointerType == windows.PT_MOUSE {
+		if p, ok := windows.GetCursorPos(); ok {
+			np = p
+		}
+	}
 	windows.ScreenToClient(w.hwnd, &np)
 	p := f32.Point{X: float32(np.X), Y: float32(np.Y)}
 	w.ProcessEvent(pointer.Event{

@@ -492,6 +492,7 @@ var (
 	_RegisterTouchWindow          = user32.NewProc("RegisterTouchWindow")
 	_ReleaseDC                    = user32.NewProc("ReleaseDC")
 	_ScreenToClient               = user32.NewProc("ScreenToClient")
+	_GetCursorPos                 = user32.NewProc("GetCursorPos")
 	_ShowWindow                   = user32.NewProc("ShowWindow")
 	_IsIconic                     = user32.NewProc("IsIconic")
 	_SendMessage                  = user32.NewProc("SendMessageW")
@@ -1011,6 +1012,13 @@ func SetTimer(hwnd syscall.Handle, nIDEvent uintptr, uElapse uint32, timerProc u
 		return fmt.Errorf("SetTimer failed: %v", err)
 	}
 	return nil
+}
+
+// GetCursorPos is where the cursor is on the screen, in pixels.
+func GetCursorPos() (Point, bool) {
+	var p Point
+	r, _, _ := _GetCursorPos.Call(uintptr(unsafe.Pointer(&p)))
+	return p, r != 0
 }
 
 func ScreenToClient(hwnd syscall.Handle, p *Point) {
