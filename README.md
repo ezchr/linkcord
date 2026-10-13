@@ -22,6 +22,8 @@ Linkcord was created for people on Windows 7 who can no longer run the official 
 | Friends (online, all, pending, blocked), sending, accepting, and canceling friend requests, and message requests | |
 | Attachments, emoji picker, mention autocomplete, and typing indicators | |
 | Voice join/leave, mute/deafen, connection status, and speaking indicators | Verification in a real voice call |
+| Call view with a card for everyone in the channel, full screen, invite links, soundboard, and microphone/speaker choice | Camera, screen sharing, and activities |
+| Right-click menu on voice members: per-user volume and mute, notes, friends, blocking, roles, nicknames, server mute/deafen, move, disconnect, timeout, kick, and ban, as permissions allow | Ignore, apps, and moderator view |
 | React, reply, edit, copy, delete, and inline reaction controls | |
 | Bot buttons, select menus, and forms; components V2 layouts; embeds with formatting, fields, authors, and footers | Multi-value select menus |
 | Server boost goal, boost levels and perks, and scheduled events | |
@@ -161,7 +163,9 @@ Local application data:
 | `internal/gui/viewer.go` | Image viewing, zoom, and pan. |
 | `internal/gui/members.go` | Discord's lazy member list through ningen. |
 | `internal/gui/profile.go`, `presence.go` | Profile cards, status menus, activities, and presence indicators. |
-| `internal/gui/voice.go` | Voice controls and speaking indicators, backed by `internal/voice`. |
+| `internal/gui/voice.go` | Voice panel, controls, speaking indicators, and saved per-user volumes and devices, backed by `internal/voice`. |
+| `internal/gui/voicecall.go`, `voicemenu.go` | Call view, soundboard, device menu, and the right-click menu of voice members with its moderation actions. |
+| `internal/gui/menu.go` | Context menus opened at the pointer. |
 | `internal/gui/theme.go`, `widgets.go` | Colors, fonts, and shared interface components. |
 | `internal/gui/demo.go` | Account-free demo fixtures. |
 | `internal/gui/render_test.go`, `media_render_test.go` | Screenless interface rendering tests. |

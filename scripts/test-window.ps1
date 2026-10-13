@@ -6,7 +6,7 @@
 # Usage, from the repository:
 #   .\scripts\test-window.ps1 -Demo -Script { Start-Sleep 4; Snap "start"; MouseClick 500 632; TypeText "hello"; PressKey 0x0D; Snap "sent" }
 #
-# Inside -Script: MouseMove x y, MouseClick x y, MouseWheel x y delta (120 per
+# Inside -Script: MouseMove x y, MouseClick x y, RightClick x y, MouseWheel x y delta (120 per
 # notch, positive is up), TypeText "text", PressKey vk (0x0D Enter, 0x1B Esc),
 # Snap "name" (saves <Out>\<Tag>-<name>.png). Coordinates are in the client
 # area of the window.
@@ -53,6 +53,11 @@ function MouseClick($x, $y) {
 	MouseMove $x $y
 	Post 0x201 1 (MkLParam $x $y); Start-Sleep -Milliseconds 60
 	Post 0x202 0 (MkLParam $x $y); Start-Sleep -Milliseconds 250
+}
+function RightClick($x, $y) {
+	MouseMove $x $y
+	Post 0x204 2 (MkLParam $x $y); Start-Sleep -Milliseconds 60
+	Post 0x205 0 (MkLParam $x $y); Start-Sleep -Milliseconds 250
 }
 # WM_MOUSEWHEEL takes screen coordinates; these are only close to the client
 # ones, which is enough to land on the right area of a window near the corner.

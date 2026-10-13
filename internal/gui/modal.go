@@ -63,6 +63,12 @@ type modalView struct {
 	// texts are the paragraphs of a form that only explain.
 	texts []string
 
+	// local, if set, is given the answers in place of a bot, for the forms
+	// of the app itself; submitText names its button, red if danger.
+	local      func(values []string)
+	submitText string
+	danger     bool
+
 	submit, cancel widget.Clickable
 	list           widget.List
 	nonce          string
@@ -126,30 +132,40 @@ func (c *chatView) submitModal() {
 		return
 	}
 	var comps []map[string]any
+	var values []string
 	for _, f := range mv.fields {
 		var inner map[string]any
 		if f.text {
 			value := f.ed.Text()
+			values = append(values, value)
 			if f.required && strings.TrimSpace(value) == "" {
 				mv.err = fmt.Sprintf("“%s” is required.", f.label)
 				return
 			}
 			inner = map[string]any{"type": int(discord.TextInputComponentType), "custom_id": f.customID, "value": value}
 		} else {
-			values := []string{}
+			chosen := []string{}
 			if f.chosen >= 0 {
+				chosen = append(chosen, f.options[f.chosen].Value)
 				values = append(values, f.options[f.chosen].Value)
 			} else if f.required {
 				mv.err = fmt.Sprintf("Choose an option for “%s”.", f.label)
 				return
+			} else {
+				values = append(values, "")
 			}
-			inner = map[string]any{"type": int(discord.StringSelectComponentType), "custom_id": f.customID, "values": values}
+			inner = map[string]any{"type": int(discord.StringSelectComponentType), "custom_id": f.customID, "values": chosen}
 		}
 		if f.inLabel {
 			comps = append(comps, map[string]any{"type": int(discord.LabelComponentType), "component": inner})
 		} else {
 			comps = append(comps, map[string]any{"type": int(discord.ActionRowComponentType), "components": []any{inner}})
 		}
+	}
+	if mv.local != nil {
+		ip.modal = nil
+		mv.local(values)
+		return
 	}
 	mv.err, mv.sending = "", true
 	mv.nonce = newNonce()
@@ -239,6 +255,9 @@ func (c *chatView) layoutModal(gtx layout.Context) layout.Dimensions {
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16), Top: unit.Dp(16), Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					app := mv.ev.Application
+					if !app.ID.IsValid() {
+						return oneLine(bold(label(th, 18, colorHeader, mv.ev.Title))).Layout(gtx)
+					}
 					icon := ""
 					if app.Icon != "" {
 						icon = "https://cdn.discordapp.com/app-icons/" + app.ID.String() + "/" + app.Icon + ".png?size=64"
@@ -285,10 +304,17 @@ func (c *chatView) layoutModal(gtx layout.Context) layout.Dimensions {
 							layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 								txt := "Submit"
+								if mv.submitText != "" {
+									txt = mv.submitText
+								}
 								if mv.sending {
 									txt = "Sending…"
 								}
-								return button(gtx, th, &mv.submit, colorAccent, txt)
+								bg := colorAccent
+								if mv.danger {
+									bg = colorRed
+								}
+								return button(gtx, th, &mv.submit, bg, txt)
 							}),
 						)
 					})

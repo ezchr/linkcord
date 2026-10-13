@@ -1,12 +1,16 @@
 package gui
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -25,6 +29,7 @@ var (
 	iconHeadset  = mustIcon(icons.HardwareHeadset)
 	iconDeafened = mustIcon(icons.AVVolumeOff)
 	iconHangUp   = mustIcon(icons.CommunicationCallEnd)
+	iconSignal   = mustIcon(icons.DeviceSignalCellular4Bar)
 )
 
 // voiceSensitivity is how loud, in dB, the microphone must be for what it
@@ -42,15 +47,154 @@ type voiceState struct {
 	// apply to the next call joined.
 	muted, deafened bool
 
+	// settings are how loud each user is played and the devices chosen,
+	// kept between runs once loaded.
+	settings       voiceSettings
+	settingsLoaded bool
+	// inputs and outputs are the microphones and speakers to choose from.
+	inputs, outputs []voice.Device
+
 	// demoChannel is the voice channel joined in the demo, which has no
 	// session.
 	demoChannel discord.ChannelID
 
-	// err says why the last voice action failed, until errUntil.
+	// err says why the last voice action failed, or what it did if info,
+	// until errUntil.
 	err      string
+	info     bool
 	errUntil time.Time
 
-	muteBtn, deafBtn, leaveBtn widget.Clickable
+	muteBtn, deafBtn, leaveBtn                           widget.Clickable
+	channelBtn, camBtn, screenBtn, activityBtn, soundBtn widget.Clickable
+}
+
+// voiceSettings are what the user chose for voice channels, saved in
+// voice.json beside the log.
+type voiceSettings struct {
+	// Volumes are how loud users are played, from 0 to 2, for those not
+	// played as they are sent.
+	Volumes map[discord.UserID]float32 `json:"volumes,omitempty"`
+	// Muted are the users silenced for the user only.
+	Muted map[discord.UserID]bool `json:"muted,omitempty"`
+	// Input and Output are the IDs of the microphone and speakers chosen,
+	// "" for the default ones.
+	Input  string `json:"input,omitempty"`
+	Output string `json:"output,omitempty"`
+}
+
+func voiceSettingsPath() string {
+	return filepath.Join(filepath.Dir(logPath()), "voice.json")
+}
+
+// voiceSettings returns the settings, read from the disk the first time.
+func (u *ui) voiceSettings() *voiceSettings {
+	v := &u.voice
+	if !v.settingsLoaded {
+		v.settingsLoaded = true
+		if data, err := os.ReadFile(voiceSettingsPath()); err == nil {
+			if err := json.Unmarshal(data, &v.settings); err != nil {
+				slog.Warn("could not read the voice settings", "err", err)
+			}
+		}
+		if v.settings.Volumes == nil {
+			v.settings.Volumes = make(map[discord.UserID]float32)
+		}
+		if v.settings.Muted == nil {
+			v.settings.Muted = make(map[discord.UserID]bool)
+		}
+	}
+	return &v.settings
+}
+
+// saveVoiceSettings writes the settings to the disk.
+func (u *ui) saveVoiceSettings() {
+	data, err := json.Marshal(u.voiceSettings())
+	if err != nil {
+		return
+	}
+	path := voiceSettingsPath()
+	go func() {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err == nil {
+			err = os.WriteFile(path, data, 0o600)
+		}
+		if err != nil {
+			slog.Warn("could not save the voice settings", "err", err)
+		}
+	}()
+}
+
+// userVolume is how loud the user is played, from 0 to 2.
+func (u *ui) userVolume(id discord.UserID) float32 {
+	if vol, ok := u.voiceSettings().Volumes[id]; ok {
+		return vol
+	}
+	return 1
+}
+
+// setUserVolume plays the user vol times as loud as they are sent. Close to
+// 1, it snaps to 1, as Discord's slider does.
+func (u *ui) setUserVolume(id discord.UserID, vol float32) {
+	vol = min(max(vol, 0), 2)
+	if vol > 0.96 && vol < 1.04 {
+		vol = 1
+	}
+	s := u.voiceSettings()
+	if vol == 1 {
+		delete(s.Volumes, id)
+	} else {
+		s.Volumes[id] = vol
+	}
+	u.applyVolume(id)
+}
+
+// toggleLocalMute silences the user for the user only, or stops.
+func (u *ui) toggleLocalMute(id discord.UserID) {
+	s := u.voiceSettings()
+	if s.Muted[id] {
+		delete(s.Muted, id)
+	} else {
+		s.Muted[id] = true
+	}
+	u.applyVolume(id)
+	u.saveVoiceSettings()
+}
+
+// applyVolume plays the user as loud as chosen.
+func (u *ui) applyVolume(id discord.UserID) {
+	s := u.voice.session
+	if s == nil {
+		return
+	}
+	vol := u.userVolume(id)
+	if u.voiceSettings().Muted[id] {
+		vol = 0
+	}
+	s.SetVolume(id, vol)
+}
+
+// loadDevices lists the microphones and speakers to choose from.
+func (u *ui) loadDevices() {
+	inputs, outputs, err := voice.Devices()
+	if err != nil {
+		slog.Warn("could not list the audio devices", "err", err)
+		return
+	}
+	u.voice.inputs, u.voice.outputs = inputs, outputs
+}
+
+// setDevices captures the microphone with the ID input and plays on the
+// speakers with the ID output, "" being the default ones.
+func (u *ui) setDevices(input, output string) {
+	s := u.voiceSettings()
+	s.Input, s.Output = input, output
+	u.saveVoiceSettings()
+	if vs := u.voice.session; vs != nil {
+		go func() {
+			if err := vs.SetDevices(input, output); err != nil {
+				u.post(func() { u.voiceFailed("Could not change the audio device", err) })
+			}
+		}()
+	}
 }
 
 // voiceStatus is the voice channel joined or being joined, and whether it
@@ -78,9 +222,28 @@ func (u *ui) voiceSpeaking(id discord.UserID) bool {
 // voiceFailed shows why a voice action failed for a while.
 func (u *ui) voiceFailed(what string, err error) {
 	slog.Warn("voice action failed", "what", what, "err", err)
-	u.voice.err = what + ": " + err.Error()
-	u.voice.errUntil = time.Now().Add(8 * time.Second)
-	time.AfterFunc(8*time.Second+100*time.Millisecond, u.win.Invalidate)
+	u.showVoiceMessage(what+": "+err.Error(), false, 8*time.Second)
+}
+
+// voiceInfo shows what a voice action did for a while.
+func (u *ui) voiceInfo(msg string) {
+	u.showVoiceMessage(msg, true, 4*time.Second)
+}
+
+func (u *ui) showVoiceMessage(msg string, info bool, d time.Duration) {
+	u.voice.err, u.voice.info = msg, info
+	u.voice.errUntil = time.Now().Add(d)
+	time.AfterFunc(d+100*time.Millisecond, u.win.Invalidate)
+}
+
+// voiceMessage is what the last voice action said, while it shows, and
+// whether it failed.
+func (u *ui) voiceMessage() (msg string, failed bool) {
+	v := &u.voice
+	if v.err == "" || !time.Now().Before(v.errUntil) {
+		return "", false
+	}
+	return v.err, !v.info
 }
 
 // voiceSession returns the session for st, made on first use.
@@ -90,6 +253,16 @@ func (u *ui) voiceSession(st *ningen.State) *voice.Session {
 		return v.session
 	}
 	v.session, v.st = voice.New(st.State, voiceSensitivity), st
+	settings := u.voiceSettings()
+	if err := v.session.SetDevices(settings.Input, settings.Output); err != nil {
+		slog.Warn("could not choose the audio devices", "err", err)
+	}
+	for id := range settings.Volumes {
+		u.applyVolume(id)
+	}
+	for id := range settings.Muted {
+		u.applyVolume(id)
+	}
 	updates := v.session.Updates()
 	go func() {
 		// The status and who speaks are read while laying out.
@@ -102,7 +275,7 @@ func (u *ui) voiceSession(st *ningen.State) *voice.Session {
 
 // joinable reports why the user cannot join ch, if they cannot.
 func (c *chatView) joinable(ch discord.Channel) error {
-	if c.demo {
+	if c.demo || !ch.GuildID.IsValid() {
 		return nil
 	}
 	if !c.st.HasPermissions(ch.ID, discord.PermissionConnect) {
@@ -140,7 +313,7 @@ func (c *chatView) joinVoice(ch discord.Channel) {
 	}
 	s := u.voiceSession(c.st)
 	muted, deafened := u.voice.muted, u.voice.deafened
-	canSpeak := c.st.HasPermissions(ch.ID, discord.PermissionSpeak|discord.PermissionUseVAD)
+	canSpeak := !ch.GuildID.IsValid() || c.st.HasPermissions(ch.ID, discord.PermissionSpeak|discord.PermissionUseVAD)
 	go func() {
 		// Joining leaves the user muted; the buttons' choice applies after.
 		err := s.Join(ch.ID)
@@ -228,6 +401,27 @@ func (u *ui) updateVoice(gtx layout.Context) {
 	if v.leaveBtn.Clicked(gtx) {
 		u.leaveVoice()
 	}
+	c := u.chat
+	if c == nil {
+		return
+	}
+	if v.channelBtn.Clicked(gtx) {
+		if ch, err := c.st.Cabinet.Channel(u.voiceChannel()); err == nil {
+			c.openCall(*ch)
+		}
+	}
+	if v.camBtn.Clicked(gtx) {
+		u.voiceInfo("The camera is not supported yet")
+	}
+	if v.screenBtn.Clicked(gtx) {
+		u.voiceInfo("Screen sharing is not supported yet")
+	}
+	if v.activityBtn.Clicked(gtx) {
+		u.voiceInfo("Activities only work in Discord's own app")
+	}
+	if v.soundBtn.Clicked(gtx) {
+		c.openSoundboard()
+	}
 }
 
 // syncDemoVoice shows the user's mute and deafen in the demo's channel list.
@@ -240,18 +434,17 @@ func (u *ui) syncDemoVoice() {
 }
 
 // layoutVoicePanel is the box above the user's name while in a voice
-// channel: where, how well connected, and the button to hang up. It also
-// says why a voice action failed.
+// channel, as Discord's: how well connected, the channel, whose name opens
+// the call, the button to hang up, and those of the camera, the screen, the
+// activities and the soundboard. It also says what the last voice action
+// did, or why it failed.
 func (u *ui) layoutVoicePanel(gtx layout.Context) layout.Dimensions {
 	u.updateVoice(gtx)
 	th := u.th
 	v := &u.voice
 	status := u.voiceStatus()
-	errMsg := ""
-	if v.err != "" && time.Now().Before(v.errUntil) {
-		errMsg = v.err
-	}
-	if !status.ChannelID.IsValid() && errMsg == "" {
+	msg, failed := u.voiceMessage()
+	if !status.ChannelID.IsValid() && msg == "" {
 		return layout.Dimensions{}
 	}
 
@@ -263,7 +456,7 @@ func (u *ui) layoutVoicePanel(gtx layout.Context) layout.Dimensions {
 		if status.ChannelID.IsValid() {
 			title, col := "Connecting…", colorYellow
 			if status.Joined {
-				title, col = "Voice connected", colorGreen
+				title, col = "Voice Connected", colorGreen
 			}
 			where := "Voice channel"
 			if ch, err := u.chat.st.Cabinet.Channel(status.ChannelID); err == nil {
@@ -281,8 +474,24 @@ func (u *ui) layoutVoicePanel(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-							layout.Rigid(oneLine(bold(label(th, 14, col, title))).Layout),
-							layout.Rigid(oneLine(label(th, 12, colorMuted, where)).Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconSignal, 16, col) }),
+									layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
+									layout.Flexed(1, oneLine(bold(label(th, 14, col, title))).Layout),
+								)
+							}),
+							// The channel opens the call in the middle.
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return v.channelBtn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									pointer.CursorPointer.Add(gtx.Ops)
+									c := colorMuted
+									if v.channelBtn.Hovered() {
+										c = colorText
+									}
+									return oneLine(label(th, 12, c, where)).Layout(gtx)
+								})
+							}),
 						)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -290,9 +499,29 @@ func (u *ui) layoutVoicePanel(gtx layout.Context) layout.Dimensions {
 					}),
 				)
 			}))
+			rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					gap := layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout)
+					return layout.Flex{}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return panelButton(gtx, &v.camBtn, iconCamera) }),
+						gap,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return panelButton(gtx, &v.screenBtn, iconScreen) }),
+						gap,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return panelButton(gtx, &v.activityBtn, iconActivity) }),
+						gap,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return panelButton(gtx, &v.soundBtn, iconSoundboard) }),
+					)
+				})
+			}))
 		}
-		if errMsg != "" {
-			rows = append(rows, layout.Rigid(label(th, 12, colorRed, errMsg).Layout))
+		if msg != "" {
+			col := colorText
+			if failed {
+				col = colorRed
+			}
+			rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, label(th, 12, col, msg).Layout)
+			}))
 		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
 	})
@@ -303,6 +532,22 @@ func (u *ui) layoutVoicePanel(gtx layout.Context) layout.Dimensions {
 	paint.FillShape(gtx.Ops, colorSidebar, clip.Rect{Min: image.Pt(0, size.Y-1), Max: size}.Op())
 	call.Add(gtx.Ops)
 	return layout.Dimensions{Size: size}
+}
+
+// panelButton is a button of the voice panel: ic on a gray patch as wide as
+// it is given.
+func panelButton(gtx layout.Context, click *widget.Clickable, ic *widget.Icon) layout.Dimensions {
+	return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		pointer.CursorPointer.Add(gtx.Ops)
+		size := image.Pt(gtx.Constraints.Max.X, gtx.Dp(32))
+		bg := colorInput
+		if click.Hovered() {
+			bg = colorSelected
+		}
+		paint.FillShape(gtx.Ops, bg, clip.UniformRRect(image.Rectangle{Max: size}, gtx.Dp(6)).Op(gtx.Ops))
+		gtx.Constraints = layout.Exact(size)
+		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return icon(gtx, ic, 18, colorText) })
+	})
 }
 
 // layoutVoiceButtons are the microphone and sound buttons beside the user's

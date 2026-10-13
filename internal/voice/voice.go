@@ -20,3 +20,11 @@ type PlayerStatus struct {
 	Position time.Duration
 	Playing  bool
 }
+
+// Device is a microphone or speakers.
+type Device struct {
+	// ID tells the device from the others for as long as it is plugged in.
+	ID      string
+	Name    string
+	Default bool
+}

@@ -3,7 +3,9 @@ package gui
 import (
 	"cmp"
 	"context"
+	"errors"
 	"image"
+	"io"
 	"log/slog"
 	"os"
 	"slices"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"gioui.org/app"
+	"gioui.org/io/clipboard"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
@@ -21,6 +24,7 @@ import (
 	"gioui.org/widget"
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/gateway"
+	"github.com/ayn2op/arikawa/v3/state/store"
 	"github.com/ayn2op/arikawa/v3/utils/handler"
 	"github.com/ayn2op/ningen/v3"
 	"github.com/ayn2op/ningen/v3/states/read"
@@ -194,6 +198,24 @@ type chatView struct {
 
 	// act is what can be done to messages: see actions.go.
 	act actionState
+
+	// call is the voice channel open in the middle, and sounds the sounds of
+	// the soundboard.
+	call   callView
+	sounds soundboard
+	// menu is the menu open at the pointer, if any, and umenu that of a user.
+	menu  menuState
+	umenu userMenu
+	// pointerAt is where the pointer is in the window, where menus open.
+	pointerAt image.Point
+	// rightTags watch right clicks on what has a menu, by name.
+	rightTags map[string]*int
+	// voiceClicks open the profiles of the people in voice channels.
+	voiceClicks map[discord.UserID]*widget.Clickable
+	// copyText is copied to the clipboard on the next frame.
+	copyText string
+	// demoNotes are the notes written in the demo.
+	demoNotes map[discord.UserID]string
 }
 
 // msgClickKey is the avatar (part 0) or the name (part 1) of a message.
@@ -236,6 +258,9 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 		profiles:    make(map[profileKey]*profileData),
 		userClicks:  make(map[discord.UserID]*widget.Clickable),
 		msgClicks:   make(map[msgClickKey]*widget.Clickable),
+		rightTags:   make(map[string]*int),
+		voiceClicks: make(map[discord.UserID]*widget.Clickable),
+		demoNotes:   make(map[discord.UserID]string),
 		richStates:  make(map[discord.MessageID]*richtextState),
 		textStates:  make(map[string]*richtextState),
 		revealed:    make(map[discord.MessageID]bool),
@@ -464,6 +489,7 @@ func (c *chatView) closeChannel() {
 	}
 	// Loads on their way for the channel are dropped when they arrive.
 	c.historyEpoch++
+	c.closeCall()
 	c.friends.page = homeNone
 	c.selChannel, c.messages = nil, nil
 	c.comp.files, c.comp.mentions, c.comp.mentionOn, c.comp.emoji = nil, nil, false, nil
@@ -674,6 +700,7 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 		c.refreshCancel = nil
 	}
 	c.historyEpoch++
+	c.closeCall()
 	c.friends.page = homeNone
 	c.refreshing, c.refreshPending, c.refreshFailures = false, false, 0
 	c.lastRefresh, c.refreshLive = time.Time{}, nil
@@ -711,7 +738,10 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 		var msgs []discord.Message
 		var err error
 		if demo {
-			msgs, err = c.st.Cabinet.Messages(id)
+			// A channel the demo wrote nothing in is empty.
+			if msgs, err = c.st.Cabinet.Messages(id); errors.Is(err, store.ErrNotFound) {
+				err = nil
+			}
 		} else {
 			msgs, err = c.st.Client.Messages(id, 50)
 		}
@@ -934,8 +964,19 @@ func (c *chatView) update(gtx layout.Context) {
 			}
 		case rowVoice:
 			c.joinVoice(r.ch)
+			c.openCall(r.ch)
 		}
 		break
+	}
+	for id, cl := range c.voiceClicks {
+		if cl.Clicked(gtx) {
+			for _, r := range c.rows {
+				if r.kind == rowVoiceMember && r.user == id {
+					c.openProfile(c.voiceUser(r), r.ch.GuildID)
+					break
+				}
+			}
+		}
 	}
 	c.updateComponents(gtx)
 	if c.selfClick.Clicked(gtx) {
@@ -967,11 +1008,22 @@ func (c *chatView) update(gtx layout.Context) {
 }
 
 func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
+	c.trackPointer(gtx)
 	c.update(gtx)
 	c.updateUnreadKeys(gtx)
 	if c.u.chat != c {
 		// Logged out while handling input.
 		return layout.Dimensions{Size: gtx.Constraints.Max}
+	}
+	if c.copyText != "" {
+		gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(c.copyText))})
+		c.copyText = ""
+	}
+	if c.call.open && c.call.full {
+		// The call fills the screen, without the columns.
+		dims := pane(gtx, rgb(0x000000), gtx.Constraints.Max.X, c.layoutCall)
+		c.layoutOverlays(gtx)
+		return dims
 	}
 	channels, members, showMembers := c.paneWidths(gtx)
 	serverWidth := min(gtx.Dp(72), gtx.Constraints.Max.X)
@@ -999,6 +1051,13 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 		c.memberResize.layout(gtx, gtx.Constraints.Max.X-members)
 	}
 	c.layoutComposerPopups(gtx)
+	c.layoutOverlays(gtx)
+	return dims
+}
+
+// layoutOverlays draws what opens over the columns: cards, viewers, forms
+// and menus.
+func (c *chatView) layoutOverlays(gtx layout.Context) {
 	if c.profile != nil {
 		c.layoutProfile(gtx)
 	}
@@ -1017,7 +1076,8 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 	if c.guild.popup != popupNone {
 		c.layoutGuildPopup(gtx)
 	}
-	return dims
+	c.layoutMenu(gtx)
+	c.watchPointer(gtx)
 }
 
 func (c *chatView) layoutGuilds(gtx layout.Context) layout.Dimensions {
@@ -1179,31 +1239,18 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 			})
 		})
 	case rowVoiceMember:
-		return layout.Inset{Left: unit.Dp(28), Top: unit.Dp(2), Bottom: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			col := colorMuted
-			if c.u.voiceSpeaking(r.user) {
-				col = colorGreen
-			}
-			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return c.u.picture(gtx, r.avatar, 22, colorFor(uint64(r.user)), r.label, -1)
-				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-				layout.Flexed(1, oneLine(label(th, 14, col, r.label)).Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					switch {
-					case r.deaf:
-						return icon(gtx, iconDeafened, 14, colorRed)
-					case r.muted:
-						return icon(gtx, iconMicOff, 14, colorRed)
-					}
-					return layout.Dimensions{}
-				}),
-			)
+		cl := clickOf(c.voiceClicks, r.user)
+		dims := layout.Inset{Left: unit.Dp(20)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				pointer.CursorPointer.Add(gtx.Ops)
+				return c.layoutVoiceMember(gtx, r, cl.Hovered())
+			})
 		})
+		c.voiceRowMenu(gtx, r, dims.Size)
+		return dims
 	}
 
-	selected := c.selChannel != nil && c.selChannel.ID == r.ch.ID
+	selected := c.selChannel != nil && c.selChannel.ID == r.ch.ID || c.call.open && r.kind == rowVoice && c.call.channel == r.ch.ID
 	unread := ningen.ChannelRead
 	if r.kind != rowVoice {
 		unread = c.st.ChannelIsUnread(r.ch.ID, ningen.UnreadOpts{})
@@ -1244,6 +1291,55 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 			}),
 		)
 	}, selected)
+}
+
+// layoutVoiceMember is someone in a voice channel, under it: their picture,
+// their name, green while they speak, and whether they are muted.
+func (c *chatView) layoutVoiceMember(gtx layout.Context, r channelRow, hovered bool) layout.Dimensions {
+	th := c.u.th
+	bg := colorSidebar
+	if hovered {
+		bg = colorHover
+	}
+	return rounded(gtx, bg, 4, func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints.Min.X = gtx.Constraints.Max.X
+		return layout.Inset{Left: unit.Dp(8), Right: unit.Dp(8), Top: unit.Dp(3), Bottom: unit.Dp(3)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			col := colorMuted
+			switch {
+			case c.u.voiceSpeaking(r.user):
+				col = colorGreen
+			case hovered:
+				col = colorText
+			}
+			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return c.u.picture(gtx, r.avatar, 22, colorFor(uint64(r.user)), r.label, -1)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+				layout.Flexed(1, oneLine(label(th, 14, col, r.label)).Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					switch {
+					case r.deaf:
+						return icon(gtx, iconDeafened, 14, colorRed)
+					case r.muted:
+						return icon(gtx, iconMicOff, 14, colorRed)
+					}
+					return layout.Dimensions{}
+				}),
+			)
+		})
+	})
+}
+
+// voiceUser is the user of a voice member row.
+func (c *chatView) voiceUser(r channelRow) discord.User {
+	if m, err := c.st.Cabinet.Member(r.ch.GuildID, r.user); err == nil && m.User.ID.IsValid() {
+		return m.User
+	}
+	if u, err := c.st.Cabinet.User(r.user); err == nil {
+		return *u
+	}
+	return discord.User{ID: r.user, Username: r.label}
 }
 
 // dmAvatar is the picture of a conversation: the other person's avatar with

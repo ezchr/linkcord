@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/tphakala/go-opus/opus"
 )
 
@@ -27,6 +28,9 @@ const (
 
 // speaker decodes and buffers what one user says, to be mixed into what is played.
 type speaker struct {
+	// user is who speaks, once the voice server said. It is read and written with the session's state locked.
+	user discord.UserID
+
 	mu      sync.Mutex
 	decoder *opus.Decoder
 	pcm     []int16
@@ -100,8 +104,8 @@ func (s *speaker) write(seq uint16, packet []byte) error {
 	return nil
 }
 
-// mix adds what is buffered to output, once the cushion is.
-func (s *speaker) mix(output []byte) {
+// mix adds what is buffered to output, volume times as loud, once the cushion is.
+func (s *speaker) mix(output []byte, volume float32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -111,7 +115,12 @@ func (s *speaker) mix(output []byte) {
 
 	n := min(len(output), len(s.buf))
 	for i := 0; i+1 < n; i += 2 {
-		sum := int32(int16(binary.LittleEndian.Uint16(output[i:]))) + int32(int16(binary.LittleEndian.Uint16(s.buf[i:])))
+		sample := int32(int16(binary.LittleEndian.Uint16(s.buf[i:])))
+		if volume != 1 {
+			sample = int32(float32(sample) * volume)
+		}
+
+		sum := int32(int16(binary.LittleEndian.Uint16(output[i:]))) + sample
 		binary.LittleEndian.PutUint16(output[i:], uint16(max(-1<<15, min(1<<15-1, sum))))
 	}
 

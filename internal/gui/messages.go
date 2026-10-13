@@ -28,6 +28,9 @@ const groupWindow = 7 * time.Minute
 
 func (c *chatView) layoutMessages(gtx layout.Context) layout.Dimensions {
 	th := c.u.th
+	if c.call.open {
+		return c.layoutCall(gtx)
+	}
 	if c.selChannel == nil {
 		if !c.selGuild.IsValid() {
 			switch c.friends.page {

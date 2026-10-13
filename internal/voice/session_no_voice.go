@@ -22,6 +22,12 @@ func (*Session) Latency() time.Duration       { return 0 }
 func (*Session) Leave() error                 { return nil }
 func (*Session) Toggle(bool) error            { return nil }
 
+func (*Session) SetVolume(discord.UserID, float32) {}
+func (*Session) SetDevices(string, string) error   { return nil }
+
+// Devices finds no device.
+func Devices() (inputs, outputs []Device, err error) { return nil, nil, errNoVoice }
+
 var errNoVoice = errors.New("built without voice (build tag: no_voice)")
 
 func (*Session) Join(discord.ChannelID) error { return errNoVoice }
