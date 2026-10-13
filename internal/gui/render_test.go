@@ -26,7 +26,7 @@ import (
 // LINKCORD_RENDER is the folder for the pictures. LINKCORD_RENDER_STEPS is
 // what to do, separated by ";":
 //
-//	move:x,y  click:x,y  shiftclick:x,y  scroll:x,y,dy  key:Name  text:abc  wait:ms  snap:name
+//	move:x,y  click:x,y  shiftclick:x,y  scroll:x,y,dy  key:Name  ctrlkey:Name  text:abc  wait:ms  snap:name
 //
 // Keys are Return, Escape, Up, Down or Gio's names.
 func TestRenderDemo(t *testing.T) {
@@ -111,6 +111,9 @@ func TestRenderDemo(t *testing.T) {
 				name = n
 			}
 			router.Queue(key.Event{Name: name, State: key.Press}, key.Event{Name: name, State: key.Release})
+		case "ctrlkey":
+			router.Queue(key.Event{Name: key.Name(arg), Modifiers: key.ModShortcut, State: key.Press},
+				key.Event{Name: key.Name(arg), Modifiers: key.ModShortcut, State: key.Release})
 		case "text":
 			router.Queue(key.EditEvent{Text: arg})
 		case "wait":

@@ -14,6 +14,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"gioui.org/io/clipboard"
 	"gioui.org/io/event"
 	"gioui.org/io/key"
 	"gioui.org/layout"
@@ -99,21 +100,78 @@ func (c *chatView) attachFiles() {
 			}
 			return
 		}
-		c.u.post(func() {
-			for _, p := range paths {
-				info, err := os.Stat(p)
-				if err != nil {
-					continue
-				}
-				if info.Size() > maxUpload {
-					c.sendErr = fmt.Sprintf("\"%s\" is %s; Discord only accepts files up to 10 MB without Nitro.", filepath.Base(p), formatSize(uint64(info.Size())))
-					continue
-				}
-				c.comp.files = append(c.comp.files, &pendingFile{path: p, name: filepath.Base(p), size: info.Size()})
-			}
-			gtxFocus(c)
-		})
+		c.u.post(func() { c.attachPaths(paths) })
 	}()
+}
+
+// attachPaths adds files to the message being written, leaving out folders
+// and those too big for Discord.
+func (c *chatView) attachPaths(paths []string) {
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		if info.Size() > maxUpload {
+			c.sendErr = fmt.Sprintf("\"%s\" is %s; Discord only accepts files up to 10 MB without Nitro.", filepath.Base(p), formatSize(uint64(info.Size())))
+			continue
+		}
+		c.comp.files = append(c.comp.files, &pendingFile{path: p, name: filepath.Base(p), size: info.Size()})
+	}
+	gtxFocus(c)
+}
+
+// pasteDir holds the pictures pasted into the box until they are sent.
+var pasteDir = filepath.Join(os.TempDir(), "linkcord-paste")
+
+// paste handles Ctrl+V in the box: files copied in Explorer and pictures,
+// such as screenshots, become attachments; anything else is text, which the
+// box pastes as usual.
+func (c *chatView) paste(gtx layout.Context) {
+	clip, err := readClipboard()
+	if err != nil {
+		slog.Warn("failed to read the clipboard", "err", err)
+	}
+	switch {
+	case len(clip.files) > 0:
+		c.attachPaths(clip.files)
+	case len(clip.png) > 0:
+		c.attachPicture(clip.png)
+	default:
+		gtx.Execute(clipboard.ReadCmd{Tag: &c.composer})
+	}
+}
+
+// attachPicture attaches pasted picture data as image.png, as Discord names
+// pasted pictures. Each paste gets its own folder so the names do not clash.
+func (c *chatView) attachPicture(data []byte) {
+	cleanPastes()
+	if err := os.MkdirAll(pasteDir, 0o755); err != nil {
+		c.sendErr = "Could not keep the pasted picture: " + err.Error()
+		return
+	}
+	dir, err := os.MkdirTemp(pasteDir, "p")
+	if err == nil {
+		path := filepath.Join(dir, "image.png")
+		if err = os.WriteFile(path, data, 0o644); err == nil {
+			c.attachPaths([]string{path})
+			return
+		}
+	}
+	c.sendErr = "Could not keep the pasted picture: " + err.Error()
+}
+
+// cleanPastes removes pasted pictures older than a day, long since sent.
+func cleanPastes() {
+	entries, err := os.ReadDir(pasteDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > 24*time.Hour {
+			os.RemoveAll(filepath.Join(pasteDir, e.Name()))
+		}
+	}
 }
 
 // gtxFocus asks for the box to get the keyboard focus on the next frame.
@@ -213,6 +271,18 @@ func (c *chatView) updateComposer(gtx layout.Context) {
 					c.editLast()
 				}
 			}
+		}
+	}
+
+	// Ctrl+V is asked for before the box reads the keys, so that files and
+	// pictures can be attached; text is handed back to the box.
+	for {
+		ev, ok := gtx.Event(key.Filter{Focus: &c.composer, Name: "V", Required: key.ModShortcut})
+		if !ok {
+			break
+		}
+		if e, ok := ev.(key.Event); ok && e.State == key.Press {
+			c.paste(gtx)
 		}
 	}
 
