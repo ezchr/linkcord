@@ -44,7 +44,9 @@ func TestGIFPreviewKeepsAnimation(t *testing.T) {
 
 func TestPaneDrag(t *testing.T) {
 	for _, direction := range []float32{1, -1} {
-		var r paneResize
+		// The edge starts at x 312 with 240 dp: the pane's fixed side is 240
+		// to the left of it, or to the right for the members.
+		r := paneResize{origin: 312 - direction*240}
 		width := unit.Dp(240)
 		var router input.Router
 		var ops op.Ops

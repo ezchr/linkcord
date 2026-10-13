@@ -22,12 +22,12 @@ type paneSettings struct {
 
 type paneResize struct {
 	dragging bool
-	startX   float32
-	start    unit.Dp
 	hovered  bool
-	// shown is the width drawn last, which the window may hold below the
-	// one chosen, and limit the most the window allows.
-	shown, limit unit.Dp
+	// limit is the most the window allows.
+	limit unit.Dp
+	// origin is the window x, in pixels, that the width is measured from:
+	// the left of the channels, or the right edge for the members.
+	origin float32
 }
 
 func paneSettingsPath() string {
@@ -66,10 +66,12 @@ func (c *chatView) paneWidths(gtx layout.Context) (int, int, bool) {
 		members = min(members, max(available-channels-gtx.Dp(320), 0))
 	}
 	dp := func(px int) unit.Dp { return unit.Dp(float32(px) / max(gtx.Metric.PxPerDp, 1e-3)) }
-	c.channelResize.shown, c.channelResize.limit = dp(channels), dp(max(available-gtx.Dp(280), 0))
+	c.channelResize.origin = float32(min(gtx.Dp(72), gtx.Constraints.Max.X))
+	c.memberResize.origin = float32(gtx.Constraints.Max.X)
+	c.channelResize.limit = dp(max(available-gtx.Dp(280), 0))
 	if show {
 		c.channelResize.limit = dp(max(available-gtx.Dp(320+160), 0))
-		c.memberResize.shown, c.memberResize.limit = dp(members), dp(max(available-channels-gtx.Dp(320), 0))
+		c.memberResize.limit = dp(max(available-channels-gtx.Dp(320), 0))
 	}
 	return channels, members, show
 }
@@ -108,31 +110,30 @@ func (r *paneResize) update(gtx layout.Context, width *unit.Dp, direction float3
 			if e.Buttons != pointer.ButtonPrimary {
 				continue
 			}
-			// Start from the width on screen, not one the window cuts down.
-			start := *width
-			if r.shown > 0 {
-				start = r.shown
-			}
-			r.dragging, r.startX, r.start = true, e.Position.X, start
+			r.dragging = true
 			gtx.Execute(pointer.GrabCmd{Tag: r, ID: e.PointerID})
 		case pointer.Drag:
-			if r.dragging {
-				scale := gtx.Metric.PxPerDp
-				if scale <= 0 {
-					scale = 1
-				}
-				most := float32(480)
-				if r.limit >= 160 {
-					most = min(most, float32(r.limit))
-				}
-				*width = unit.Dp(min(max(float32(r.start)+direction*(e.Position.X-r.startX)/scale, 160), most))
+			// The edge goes where the pointer is, measured from the side of
+			// the window, so that no event lost on the way can make it jump.
+			// Windows may cancel the press as the drag begins; a held button
+			// still drags.
+			if !r.dragging && !e.Buttons.Contain(pointer.ButtonPrimary) {
+				continue
 			}
+			r.dragging = true
+			scale := max(gtx.Metric.PxPerDp, 1e-3)
+			most := float32(480)
+			if r.limit >= 160 {
+				most = min(most, float32(r.limit))
+			}
+			*width = unit.Dp(min(max(direction*(e.Position.X-r.origin)/scale, 160), most))
 		case pointer.Release:
 			changed = changed || r.dragging
 			r.dragging = false
 		case pointer.Cancel:
+			// Kept dragging: real input sends a cancel when the drag begins.
 			changed = changed || r.dragging
-			r.dragging, r.hovered = false, false
+			r.hovered = false
 		}
 	}
 	return changed
