@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,6 +26,11 @@ type videoStream struct {
 	path string
 	srv  *http.Server
 	stop context.CancelFunc
+
+	// The source, for parts far ahead of the download.
+	ctx    context.Context
+	client *http.Client
+	source string
 
 	mu    sync.Mutex
 	grew  *sync.Cond
@@ -64,6 +71,9 @@ func streamVideo(ctx context.Context, client *http.Client, raw string) (*videoSt
 		key:      "/" + hex.EncodeToString(secret),
 		path:     file.Name(),
 		stop:     stop,
+		ctx:      ctx,
+		client:   client,
+		source:   raw,
 		total:    resp.ContentLength,
 		finished: make(chan struct{}),
 	}
@@ -147,6 +157,9 @@ func (s *videoStream) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	s.handlers.Add(1)
 	defer s.handlers.Done()
+	if s.fetchAhead(w, r) {
+		return
+	}
 	total, err := s.size()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
@@ -160,6 +173,60 @@ func (s *videoStream) serve(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 	w.Header().Set("Content-Type", "application/octet-stream")
 	http.ServeContent(w, r, "", time.Time{}, &growingReader{s: s, f: file, total: total})
+}
+
+// aheadGap is how far past the download a read must start to be fetched from
+// the source rather than waited for.
+const aheadGap = 1 << 20
+
+// fetchAhead answers a read far past the download from the source. Videos
+// that keep their index at the end are read there first, and would otherwise
+// wait for the whole download.
+func (s *videoStream) fetchAhead(w http.ResponseWriter, r *http.Request) bool {
+	var start, end int64 = 0, -1
+	spec, ok := strings.CutPrefix(r.Header.Get("Range"), "bytes=")
+	if !ok || strings.Contains(spec, ",") {
+		return false
+	}
+	from, to, _ := strings.Cut(spec, "-")
+	start, err := strconv.ParseInt(from, 10, 64)
+	if err != nil {
+		return false
+	}
+	if to != "" {
+		if end, err = strconv.ParseInt(to, 10, 64); err != nil || end < start {
+			return false
+		}
+	}
+	s.mu.Lock()
+	far := !s.done && s.total > 0 && start > s.have+aheadGap && start < s.total
+	s.mu.Unlock()
+	if !far {
+		return false
+	}
+	req, err := http.NewRequestWithContext(s.ctx, http.MethodGet, s.source, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Range", "bytes="+spec)
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusPartialContent || resp.Header.Get("Content-Range") == "" {
+		// The source does not do ranges: wait for the download instead.
+		return false
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Accept-Ranges", "bytes")
+	w.Header().Set("Content-Range", resp.Header.Get("Content-Range"))
+	if resp.ContentLength >= 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
+	}
+	w.WriteHeader(http.StatusPartialContent)
+	io.Copy(w, io.LimitReader(resp.Body, maxVideoDownload))
+	return true
 }
 
 // Error reports why the download failed, once it has.

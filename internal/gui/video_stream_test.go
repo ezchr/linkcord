@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"bytes"
 	"context"
 	"image"
 	"net/http"
@@ -15,8 +16,8 @@ import (
 
 // TestStreamVideo plays a 1080p clip from a slow server: the first frame
 // comes before the download ends, scaled down to the viewer's box, and the
-// whole clip decodes. A clip with its index at the end plays too, once it has
-// downloaded.
+// whole clip decodes. A clip with its index at the end has the index fetched
+// on its own, as Discord's servers take ranges.
 func TestStreamVideo(t *testing.T) {
 	t.Run("index first", func(t *testing.T) { testStreamVideo(t, true) })
 	t.Run("index last", func(t *testing.T) { testStreamVideo(t, false) })
@@ -53,6 +54,10 @@ func testStreamVideo(t *testing.T, faststart bool) {
 	rate := len(data) / 4
 	sent := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") != "" {
+			http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(data))
+			return
+		}
 		defer close(sent)
 		w.Header().Set("Content-Type", "video/mp4")
 		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
@@ -95,7 +100,7 @@ func testStreamVideo(t *testing.T, faststart bool) {
 	<-sent
 	total := time.Since(start)
 	t.Logf("first frame after %v, download took %v, %d frames", first, total, frames)
-	if faststart && first > total/2 {
+	if first > total/2 {
 		t.Errorf("first frame after %v; the download took %v", first, total)
 	}
 	if frames < 175 {

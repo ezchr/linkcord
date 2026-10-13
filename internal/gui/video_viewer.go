@@ -100,6 +100,9 @@ func (v *videoViewer) run(ctx context.Context, u *ui) {
 		if err != nil {
 			audioWarning = " · Audio unavailable"
 		} else {
+			// The audio decoder starts sooner than the picture, which would
+			// otherwise run behind and have its frames dropped at first.
+			audio.held.Store(true)
 			audio.paused.Store(v.paused.Load())
 			audio.muted.Store(v.muted.Load())
 			v.mu.Lock()
@@ -122,6 +125,7 @@ func (v *videoViewer) run(ctx context.Context, u *ui) {
 	last := time.Now()
 	position := time.Duration(0)
 	started := false
+	var drawn time.Time
 	updateClock := func() {
 		now := time.Now()
 		if !v.paused.Load() {
@@ -149,16 +153,21 @@ func (v *videoViewer) run(ctx context.Context, u *ui) {
 			case <-ticker.C:
 			}
 		}
-		// Catch up to the audio clock without drawing obsolete frames.
-		if position-at > 100*time.Millisecond {
+		// Catch up to the audio clock without drawing obsolete frames, but
+		// keep drawing some so that the picture never stops.
+		if position-at > 100*time.Millisecond && time.Since(drawn) < 100*time.Millisecond {
 			return nil
 		}
+		drawn = time.Now()
 		op := paint.NewImageOp(frame)
 		v.mu.Lock()
 		v.frame = &op
 		v.status = fmt.Sprintf("%.1f s%s", at.Seconds(), audioWarning)
 		v.mu.Unlock()
 		u.win.Invalidate()
+		if audio != nil {
+			audio.held.Store(false)
+		}
 		return nil
 	})
 	if err != nil {

@@ -16,6 +16,7 @@ type videoAudio struct {
 	queue   chan []byte
 	current []byte
 	paused  atomic.Bool
+	held    atomic.Bool // silent until the picture starts
 	muted   atomic.Bool
 	played  atomic.Int64
 	eof     atomic.Bool
@@ -34,7 +35,7 @@ func newVideoAudio() (*videoAudio, error) {
 
 func (a *videoAudio) fill(output []byte) {
 	clear(output)
-	if a.paused.Load() {
+	if a.paused.Load() || a.held.Load() {
 		return
 	}
 	consumed := 0
