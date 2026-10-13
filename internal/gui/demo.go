@@ -47,7 +47,7 @@ func (u *ui) startDemo() {
 	}}, false)
 
 	// A server with the decorated names that many servers use.
-	guild := discord.Guild{ID: discord.GuildID(id(100)), Name: "Demo Server", OwnerID: me.ID}
+	guild := discord.Guild{ID: discord.GuildID(id(100)), Name: "Demo Server", OwnerID: me.ID, NitroBoost: discord.NitroLevel2, NitroBoosters: 9}
 	cab.GuildSet(&guild, false)
 	roles := []discord.Role{
 		{ID: discord.RoleID(id(101)), Name: "Moderators", Color: 0x2ecc71, Position: 3, Hoist: true},
@@ -277,6 +277,13 @@ func (u *ui) startDemo() {
 		ID: request.ID, Type: request.Type, IsMessageRequest: true, LastMessageID: request.LastMessageID,
 		Since: discord.NewTimestamp(time.Now().Add(-time.Hour)), Recipients: request.DMRecipients,
 	}})
+
+	u.chat.guild.events[guild.ID] = upcomingEvents([]discord.GuildScheduledEvent{
+		{Name: "Movie night", Description: "We watch a movie together. Bring snacks!", Status: discord.ScheduledEvent,
+			StartTime: discord.NewTimestamp(time.Now().Add(5 * time.Hour)), ChannelID: channels[5].ID, UserCount: 12},
+		{Name: "CS 1.6 tournament", Status: discord.ActiveEvent, StartTime: discord.NewTimestamp(time.Now().Add(-time.Hour)),
+			EntityMetadata: &discord.EntityMetadata{Location: "Server 192.168.0.10"}, UserCount: 8},
+	})
 
 	u.chat.load(ready)
 	u.chat.selectGuild(guild.ID)

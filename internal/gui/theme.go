@@ -33,6 +33,10 @@ var (
 	colorGreen    = rgb(0x23a55a)
 	// colorGreenButton is the green of filled buttons, such as Add Friend.
 	colorGreenButton = rgb(0x248046)
+	// colorBoost is the pink of server boosts, and colorBoostChip the purple
+	// of the boost goal's label.
+	colorBoost     = rgb(0xff73fa)
+	colorBoostChip = rgb(0x5b2d7d)
 	// colorSecondaryButton is the gray of secondary and link buttons.
 	colorSecondaryButton = rgb(0x4e5058)
 	colorYellow          = rgb(0xf0b232)

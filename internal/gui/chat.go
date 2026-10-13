@@ -63,6 +63,9 @@ const (
 	// rowHome is the friends or the message requests, at the top of the
 	// direct messages.
 	rowHome
+	// rowGuildInfo is the boost goal, the events or the boosts, at the top
+	// of a server's channels.
+	rowGuildInfo
 )
 
 // channelRow is a line of the channel column.
@@ -83,6 +86,8 @@ type chatView struct {
 	// friends is the friends page and the message requests of the direct
 	// messages.
 	friends friendsState
+	// guild is the boost goal and events of the selected server.
+	guild guildInfo
 
 	// detached is set while older messages show in place of the newest,
 	// after a jump; flashID is lit until flashUntil.
@@ -257,6 +262,7 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 		}
 	})
 	c.friends.init()
+	c.guild.init()
 	c.inter.init()
 	c.memberList.Axis = layout.Vertical
 	c.guildList.Axis = layout.Vertical
@@ -420,6 +426,8 @@ func (c *chatView) selectGuild(id discord.GuildID) {
 	if id.IsValid() && !c.demo {
 		go c.st.MemberState.Subscribe(id)
 	}
+	c.guild.popup = popupNone
+	c.loadEvents(id)
 	c.rebuildRows()
 	if chID, ok := c.lastChannel[id]; ok {
 		for _, r := range c.rows {
@@ -501,6 +509,7 @@ func (c *chatView) rebuildRows() {
 		return
 	}
 
+	c.rows = append(c.rows, c.guildInfoRows()...)
 	channels, err := c.st.Cabinet.Channels(c.selGuild)
 	if err != nil {
 		slog.Error("failed to get channels", "err", err, "guild_id", c.selGuild)
@@ -915,6 +924,8 @@ func (c *chatView) update(gtx layout.Context) {
 			c.rebuildRows()
 		case rowText, rowDM:
 			c.selectChannel(r.ch)
+		case rowGuildInfo:
+			c.openGuildInfo(r.ch.ID)
 		case rowHome:
 			if r.ch.ID == requestsRowID {
 				c.openHome(homeRequests)
@@ -1002,6 +1013,9 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 	}
 	if c.inter.modal != nil {
 		c.layoutModal(gtx)
+	}
+	if c.guild.popup != popupNone {
+		c.layoutGuildPopup(gtx)
 	}
 	return dims
 }
@@ -1138,6 +1152,8 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 	switch r.kind {
 	case rowHome:
 		return c.layoutHomeRow(gtx, r)
+	case rowGuildInfo:
+		return c.layoutGuildInfoRow(gtx, r)
 	case rowCategory:
 		top := unit.Dp(14)
 		if first {
