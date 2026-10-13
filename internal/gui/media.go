@@ -387,16 +387,6 @@ func (c *chatView) layoutVideo(gtx layout.Context, p mediaPreview) layout.Dimens
 					return c.layoutControls(gtx, v, inTile)
 				})
 			}
-		} else if !loading {
-			// The name of the file, as on Discord before it plays.
-			layout.NW.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.UniformInset(unit.Dp(6)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return rounded(gtx, withAlpha(colorServers, 0xc0), 4, func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Left: unit.Dp(6), Right: unit.Dp(6), Top: unit.Dp(2), Bottom: unit.Dp(2)}.Layout(gtx,
-							oneLine(label(c.u.th, 12, colorHeader, title)).Layout)
-					})
-				})
-			})
 		}
 		// Whether the mouse is over the tile, controls included, which shows
 		// the controls while it plays.
