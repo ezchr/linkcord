@@ -10,12 +10,16 @@ import (
 	"unicode/utf8"
 
 	"gioui.org/font"
+	"gioui.org/io/event"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
+	"gioui.org/widget"
 	"gioui.org/x/richtext"
+	"gioui.org/x/styledtext"
 	"github.com/ayn2op/arikawa/v3/discord"
 )
 
@@ -110,6 +114,8 @@ const (
 	metaSpoiler = "spoiler"
 	// metaEmoji is the picture of a server emoji, drawn over its span.
 	metaEmoji = "emoji"
+	// metaCopy is what copying a span gives in place of its content.
+	metaCopy = "copy"
 )
 
 var (
@@ -252,6 +258,8 @@ func (c *chatView) inlineSpans(s string, m discord.Message, base richtext.SpanSt
 						sp.Set(metaSpoiler, "1")
 					} else {
 						sp.Set(metaEmoji, emojiURL(parts[3], parts[1] == "a", px))
+						// Copying the picture gives its name, as in Discord.
+						sp.Set(metaCopy, ":"+parts[2]+":")
 					}
 					spans = append(spans, sp)
 				case mt[5] != "":
@@ -377,6 +385,8 @@ func (c *chatView) layoutRich(gtx layout.Context, state *richtextState, m discor
 		}
 	}
 
+	c.updateSelection(gtx, state)
+
 	revealed := c.revealed[m.ID]
 	// Re-parse only when the message, its spoilers or the minute change
 	// (the minute keeps "5 minutes ago" timestamps and mention names fresh).
@@ -386,44 +396,74 @@ func (c *chatView) layoutRich(gtx layout.Context, state *richtextState, m discor
 		state.parts, state.all = c.buildContent(m, text, size, revealed)
 	}
 	// Every block draws from the one state, so that the spans keep their
-	// indices from frame to frame.
+	// indices from frame to frame. The blocks are stacked by hand, so that
+	// where their letters are is known in the coordinates of the whole text,
+	// for selecting across them.
 	all := state.all
-	var children []layout.FlexChild
+	state.pieces = state.pieces[:0]
+	macro := op.Record(gtx.Ops)
+	var size2 image.Point
 	for bi, part := range state.parts {
 		if bi > 0 {
-			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout))
+			size2.Y += gtx.Dp(4)
 		}
+		bgtx := gtx
+		bgtx.Constraints.Min = image.Point{}
+		var dims layout.Dimensions
+		bm := op.Record(gtx.Ops)
 		if part.kind == blockCode {
 			txt := part.text
-			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return rounded(gtx, colorCode, 4, func(gtx layout.Context) layout.Dimensions {
-						gtx.Constraints.Min.X = gtx.Constraints.Max.X
-						return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							l := label(th, 13, colorText, txt)
-							l.Font.Typeface = "Go Mono"
-							return l.Layout(gtx)
-						})
+			sel := state.codeSelectable(bi)
+			dims = layout.Inset{Top: unit.Dp(4)}.Layout(bgtx, func(gtx layout.Context) layout.Dimensions {
+				return rounded(gtx, colorCode, 4, func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = gtx.Constraints.Max.X
+					return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						l := label(th, 13, colorText, txt)
+						l.Font.Typeface = "Go Mono"
+						l.State = sel
+						l.SelectionColor = withAlpha(colorAccent, 0x66)
+						return l.Layout(gtx)
 					})
 				})
-			}))
-			continue
-		}
-		start, n, quote := part.start, part.n, part.kind == blockQuote
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			})
+		} else {
+			start, n, quote := part.start, part.n, part.kind == blockQuote
+			off := image.Pt(0, size2.Y)
+			if quote {
+				off.X = gtx.Dp(12)
+			}
 			text := func(gtx layout.Context) layout.Dimensions {
-				return c.richSlice(gtx, state, all, start, start+n)
+				return c.richSlice(gtx, state, all, start, start+n, off)
 			}
 			if !quote {
-				return text(gtx)
+				dims = text(bgtx)
+			} else {
+				// Quotes have a bar on their left.
+				dims = layout.Inset{Left: unit.Dp(12)}.Layout(bgtx, text)
+				paint.FillShape(gtx.Ops, colorSelected, clip.UniformRRect(image.Rect(0, 0, gtx.Dp(4), dims.Size.Y), gtx.Dp(2)).Op(gtx.Ops))
 			}
-			// Quotes have a bar on their left.
-			dims := layout.Inset{Left: unit.Dp(12)}.Layout(gtx, text)
-			paint.FillShape(gtx.Ops, colorSelected, clip.UniformRRect(image.Rect(0, 0, gtx.Dp(4), dims.Size.Y), gtx.Dp(2)).Op(gtx.Ops))
-			return dims
-		}))
+		}
+		call := bm.Stop()
+		t := op.Offset(image.Pt(0, size2.Y)).Push(gtx.Ops)
+		call.Add(gtx.Ops)
+		t.Pop()
+		size2.Y += dims.Size.Y
+		size2.X = max(size2.X, dims.Size.X)
 	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	textCall := macro.Stop()
+	size2 = gtx.Constraints.Constrain(size2)
+
+	// The text takes the pointer for selecting it, under its links and
+	// mentions, which stay clickable; what is selected is lit behind it.
+	area := clip.Rect{Max: size2}.Push(gtx.Ops)
+	pass := pointer.PassOp{}.Push(gtx.Ops)
+	pointer.CursorText.Add(gtx.Ops)
+	event.Op(gtx.Ops, state)
+	pass.Pop()
+	area.Pop()
+	c.layoutSelection(gtx, state)
+	textCall.Add(gtx.Ops)
+	return layout.Dimensions{Size: size2}
 }
 
 // contentPart is a block of a message ready to draw: a code block with its
@@ -474,8 +514,20 @@ func (c *chatView) buildContent(m discord.Message, text string, size unit.Sp, re
 // richSlice lays out the spans from start to end of all with state, which
 // keeps a slot for each span of all so that clicks map back to the span
 // under the pointer.
-func (c *chatView) richSlice(gtx layout.Context, state *richtextState, all []richtext.SpanStyle, start, end int) layout.Dimensions {
+//
+// It adds where the letters of the spans are to state.pieces, off the
+// origin of the whole text by off.
+func (c *chatView) richSlice(gtx layout.Context, state *richtextState, all []richtext.SpanStyle, start, end int, off image.Point) layout.Dimensions {
 	t := richtext.Text(state.block(start), c.u.th.Shaper, all[start:end]...)
+	var pieces []styledtext.SpanPiece
+	t.Pieces = &pieces
+	defer func() {
+		for _, pc := range pieces {
+			pc.Index += start
+			pc.Rect = pc.Rect.Add(off)
+			state.pieces = append(state.pieces, pc)
+		}
+	}()
 	t.SpanFunc = func(gtx layout.Context, span richtext.SpanStyle, dims layout.Dimensions) {
 		url, _ := span.Get(metaEmoji).(string)
 		if url == "" {
@@ -498,6 +550,24 @@ type richtextState struct {
 	key   string
 	parts []contentPart
 	all   []richtext.SpanStyle
+
+	// pieces are where the letters of the spans were laid out last, for
+	// selecting text, and codeSel the selections of the code blocks.
+	pieces  []styledtext.SpanPiece
+	codeSel map[int]*widget.Selectable
+}
+
+// codeSelectable is the selection of the code block at index i.
+func (s *richtextState) codeSelectable(i int) *widget.Selectable {
+	if s.codeSel == nil {
+		s.codeSel = make(map[int]*widget.Selectable)
+	}
+	sel, ok := s.codeSel[i]
+	if !ok {
+		sel = new(widget.Selectable)
+		s.codeSel[i] = sel
+	}
+	return sel
 }
 
 func (s *richtextState) block(start int) *richtext.InteractiveText {

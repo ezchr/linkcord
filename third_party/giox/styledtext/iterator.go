@@ -53,6 +53,10 @@ type textIterator struct {
 	first bool
 	// baseline tracks the location of the first line of text's baseline.
 	baseline int
+	// carets, when collect is set, are the places after the runes of the
+	// glyphs shown, for selecting text.
+	collect bool
+	carets  []Caret
 }
 
 // processGlyph checks whether the glyph is visible within the iterator's configured
@@ -144,6 +148,9 @@ func (it *textIterator) paintGlyph(gtx layout.Context, shaper *text.Shaper, glyp
 			it.lineOff = image.Point{X: (glyph.X - it.firstX).Floor(), Y: int(glyph.Y)}.Sub(it.viewport.Min)
 		}
 		line = append(line, glyph)
+		if it.collect && glyph.Runes > 0 {
+			it.carets = append(it.carets, Caret{X: (glyph.X + glyph.Advance - it.firstX).Round(), Rune: it.runes})
+		}
 	}
 	if glyph.Flags&text.FlagLineBreak > 0 || cap(line)-len(line) == 0 || !visibleOrBefore {
 		t := op.Offset(it.lineOff).Push(gtx.Ops)

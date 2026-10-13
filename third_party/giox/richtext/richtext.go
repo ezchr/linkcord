@@ -229,6 +229,9 @@ type TextStyle struct {
 	// SpanFunc, if set, is called for every span once laid out, with gtx at
 	// its origin and dims its size, to draw over it.
 	SpanFunc func(gtx layout.Context, span SpanStyle, dims layout.Dimensions)
+	// Pieces, if not nil, is given where every piece of every span is laid
+	// out, and where its runes are, for selecting text.
+	Pieces *[]styledtext.SpanPiece
 	*text.Shaper
 }
 
@@ -272,6 +275,7 @@ func (t TextStyle) Layout(gtx layout.Context) layout.Dimensions {
 	text.Alignment = t.Alignment
 	text.LineHeight = t.LineHeight
 	text.LineHeightScale = t.LineHeightScale
+	text.Pieces = t.Pieces
 	return text.Layout(gtx, func(gtx layout.Context, i int, dims layout.Dimensions) {
 		span := &t.Styles[i]
 		if t.SpanFunc != nil {

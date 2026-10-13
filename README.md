@@ -25,6 +25,7 @@ Linkcord was created for people on Windows 7 who can no longer run the official 
 | Call view with a card for everyone in the channel, full screen, invite links, soundboard, and microphone/speaker choice | Camera, screen sharing, and activities |
 | Right-click menu on voice members: per-user volume and mute, notes, friends, blocking, roles, nicknames, server mute/deafen, move, disconnect, timeout, kick, and ban, as permissions allow | Ignore, apps, and moderator view |
 | React, reply, edit, copy, delete, and inline reaction controls | |
+| Selecting text in messages and embeds with the mouse (double click for a word, triple for all), copied with Ctrl+C or the right-click menu | Selecting across several messages |
 | Bot buttons, select menus, and forms; components V2 layouts; embeds with formatting, fields, authors, and footers | Multi-value select menus |
 | Server boost goal, boost levels and perks, and scheduled events | |
 | Closing the window keeps Linkcord running, voice included, with an icon in the notification area; clicking it, or starting Linkcord again, brings the window back, and its menu or the profile menu quits | |
@@ -184,7 +185,7 @@ When merging upstream discordo changes, replace `github.com/ayn2op/discordo` mod
 `go.mod` uses local copies of Gio and its extensions, Arikawa and dave-go. Patch files are retained in `third_party/patches/` so the changes can be reapplied to newer versions.
 
 - **Gio v0.10.3:** checks for Windows APIs unavailable on Windows 7 and falls back to classic mouse messages. Direct3D hardware failures fall back to WARP.
-- **gioui.org/x v0.10.3:** draws image glyphs in rich text so color emoji remain visible; also supports the project's rich-text span callback.
+- **gioui.org/x v0.10.3:** draws image glyphs in rich text so color emoji remain visible; also supports the project's rich-text span callback, and reports where every span and its letters are laid out, for selecting text.
 - **Arikawa (ayn2op fork, 2026-10-12):** users carry their avatar decoration, nameplate and server tag (`avatar_decoration_data`, `collectibles`, `primary_guild`), which Discord sends with every user and Arikawa dropped.
 - **dave-go v0.5.1:** adds end-to-end encryption of H264 frames laid out as libdave does, taking a fresh nonce for every retry, for screen sharing. Upstream encrypts Opus only.
 

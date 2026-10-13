@@ -216,6 +216,8 @@ type chatView struct {
 	copyText string
 	// demoNotes are the notes written in the demo.
 	demoNotes map[discord.UserID]string
+	// sel is the text selected in the messages.
+	sel textSelection
 }
 
 // msgClickKey is the avatar (part 0) or the name (part 1) of a message.
@@ -1015,6 +1017,7 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 		// Logged out while handling input.
 		return layout.Dimensions{Size: gtx.Constraints.Max}
 	}
+	c.updateSelectionKeys(gtx)
 	if c.copyText != "" {
 		gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(c.copyText))})
 		c.copyText = ""
