@@ -5,6 +5,7 @@ import (
 	"context"
 	"image"
 	"log/slog"
+	"os"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -20,6 +21,7 @@ import (
 	"gioui.org/widget"
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/gateway"
+	"github.com/ayn2op/arikawa/v3/utils/handler"
 	"github.com/ayn2op/ningen/v3"
 	"github.com/ayn2op/ningen/v3/states/read"
 	"golang.org/x/exp/shiny/materialdesign/icons"
@@ -75,6 +77,8 @@ type channelRow struct {
 }
 
 type chatView struct {
+	// deleted keeps deleted messages, shown in their place with a sign.
+	deleted *deletedLog
 	// The video volume chosen last, kept for the next video.
 	lastVolume float32
 	volumeSet  bool
@@ -210,6 +214,25 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 		showMembers: true,
 		act:         newActionState(),
 	}
+	if os.Getenv(demoEnvVar) != "" {
+		c.deleted = newDeletedLog("")
+	} else {
+		c.deleted = newDeletedLog(deletedLogPath())
+	}
+	// Deleted messages are copied before the state forgets them.
+	st.PreHandler = handler.New()
+	st.PreHandler.AddSyncHandler(func(ev *gateway.MessageDeleteEvent) {
+		if m, err := st.Cabinet.Message(ev.ChannelID, ev.ID); err == nil {
+			c.deleted.record(*m)
+		}
+	})
+	st.PreHandler.AddSyncHandler(func(ev *gateway.MessageDeleteBulkEvent) {
+		for _, id := range ev.IDs {
+			if m, err := st.Cabinet.Message(ev.ChannelID, id); err == nil {
+				c.deleted.record(*m)
+			}
+		}
+	})
 	c.memberList.Axis = layout.Vertical
 	c.guildList.Axis = layout.Vertical
 	c.channelList.Axis = layout.Vertical
@@ -258,7 +281,7 @@ func (c *chatView) pump() {
 						}
 					})
 				}
-			case *gateway.MessageCreateEvent, *gateway.MessageUpdateEvent, *gateway.MessageDeleteEvent,
+			case *gateway.MessageCreateEvent, *gateway.MessageUpdateEvent, *gateway.MessageDeleteEvent, *gateway.MessageDeleteBulkEvent,
 				*gateway.TypingStartEvent, *read.UpdateEvent,
 				*gateway.GuildCreateEvent, *gateway.GuildDeleteEvent, *gateway.GuildUpdateEvent,
 				*gateway.ChannelCreateEvent, *gateway.ChannelUpdateEvent, *gateway.ChannelDeleteEvent,
@@ -615,8 +638,8 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 				c.loadErr = "Could not load messages: " + err.Error()
 				return
 			}
-			c.messages = sortedMessages(msgs)
 			c.noOlder = len(msgs) < 50
+			c.messages = c.deleted.merge(id, sortedMessages(msgs), historyStart(msgs, !c.noOlder), 0)
 			c.markRead(id)
 			c.requestAuthors(c.messages)
 		})
@@ -658,7 +681,7 @@ func (c *chatView) loadOlder() {
 			if len(msgs) < 50 {
 				c.noOlder = true
 			}
-			older := sortedMessages(msgs)
+			older := c.deleted.merge(id, sortedMessages(msgs), historyStart(msgs, !c.noOlder), before)
 			c.messages = append(older, c.messages...)
 			// Keep showing the same messages instead of jumping to the top.
 			c.messageList.Position.First += len(older)
@@ -742,8 +765,11 @@ func (c *chatView) apply(ev gateway.Event) {
 			}
 		}
 	case *gateway.MessageDeleteEvent:
-		c.messages = slices.DeleteFunc(c.messages, func(m discord.Message) bool { return m.ID == ev.ID })
-		c.forgetMessage(ev.ID)
+		c.messageDeleted(ev.ID)
+	case *gateway.MessageDeleteBulkEvent:
+		for _, id := range ev.IDs {
+			c.messageDeleted(id)
+		}
 	case *gateway.MessageReactionAddEvent:
 		c.reactionEvent(ev.ChannelID, ev.MessageID, ev.Emoji, ev.UserID, true)
 	case *gateway.MessageReactionRemoveEvent:

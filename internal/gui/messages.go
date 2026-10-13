@@ -299,6 +299,12 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 				}
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if !c.deleted.has(m.ID) {
+					return layout.Dimensions{}
+				}
+				return c.layoutDeletedSign(gtx, m.ID)
+			}),
 		)
 	})
 }

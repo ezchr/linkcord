@@ -208,7 +208,8 @@ func (c *chatView) layoutWithActions(gtx layout.Context, m discord.Message, w la
 		}
 	}
 	over := a.hover == m.ID || a.barOver == m.ID
-	showBar := over && a.editing != m.ID && a.deleting == nil
+	// A deleted message is gone from Discord: nothing can be done with it.
+	showBar := over && a.editing != m.ID && a.deleting == nil && !c.deleted.has(m.ID)
 	if !showBar && a.barOver == m.ID {
 		// A toolbar that is not drawn gets no Leave; forget it.
 		a.barOver = 0
@@ -547,6 +548,7 @@ func (c *chatView) deleteMessage(m discord.Message) {
 		c.messages = slices.DeleteFunc(c.messages, func(x discord.Message) bool { return x.ID == m.ID })
 		c.forgetMessage(m.ID)
 	}
+	c.deleted.deleting(m.ID)
 	if c.demo {
 		remove()
 		return

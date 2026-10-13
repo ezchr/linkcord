@@ -78,6 +78,7 @@ func (c *chatView) refreshCurrentChat() {
 				visible = c.messages[pos.First-1].ID
 			}
 			c.messages = reconcileChatHistory(c.messages, messages, c.refreshLive, complete)
+			c.messages = c.deleted.merge(id, c.messages, historyStart(c.messages, !complete && !c.noOlder), 0)
 			c.refreshLive = nil
 			c.loadErr = ""
 			if complete {

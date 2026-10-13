@@ -115,7 +115,10 @@ func (u *ui) startDemo() {
 	add(channels[0].ID, guild.ID, users[1], 5*time.Hour, "hello everyone 🔥🔥", func(m *discord.Message) {
 		m.Reactions = []discord.Reaction{{Count: 3, Emoji: discord.Emoji{Name: "🔥"}}, {Count: 1, Me: true, Emoji: discord.Emoji{Name: "😂"}}}
 	})
-	add(channels[0].ID, guild.ID, users[1], 5*time.Hour-time.Minute, "anyone up for *cs 1.6*? ~~not now~~ maybe later", nil)
+	var deleted discord.Message
+	add(channels[0].ID, guild.ID, users[1], 5*time.Hour-time.Minute, "anyone up for *cs 1.6*? ~~not now~~ maybe later", func(m *discord.Message) {
+		deleted = *m
+	})
 	add(channels[0].ID, guild.ID, users[0], 5*time.Hour-2*time.Minute, "count me in <:StareNeutral:612368399732965376> but I'm winning", nil)
 	add(channels[0].ID, guild.ID, users[0], 5*time.Hour-3*time.Minute, "<a:StareNodGIF:614322540332056577><:StareNeutral:612368399732965376>", nil)
 	add(channels[0].ID, guild.ID, users[2], 4*time.Hour, "Check this out: `go build ./...`, then\n```\nlinkcord.exe --demo\n```\nworks on Windows 7 😎", nil)
@@ -157,6 +160,9 @@ func (u *ui) startDemo() {
 
 	u.chat = newChatView(u, st)
 	u.chat.demo = true
+	// A message someone deleted, shown with its sign; the demo keeps nothing.
+	u.chat.deleted = newDeletedLog("")
+	u.chat.deleted.record(deleted)
 	u.chat.load(ready)
 	u.chat.selectGuild(guild.ID)
 	u.screen = screenChat
