@@ -39,6 +39,9 @@ func (c *chatView) layoutMessages(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.chatHeader(gtx, title) }),
 		layout.Flexed(1, c.layoutHistory),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16), Top: unit.Dp(4)}.Layout(gtx, c.layoutJumpBar)
+		}),
 		layout.Rigid(c.layoutComposer),
 	)
 }
@@ -221,7 +224,15 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 				var children []layout.FlexChild
 				if ref := m.ReferencedMessage; ref != nil && !grouped {
 					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return c.layoutReply(gtx, *ref)
+						// A click on the quote goes to the message it quotes.
+						cl := c.msgClick(m.ID, 10)
+						if cl.Clicked(gtx) {
+							c.jumpToMessage(ref.ID)
+						}
+						return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							pointer.CursorPointer.Add(gtx.Ops)
+							return c.layoutReply(gtx, *ref)
+						})
 					}))
 				}
 				if !grouped {
@@ -265,33 +276,12 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 						return c.layoutContent(gtx, m)
 					}))
 				}
-				for _, a := range m.Attachments {
+				if fwd := forwardedSnapshot(m); fwd != nil {
 					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return c.layoutAttachment(gtx, a)
+						return c.layoutForwarded(gtx, m, *fwd)
 					}))
 				}
-				for _, s := range m.Stickers {
-					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return c.layoutSticker(gtx, s)
-					}))
-				}
-				for _, e := range m.Embeds {
-					if p, ok := embedPreview(e); ok {
-						children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if p.video {
-								return c.layoutVideo(gtx, p)
-							}
-							return c.layoutMedia(gtx, p.proxy, p.original, p.width, p.height, p.openURL)
-						}))
-						continue
-					}
-					if e.Title == "" && e.Description == "" && e.Image == nil {
-						continue
-					}
-					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return c.layoutEmbed(gtx, e)
-					}))
-				}
+				children = append(children, c.mediaChildren(m)...)
 				if len(m.Reactions) > 0 {
 					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return c.layoutReactions(gtx, m)
@@ -307,6 +297,40 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 			}),
 		)
 	})
+}
+
+// mediaChildren lays out what a message carries besides its text: files,
+// stickers and embeds.
+func (c *chatView) mediaChildren(m discord.Message) []layout.FlexChild {
+	var children []layout.FlexChild
+	for _, a := range m.Attachments {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return c.layoutAttachment(gtx, a)
+		}))
+	}
+	for _, s := range m.Stickers {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return c.layoutSticker(gtx, s)
+		}))
+	}
+	for _, e := range m.Embeds {
+		if p, ok := embedPreview(e); ok {
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if p.video {
+					return c.layoutVideo(gtx, p)
+				}
+				return c.layoutMedia(gtx, p.proxy, p.original, p.width, p.height, p.openURL)
+			}))
+			continue
+		}
+		if e.Title == "" && e.Description == "" && e.Image == nil {
+			continue
+		}
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return c.layoutEmbed(gtx, e)
+		}))
+	}
+	return children
 }
 
 // authorAvatarURL is the avatar of a message author: the one they use in the
@@ -336,15 +360,34 @@ func (c *chatView) layoutReply(gtx layout.Context, ref discord.Message) layout.D
 	if snippet == "" && len(ref.Attachments) > 0 {
 		snippet = "Attachment"
 	}
+	// The quote keeps the author's color and the text's, a little darker,
+	// with their avatar, as on Discord.
+	guildID := c.selChannel.GuildID
+	nameColor := colorHeader
+	if guildID.IsValid() {
+		if col, ok := c.st.MemberColor(guildID, ref.Author.ID); ok && col != 0 && col != discord.NullColor {
+			nameColor = rgb(uint32(col))
+		}
+	}
 	return layout.Inset{Bottom: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconReply, 14, colorMuted) }),
 			layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-			layout.Rigid(oneLine(bold(label(th, 13, colorMuted, "@"+name))).Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return c.u.picture(gtx, c.authorAvatarURL(guildID, ref.Author), 16, colorFor(uint64(ref.Author.ID)), name, -1)
+			}),
+			layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
+			layout.Rigid(oneLine(bold(label(th, 13, darker(nameColor), "@"+name))).Layout),
 			layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-			layout.Flexed(1, oneLine(label(th, 13, colorMuted, snippet)).Layout),
+			layout.Flexed(1, oneLine(label(th, 13, darker(colorText), snippet)).Layout),
 		)
 	})
+}
+
+// darker dims a color a little, for quoted text.
+func darker(c colorT) colorT {
+	c.R, c.G, c.B = uint8(int(c.R)*80/100), uint8(int(c.G)*80/100), uint8(int(c.B)*80/100)
+	return c
 }
 
 func (c *chatView) linkClick(url string) *widget.Clickable {
@@ -443,6 +486,9 @@ func (c *chatView) layoutMedia(gtx layout.Context, proxy, original string, w, h 
 }
 
 func (c *chatView) layoutAttachment(gtx layout.Context, a discord.Attachment) layout.Dimensions {
+	if isVoiceMessage(a) {
+		return c.layoutVoiceMessage(gtx, a)
+	}
 	if isImage(a) {
 		return c.layoutMedia(gtx, string(a.Proxy), string(a.URL), int(a.Width), int(a.Height), string(a.URL))
 	}
@@ -456,7 +502,23 @@ func (c *chatView) layoutAttachment(gtx layout.Context, a discord.Attachment) la
 	th := c.u.th
 	cl := c.linkClick(string(a.URL))
 	if cl.Clicked(gtx) {
-		openLink(string(a.URL))
+		c.saveFile(string(a.URL), a.Filename)
+	}
+	// What a click does, and how far a download is.
+	status := formatSize(a.Size) + " · click to download"
+	statusColor := colorMuted
+	if d := c.downloads[string(a.URL)]; d != nil {
+		got, total, _, err, done := d.state()
+		switch {
+		case done && err != nil:
+			status, statusColor = "Download failed · click to retry", colorRed
+		case done:
+			status = "Saved to Downloads · click to show"
+		case total > 0:
+			status = fmt.Sprintf("Downloading… %d%%", got*100/total)
+		default:
+			status = "Downloading… " + formatSize(uint64(got))
+		}
 	}
 	return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(420))
@@ -474,8 +536,21 @@ func (c *chatView) layoutAttachment(gtx layout.Context, a discord.Attachment) la
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 								layout.Rigid(oneLine(label(th, 14, colorLink, a.Filename)).Layout),
-								layout.Rigid(label(th, 12, colorMuted, formatSize(a.Size)+" · click to open").Layout),
+								layout.Rigid(label(th, 12, statusColor, status).Layout),
 							)
+						}),
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								ic := iconDownload
+								if d := c.downloads[string(a.URL)]; d != nil {
+									if _, _, _, err, done := d.state(); done && err == nil {
+										ic = iconDone
+									}
+								}
+								return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return icon(gtx, ic, 22, colorText)
+								})
+							})
 						}),
 					)
 				})

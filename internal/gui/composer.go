@@ -672,6 +672,7 @@ func (c *chatView) send() {
 	c.typingUntil = time.Time{}
 	// Show the newest messages, where this one lands.
 	c.messageList.Position = layout.Position{}
+	c.jumpToPresent()
 
 	id := c.selChannel.ID
 	if c.demo {

@@ -82,6 +82,7 @@ func (c *chatView) closeVideo() {
 // The tile shows a spinner until the first frame is ready.
 func (c *chatView) openVideo(source, title string, shown bool) {
 	c.closeVideo()
+	c.stopVoice()
 	ctx, cancel := context.WithCancel(context.Background())
 	v := &videoViewer{source: source, title: title, cancel: cancel, shown: shown, seek: make(chan time.Duration, 1)}
 	c.video = v

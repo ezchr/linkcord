@@ -77,6 +77,17 @@ type channelRow struct {
 }
 
 type chatView struct {
+	// detached is set while older messages show in place of the newest,
+	// after a jump; flashID is lit until flashUntil.
+	detached    bool
+	jumpPresent widget.Clickable
+	flashID     discord.MessageID
+	flashUntil  time.Time
+	// downloads are the files saved to the Downloads folder, by address.
+	downloads map[string]*download
+	// voice is the voice message playing, and voiceCtl the widgets of each.
+	voice    *voicePlayer
+	voiceCtl map[string]*voiceControls
 	// deleted keeps deleted messages, shown in their place with a sign.
 	deleted *deletedLog
 	// The video volume chosen last, kept for the next video.
@@ -303,6 +314,7 @@ func (c *chatView) close() {
 		c.refreshCancel()
 	}
 	c.closeVideo()
+	c.stopVoice()
 	// A call does not outlive the session it belongs to.
 	c.u.leaveVoice()
 	c.u.voice.demoChannel = 0
@@ -597,6 +609,7 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	c.lastChannel[c.selGuild] = ch.ID
 	c.messages, c.loadErr, c.sendErr = nil, "", ""
 	c.loading, c.loadingOlder, c.noOlder = true, false, false
+	c.detached = false
 	c.messageList.Position = layout.Position{}
 	clear(c.typers)
 	clear(c.selectables)
@@ -739,7 +752,8 @@ func (c *chatView) apply(ev gateway.Event) {
 	switch ev := ev.(type) {
 	case *gateway.MessageCreateEvent:
 		if sel != nil && ev.ChannelID == sel.ID {
-			if !slices.ContainsFunc(c.messages, func(m discord.Message) bool { return m.ID == ev.ID }) {
+			// Over older messages, new ones wait for the jump to the present.
+			if !c.detached && !slices.ContainsFunc(c.messages, func(m discord.Message) bool { return m.ID == ev.ID }) {
 				c.messages = append(c.messages, ev.Message)
 			}
 			delete(c.typers, ev.Author.ID)
@@ -875,6 +889,7 @@ func (c *chatView) update(gtx layout.Context) {
 
 func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 	c.update(gtx)
+	c.updateUnreadKeys(gtx)
 	if c.u.chat != c {
 		// Logged out while handling input.
 		return layout.Dimensions{Size: gtx.Constraints.Max}

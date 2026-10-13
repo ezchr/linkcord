@@ -221,6 +221,9 @@ func (c *chatView) layoutWithActions(gtx layout.Context, m discord.Message, w la
 	if over || a.editing == m.ID {
 		paint.FillShape(gtx.Ops, colorMessageHover, clip.Rect{Max: dims.Size}.Op())
 	}
+	if c.flashing(m.ID) {
+		paint.FillShape(gtx.Ops, withAlpha(colorAccent, 0x30), clip.Rect{Max: dims.Size}.Op())
+	}
 	call.Add(gtx.Ops)
 	// The area passes clicks on, so that links and names keep working.
 	area := clip.Rect{Max: dims.Size}.Push(gtx.Ops)

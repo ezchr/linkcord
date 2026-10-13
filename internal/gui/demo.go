@@ -125,7 +125,30 @@ func (u *ui) startDemo() {
 	add(channels[0].ID, guild.ID, me, 3*time.Hour, "> this is a quote\nAnd this is a ||spoiler|| with https://github.com/ezchr/linkcord", func(m *discord.Message) {
 		m.Embeds = []discord.Embed{{Title: "GitHub - ezchr/linkcord", Description: "Lightweight Discord client for Windows 7, 8, 10, and 11. - ezchr/linkcord", URL: "https://github.com/ezchr/linkcord", Color: 0x1f2328}}
 	})
-	add(channels[0].ID, guild.ID, users[5], 2*time.Hour, "<@"+me.ID.String()+"> reply when you can 🙏", nil)
+	var asked discord.Message
+	add(channels[0].ID, guild.ID, users[5], 2*time.Hour, "<@"+me.ID.String()+"> reply when you can 🙏", func(m *discord.Message) {
+		asked = *m
+	})
+	add(channels[0].ID, guild.ID, users[3], 100*time.Minute, "", func(m *discord.Message) {
+		m.Reference = &discord.MessageReference{Type: discord.MessageReferenceTypeForward, ChannelID: channels[1].ID}
+		m.MessageSnapshots = []discord.MessageSnapshot{{Message: discord.MessageSnapshotMessage{
+			Content: "**patch notes** are out: new maps and a *faster* lobby", Timestamp: discord.NewTimestamp(time.Now().Add(-26 * time.Hour)),
+		}}}
+	})
+	add(channels[0].ID, guild.ID, users[0], 95*time.Minute, "the logs from yesterday", func(m *discord.Message) {
+		m.Attachments = []discord.Attachment{{Filename: "server-log.txt", URL: discord.URL(avatar), Size: 18 * 1024, ContentType: "text/plain"}}
+	})
+	// A voice message to test with, from LINKCORD_DEMO_VOICE.
+	if voice := os.Getenv("LINKCORD_DEMO_VOICE"); voice != "" {
+		add(channels[0].ID, guild.ID, users[1], 92*time.Minute, "", func(m *discord.Message) {
+			wave := make([]byte, 64)
+			for i := range wave {
+				wave[i] = byte(60 + (i*37)%190)
+			}
+			m.Flags = discord.IsVoiceMessage
+			m.Attachments = []discord.Attachment{{Filename: "voice-message.ogg", URL: discord.URL(voice), Size: 40 * 1024, ContentType: "audio/ogg", DurationSecs: 6, Waveform: wave}}
+		})
+	}
 	// A video to test playback with, from LINKCORD_DEMO_VIDEO.
 	if video := os.Getenv("LINKCORD_DEMO_VIDEO"); video != "" {
 		add(channels[0].ID, guild.ID, users[2], 90*time.Minute, "look at this clip", func(m *discord.Message) {
@@ -133,8 +156,9 @@ func (u *ui) startDemo() {
 		})
 	}
 	add(channels[0].ID, guild.ID, me, time.Hour, "on my way", func(m *discord.Message) {
-		ref := discord.Message{Author: users[5], Content: "reply when you can 🙏"}
+		ref := asked
 		m.ReferencedMessage = &ref
+		m.Reference = &discord.MessageReference{MessageID: asked.ID, ChannelID: asked.ChannelID}
 		m.Type = discord.InlinedReplyMessage
 	})
 	add(channels[0].ID, guild.ID, users[6], 30*time.Minute, "", func(m *discord.Message) { m.Type = discord.GuildMemberJoinMessage })
