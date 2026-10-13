@@ -20,37 +20,37 @@ func (u *ui) startDemo() {
 		return discord.NewSnowflake(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(n) * time.Minute))
 	}
 
-	me := discord.User{ID: discord.UserID(id(1)), Discriminator: "0", Username: "usuario_demo", DisplayName: "Tú (demo)"}
+	me := discord.User{ID: discord.UserID(id(1)), Discriminator: "0", Username: "demo_user", DisplayName: "You (demo)"}
 	cab.MyselfSet(me, false)
 	users := []discord.User{
 		{ID: discord.UserID(id(2)), Discriminator: "0", Username: "ana", DisplayName: "Ana"},
 		{ID: discord.UserID(id(3)), Discriminator: "0", Username: "beto", DisplayName: "Beto"},
 		{ID: discord.UserID(id(4)), Discriminator: "0", Username: "carla", DisplayName: "Carla"},
 		{ID: discord.UserID(id(5)), Discriminator: "0", Username: "dani", DisplayName: "Dani"},
-		{ID: discord.UserID(id(6)), Discriminator: "0", Username: "bot_demo", DisplayName: "Bot de bienvenida", Bot: true},
-		{ID: discord.UserID(id(7)), Discriminator: "0", Username: "elena", DisplayName: "𝓔𝓵𝓮𝓷𝓪 | ᴿᵉʸ"},
+		{ID: discord.UserID(id(6)), Discriminator: "0", Username: "demo_bot", DisplayName: "Welcome Bot", Bot: true},
+		{ID: discord.UserID(id(7)), Discriminator: "0", Username: "elena", DisplayName: "𝓔𝓵𝓮𝓷𝓪 | ᴷⁱⁿᵍ"},
 		{ID: discord.UserID(id(8)), Discriminator: "0", Username: "fer", DisplayName: "Fer"},
 	}
 	presences := []discord.Presence{
-		{Status: discord.OnlineStatus, Activities: []discord.Activity{{Type: discord.ListeningActivity, Name: "YouTube Music", Details: "Canción de prueba", State: "Artista de prueba", Timestamps: &discord.ActivityTimestamps{Start: discord.UnixMsTimestamp(time.Now().Add(-56 * time.Minute).UnixMilli())}}}},
+		{Status: discord.OnlineStatus, Activities: []discord.Activity{{Type: discord.ListeningActivity, Name: "YouTube Music", Details: "Sample song", State: "Sample artist", Timestamps: &discord.ActivityTimestamps{Start: discord.UnixMsTimestamp(time.Now().Add(-56 * time.Minute).UnixMilli())}}}},
 		{Status: discord.OnlineStatus, Activities: []discord.Activity{{Type: discord.GameActivity, Name: "Counter-Strike"}}},
 		{Status: discord.IdleStatus},
-		{Status: discord.OnlineStatus, Activities: []discord.Activity{{Type: discord.CustomActivity, Name: "Custom Status", State: "Estudiando 📚"}}},
+		{Status: discord.OnlineStatus, Activities: []discord.Activity{{Type: discord.CustomActivity, Name: "Custom Status", State: "Studying 📚"}}},
 		{Status: discord.OnlineStatus},
 		{Status: discord.DoNotDisturbStatus, Activities: []discord.Activity{{Type: discord.CustomActivity, Name: "Custom Status", State: "busy"}}},
 		{Status: discord.OfflineStatus},
 	}
 	cab.PresenceSet(discord.NullGuildID, &discord.Presence{User: me, Status: discord.OnlineStatus, Activities: []discord.Activity{
-		{Type: discord.CustomActivity, Name: "Custom Status", State: "Probando Linkcord"},
-		{Type: discord.ListeningActivity, Name: "YouTube Music", Details: "Canción de prueba", State: "Artista de prueba", Timestamps: &discord.ActivityTimestamps{Start: discord.UnixMsTimestamp(time.Now().Add(-3 * time.Minute).UnixMilli())}},
+		{Type: discord.CustomActivity, Name: "Custom Status", State: "Testing Linkcord"},
+		{Type: discord.ListeningActivity, Name: "YouTube Music", Details: "Sample song", State: "Sample artist", Timestamps: &discord.ActivityTimestamps{Start: discord.UnixMsTimestamp(time.Now().Add(-3 * time.Minute).UnixMilli())}},
 	}}, false)
 
 	// A server with the decorated names that many servers use.
-	guild := discord.Guild{ID: discord.GuildID(id(100)), Name: "Servidor Demo", OwnerID: me.ID}
+	guild := discord.Guild{ID: discord.GuildID(id(100)), Name: "Demo Server", OwnerID: me.ID}
 	cab.GuildSet(&guild, false)
 	roles := []discord.Role{
-		{ID: discord.RoleID(id(101)), Name: "Moderadores", Color: 0x2ecc71, Position: 3, Hoist: true},
-		{ID: discord.RoleID(id(102)), Name: "Miembros", Color: 0x7a4a1e, Position: 2, Hoist: true},
+		{ID: discord.RoleID(id(101)), Name: "Moderators", Color: 0x2ecc71, Position: 3, Hoist: true},
+		{ID: discord.RoleID(id(102)), Name: "Members", Color: 0x7a4a1e, Position: 2, Hoist: true},
 		{ID: discord.RoleID(id(103)), Name: "Bots", Color: 0xf1c40f, Position: 1, Hoist: true},
 	}
 	for i := range roles {
@@ -67,15 +67,15 @@ func (u *ui) startDemo() {
 		cab.PresenceSet(discord.NullGuildID, &p, false)
 	}
 
-	cat := discord.Channel{ID: discord.ChannelID(id(110)), GuildID: guild.ID, Type: discord.GuildCategory, Name: "【 💬 CHARLA 💬 】", Position: 1}
-	voiceCat := discord.Channel{ID: discord.ChannelID(id(111)), GuildID: guild.ID, Type: discord.GuildCategory, Name: "🔊 VOZ", Position: 2}
+	cat := discord.Channel{ID: discord.ChannelID(id(110)), GuildID: guild.ID, Type: discord.GuildCategory, Name: "【 💬 CHAT 💬 】", Position: 1}
+	voiceCat := discord.Channel{ID: discord.ChannelID(id(111)), GuildID: guild.ID, Type: discord.GuildCategory, Name: "🔊 VOICE", Position: 2}
 	channels := []discord.Channel{
-		{ID: discord.ChannelID(id(120)), GuildID: guild.ID, Type: discord.GuildText, Name: "╭・━━-👋-bienvenida", Position: 0, Topic: "Bienvenidos al servidor de prueba ✨"},
-		{ID: discord.ChannelID(id(121)), GuildID: guild.ID, Type: discord.GuildText, Name: "├・━━-💀-despedida", Position: 1},
+		{ID: discord.ChannelID(id(120)), GuildID: guild.ID, Type: discord.GuildText, Name: "╭・━━-👋-welcome", Position: 0, Topic: "Welcome to the demo server ✨"},
+		{ID: discord.ChannelID(id(121)), GuildID: guild.ID, Type: discord.GuildText, Name: "├・━━-💀-goodbye", Position: 1},
 		{ID: discord.ChannelID(id(122)), GuildID: guild.ID, Type: discord.GuildText, Name: "╰・━━-🔴-streams", Position: 2},
-		{ID: discord.ChannelID(id(123)), GuildID: guild.ID, Type: discord.GuildText, Name: "🔒privado🔒", Position: 3, ParentID: cat.ID},
-		{ID: discord.ChannelID(id(124)), GuildID: guild.ID, Type: discord.GuildText, Name: "chat-general", Position: 4, ParentID: cat.ID},
-		{ID: discord.ChannelID(id(125)), GuildID: guild.ID, Type: discord.GuildVoice, Name: "🏝 Sala de juegos", Position: 5, ParentID: voiceCat.ID},
+		{ID: discord.ChannelID(id(123)), GuildID: guild.ID, Type: discord.GuildText, Name: "🔒private🔒", Position: 3, ParentID: cat.ID},
+		{ID: discord.ChannelID(id(124)), GuildID: guild.ID, Type: discord.GuildText, Name: "general-chat", Position: 4, ParentID: cat.ID},
+		{ID: discord.ChannelID(id(125)), GuildID: guild.ID, Type: discord.GuildVoice, Name: "🏝 Game Room", Position: 5, ParentID: voiceCat.ID},
 		{ID: discord.ChannelID(id(126)), GuildID: guild.ID, Type: discord.GuildVoice, Name: "General", Position: 6, ParentID: voiceCat.ID},
 	}
 	cab.ChannelSet(&cat, false)
@@ -89,7 +89,7 @@ func (u *ui) startDemo() {
 
 	// Direct messages: one with a person and a group.
 	dm := discord.Channel{ID: discord.ChannelID(id(200)), Type: discord.DirectMessage, DMRecipients: []discord.User{users[0]}, LastMessageID: discord.MessageID(id(9000))}
-	group := discord.Channel{ID: discord.ChannelID(id(201)), Type: discord.GroupDM, Name: "Grupo de amigos", DMRecipients: []discord.User{users[0], users[1], users[3]}}
+	group := discord.Channel{ID: discord.ChannelID(id(201)), Type: discord.GroupDM, Name: "Friends Group", DMRecipients: []discord.User{users[0], users[1], users[3]}}
 	cab.ChannelSet(&dm, false)
 	cab.ChannelSet(&group, false)
 
@@ -107,23 +107,23 @@ func (u *ui) startDemo() {
 		cab.MessageSet(&m, false)
 	}
 	for i := 60; i > 6; i-- {
-		add(channels[0].ID, guild.ID, users[4], time.Duration(i)*time.Hour, fmt.Sprintf("👋 <@%s> **¡Bienvenido al servidor!** Lee las reglas y diviértete.", users[i%4].ID), func(m *discord.Message) {
-			m.Attachments = []discord.Attachment{{Filename: "bienvenida.jpg", URL: discord.URL(avatar), Size: 392 * 1024, ContentType: "image/png", Width: 128, Height: 128}}
+		add(channels[0].ID, guild.ID, users[4], time.Duration(i)*time.Hour, fmt.Sprintf("👋 <@%s> **Welcome to the server!** Read the rules and have fun.", users[i%4].ID), func(m *discord.Message) {
+			m.Attachments = []discord.Attachment{{Filename: "welcome.jpg", URL: discord.URL(avatar), Size: 392 * 1024, ContentType: "image/png", Width: 128, Height: 128}}
 		})
 	}
-	add(channels[0].ID, guild.ID, users[1], 5*time.Hour, "hola a todos 🔥🔥", func(m *discord.Message) {
+	add(channels[0].ID, guild.ID, users[1], 5*time.Hour, "hello everyone 🔥🔥", func(m *discord.Message) {
 		m.Reactions = []discord.Reaction{{Count: 3, Emoji: discord.Emoji{Name: "🔥"}}, {Count: 1, Me: true, Emoji: discord.Emoji{Name: "😂"}}}
 	})
-	add(channels[0].ID, guild.ID, users[1], 5*time.Hour-time.Minute, "alguien para jugar *cs 1.6*? ~~ahora no~~ más tarde", nil)
-	add(channels[0].ID, guild.ID, users[0], 5*time.Hour-2*time.Minute, "yo me apunto <:StareNeutral:612368399732965376> pero gano yo", nil)
+	add(channels[0].ID, guild.ID, users[1], 5*time.Hour-time.Minute, "anyone up for *cs 1.6*? ~~not now~~ maybe later", nil)
+	add(channels[0].ID, guild.ID, users[0], 5*time.Hour-2*time.Minute, "count me in <:StareNeutral:612368399732965376> but I'm winning", nil)
 	add(channels[0].ID, guild.ID, users[0], 5*time.Hour-3*time.Minute, "<a:StareNodGIF:614322540332056577><:StareNeutral:612368399732965376>", nil)
-	add(channels[0].ID, guild.ID, users[2], 4*time.Hour, "Miren esto: `go build ./...` y luego\n```\nlinkcord.exe --demo\n```\nfunciona en Windows 7 😎", nil)
-	add(channels[0].ID, guild.ID, me, 3*time.Hour, "> esto es una cita\nY esto un ||spoiler|| con https://github.com/ezchr/linkcord", func(m *discord.Message) {
-		m.Embeds = []discord.Embed{{Title: "GitHub - ezchr/linkcord", Description: "Cliente de Discord liviano para Windows 7, 8, 10 y 11. - ezchr/linkcord", URL: "https://github.com/ezchr/linkcord", Color: 0x1f2328}}
+	add(channels[0].ID, guild.ID, users[2], 4*time.Hour, "Check this out: `go build ./...`, then\n```\nlinkcord.exe --demo\n```\nworks on Windows 7 😎", nil)
+	add(channels[0].ID, guild.ID, me, 3*time.Hour, "> this is a quote\nAnd this is a ||spoiler|| with https://github.com/ezchr/linkcord", func(m *discord.Message) {
+		m.Embeds = []discord.Embed{{Title: "GitHub - ezchr/linkcord", Description: "Lightweight Discord client for Windows 7, 8, 10, and 11. - ezchr/linkcord", URL: "https://github.com/ezchr/linkcord", Color: 0x1f2328}}
 	})
-	add(channels[0].ID, guild.ID, users[5], 2*time.Hour, "<@"+me.ID.String()+"> respóndeme cuando puedas 🙏", nil)
-	add(channels[0].ID, guild.ID, me, time.Hour, "ya voy", func(m *discord.Message) {
-		ref := discord.Message{Author: users[5], Content: "respóndeme cuando puedas 🙏"}
+	add(channels[0].ID, guild.ID, users[5], 2*time.Hour, "<@"+me.ID.String()+"> reply when you can 🙏", nil)
+	add(channels[0].ID, guild.ID, me, time.Hour, "on my way", func(m *discord.Message) {
+		ref := discord.Message{Author: users[5], Content: "reply when you can 🙏"}
 		m.ReferencedMessage = &ref
 		m.Type = discord.InlinedReplyMessage
 	})
@@ -134,16 +134,16 @@ func (u *ui) startDemo() {
 		if i%3 == 0 {
 			author = me
 		}
-		add(dm.ID, 0, author, time.Duration(i)*time.Hour, fmt.Sprintf("mensaje de prueba %d 😀", i), nil)
+		add(dm.ID, 0, author, time.Duration(i)*time.Hour, fmt.Sprintf("test message %d 😀", i), nil)
 	}
 	for i := 60; i > 0; i-- {
-		add(group.ID, 0, users[i%3], time.Duration(i)*time.Minute, fmt.Sprintf("hola grupo %d", i), nil)
+		add(group.ID, 0, users[i%3], time.Duration(i)*time.Minute, fmt.Sprintf("hello group %d", i), nil)
 	}
 
 	ready := &gateway.ReadyEvent{User: me}
 	ready.Guilds = []gateway.GuildCreateEvent{{Guild: guild}}
 	for i := range 6 {
-		g := discord.Guild{ID: discord.GuildID(id(300 + i)), Name: []string{"Juegos", "Música", "Programación", "Anime", "Linkcord Club", "Tareas"}[i], OwnerID: me.ID}
+		g := discord.Guild{ID: discord.GuildID(id(300 + i)), Name: []string{"Games", "Music", "Programming", "Anime", "Linkcord Club", "Homework"}[i], OwnerID: me.ID}
 		cab.GuildSet(&g, false)
 		ready.Guilds = append(ready.Guilds, gateway.GuildCreateEvent{Guild: g})
 	}

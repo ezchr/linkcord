@@ -1,18 +1,7 @@
 package cmd
 
-import (
-	"runtime/debug"
-)
+import "github.com/ezchr/linkcord/internal/version"
 
 func buildVersion() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "unknown"
-	}
-	switch info.Main.Version {
-	case "", "(devel)":
-		return "v0.0.0-dev"
-	default:
-		return info.Main.Version
-	}
+	return version.String()
 }

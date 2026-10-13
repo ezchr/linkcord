@@ -67,7 +67,7 @@ func (c *chatView) rebuildMembers() {
 				strings.Compare(strings.ToLower(a.DisplayOrUsername()), strings.ToLower(b.DisplayOrUsername())),
 			)
 		})
-		c.memberRows = append(c.memberRows, memberRow{group: fmt.Sprintf("MIEMBROS — %d", len(users))})
+		c.memberRows = append(c.memberRows, memberRow{group: fmt.Sprintf("MEMBERS — %d", len(users))})
 		for _, u := range users {
 			c.memberRows = append(c.memberRows, memberRow{member: &discord.Member{User: u}})
 		}
@@ -159,12 +159,12 @@ func (c *chatView) demoMembers(guildID discord.GuildID) {
 }
 
 func (c *chatView) groupName(guildID discord.GuildID, g gateway.GuildMemberListGroup) string {
-	name := "MIEMBROS"
+	name := "MEMBERS"
 	switch g.ID {
 	case "online":
-		name = "EN LÍNEA"
+		name = "ONLINE"
 	case "offline":
-		name = "DESCONECTADOS"
+		name = "OFFLINE"
 	default:
 		if id, err := discord.ParseSnowflake(g.ID); err == nil {
 			if role, err := c.st.Cabinet.Role(guildID, discord.RoleID(id)); err == nil {
@@ -179,7 +179,7 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 	th := c.u.th
 	guildID := c.selChannel.GuildID
 	if len(c.memberRows) == 0 {
-		return layout.UniformInset(unit.Dp(16)).Layout(gtx, label(th, 13, colorMuted, "Cargando miembros…").Layout)
+		return layout.UniformInset(unit.Dp(16)).Layout(gtx, label(th, 13, colorMuted, "Loading members…").Layout)
 	}
 	dims := listLayout(gtx, th, &c.memberList, len(c.memberRows), func(gtx layout.Context, i int) layout.Dimensions {
 		r := c.memberRows[i]

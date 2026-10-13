@@ -3,6 +3,8 @@
 # install has, for the cgo audio code of voice.
 param(
 	[string]$Out = "..\linkcord.exe",
+	# For a release, pass its exact tag, for example -Version v1.4.0.
+	[string]$Version = "",
 	# Keep the console window to read logs and panics while developing.
 	[switch]$Console
 )
@@ -16,6 +18,12 @@ $env:GOOS = "windows"
 $env:GOARCH = "amd64"
 
 $ldflags = "-s -w"
+if ($Version) {
+	if ($Version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
+		throw "Version must be a release tag such as v1.4.0."
+	}
+	$ldflags += " -X github.com/ezchr/linkcord/internal/version.Version=$Version"
+}
 if (-not $Console) { $ldflags += " -H windowsgui" }
 
 Push-Location $PSScriptRoot

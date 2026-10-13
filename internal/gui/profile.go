@@ -69,8 +69,8 @@ var statusChoices = []struct {
 }{
 	{discord.OnlineStatus, ""},
 	{discord.IdleStatus, ""},
-	{discord.DoNotDisturbStatus, "No recibirás notificaciones en el escritorio."},
-	{discord.InvisibleStatus, "Aparecerás sin conexión."},
+	{discord.DoNotDisturbStatus, "You will not receive desktop notifications."},
+	{discord.InvisibleStatus, "You will appear offline."},
 }
 
 type profileView struct {
@@ -446,7 +446,7 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 	} else if p.loading {
 		children = append(children,
 			layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
-			section(label(th, 13, colorMuted, "Cargando perfil…").Layout),
+			section(label(th, 13, colorMuted, "Loading profile…").Layout),
 		)
 	}
 
@@ -468,17 +468,17 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		section(func(gtx layout.Context) layout.Dimensions {
 			rows := []layout.FlexChild{
-				layout.Rigid(bold(label(th, 12, colorText, "Miembro desde")).Layout),
+				layout.Rigid(bold(label(th, 12, colorText, "Member since")).Layout),
 				layout.Rigid(label(th, 13, colorText, formatDate(user.CreatedAt())).Layout),
 			}
 			if d := p.data; d != nil && d.GuildMember != nil && d.GuildMember.JoinedAt.IsValid() {
-				gname := "el servidor"
+				gname := "the server"
 				if g, err := c.st.Cabinet.Guild(p.guildID); err == nil {
 					gname = g.Name
 				}
 				rows = append(rows,
 					layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-					layout.Rigid(bold(label(th, 12, colorText, "Miembro de "+gname+" desde")).Layout),
+					layout.Rigid(bold(label(th, 12, colorText, "Joined "+gname+" on")).Layout),
 					layout.Rigid(label(th, 13, colorText, formatDate(d.GuildMember.JoinedAt.Time())).Layout),
 				)
 			}
@@ -507,13 +507,13 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 			return layout.Flex{}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
-					return button(gtx, th, &p.message, colorAccent, "Enviar mensaje")
+					return button(gtx, th, &p.message, colorAccent, "Send message")
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					txt := "Copiar ID"
+					txt := "Copy ID"
 					if p.copied {
-						txt = "¡Copiado!"
+						txt = "Copied!"
 					}
 					return button(gtx, th, &p.copyID, colorSelected, txt)
 				}),
@@ -681,9 +681,9 @@ func (c *chatView) layoutSelfMenu(gtx layout.Context, p *profileView) layout.Dim
 			}, click == &p.statusBtn && p.statusMenu)
 		})
 	}
-	copyTxt := "Copiar ID del usuario"
+	copyTxt := "Copy user ID"
 	if p.copied {
-		copyTxt = "¡ID copiado!"
+		copyTxt = "ID copied!"
 	}
 	return rounded(gtx, colorMenu, 8, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
@@ -695,7 +695,7 @@ func (c *chatView) layoutSelfMenu(gtx layout.Context, p *profileView) layout.Dim
 					})
 				}, statusName(status), colorText, true),
 				item(&p.copyID, func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconCopy, 18, colorMuted) }, copyTxt, colorText, false),
-				item(&p.logout, func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconLogout, 18, colorRed) }, "Cerrar sesión", colorRed, false),
+				item(&p.logout, func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconLogout, 18, colorRed) }, "Log out", colorRed, false),
 			)
 		})
 	})
@@ -742,9 +742,9 @@ func (c *chatView) layoutStatusMenu(gtx layout.Context, p *profileView) layout.D
 	return dims
 }
 
-// formatDate is a date as Discord shows it in profiles, such as "12 oct 2026".
+// formatDate is a date as Discord shows it in profiles, such as "12 Oct 2026".
 func formatDate(t time.Time) string {
-	months := [...]string{"ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sept", "oct", "nov", "dic"}
+	months := [...]string{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
 	t = t.Local()
 	return strconv.Itoa(t.Day()) + " " + months[t.Month()-1] + " " + strconv.Itoa(t.Year())
 }

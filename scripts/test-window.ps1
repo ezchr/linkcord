@@ -4,7 +4,7 @@
 # windows cover it.
 #
 # Usage, from the repository:
-#   .\scripts\probar-ventana.ps1 -Demo -Script { Start-Sleep 4; Snap "inicio"; MouseClick 500 632; TypeText "hola"; PressKey 0x0D; Snap "enviado" }
+#   .\scripts\test-window.ps1 -Demo -Script { Start-Sleep 4; Snap "start"; MouseClick 500 632; TypeText "hello"; PressKey 0x0D; Snap "sent" }
 #
 # Inside -Script: MouseMove x y, MouseClick x y, MouseWheel x y delta (120 per
 # notch, positive is up), TypeText "text", PressKey vk (0x0D Enter, 0x1B Esc),
@@ -12,8 +12,8 @@
 # area of the window.
 param(
 	[string]$Exe = (Join-Path $PSScriptRoot "..\..\linkcord.exe"),
-	[string]$Out = (Join-Path $PSScriptRoot "..\capturas"),
-	[string]$Tag = "prueba",
+	[string]$Out = (Join-Path $PSScriptRoot "..\screenshots"),
+	[string]$Tag = "test",
 	# Shows made-up data instead of logging in.
 	[switch]$Demo,
 	# Renders without a graphics card, as many Windows 7 PCs do.
@@ -43,7 +43,7 @@ if ($Warp) { $env:GIO_D3D11_WARP = "1" } else { Remove-Item Env:GIO_D3D11_WARP -
 $p = Start-Process $Exe -PassThru -RedirectStandardError (Join-Path $Out "$Tag-stderr.txt")
 $script:h = [IntPtr]::Zero
 for ($i = 0; $i -lt 50 -and $script:h -eq [IntPtr]::Zero; $i++) { Start-Sleep -Milliseconds 200; $p.Refresh(); $script:h = $p.MainWindowHandle }
-if ($script:h -eq [IntPtr]::Zero) { "No se abrió la ventana (terminó: $($p.HasExited))"; Get-Content (Join-Path $Out "$Tag-stderr.txt"); exit 1 }
+if ($script:h -eq [IntPtr]::Zero) { "The window did not open (process exited: $($p.HasExited))"; Get-Content (Join-Path $Out "$Tag-stderr.txt"); exit 1 }
 Start-Sleep -Milliseconds 800
 
 function MkLParam($x, $y) { [IntPtr](($y -shl 16) -bor ($x -band 0xffff)) }
@@ -69,10 +69,10 @@ function Snap($name) {
 	$g.ReleaseHdc($hdc)
 	$file = Join-Path $Out "$Tag-$name.png"
 	$bmp.Save($file); $g.Dispose(); $bmp.Dispose()
-	"Captura: $file"
+	"Screenshot: $file"
 }
 
 # The window must believe it has the focus to take keys.
 Post 0x7 0 ([IntPtr]0); Start-Sleep -Milliseconds 200
-if ($Script) { & $Script } else { Start-Sleep -Seconds 4; Snap "inicio" }
+if ($Script) { & $Script } else { Start-Sleep -Seconds 4; Snap "start" }
 Stop-Process $p -Force -ErrorAction SilentlyContinue

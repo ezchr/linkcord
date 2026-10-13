@@ -106,7 +106,7 @@ func (c *chatView) joinable(ch discord.Channel) error {
 		return nil
 	}
 	if !c.st.HasPermissions(ch.ID, discord.PermissionConnect) {
-		return errors.New("no tienes permiso para conectarte")
+		return errors.New("you do not have permission to connect")
 	}
 	if ch.VoiceUserLimit > 0 && !c.st.HasPermissions(ch.ID, discord.PermissionMoveMembers) {
 		states, _ := c.st.Cabinet.VoiceStates(ch.GuildID)
@@ -118,7 +118,7 @@ func (c *chatView) joinable(ch discord.Channel) error {
 		}
 		// Discord does not answer a request to join a full channel.
 		if n >= int(ch.VoiceUserLimit) {
-			return errors.New("el canal está lleno")
+			return errors.New("the channel is full")
 		}
 	}
 	return nil
@@ -131,7 +131,7 @@ func (c *chatView) joinVoice(ch discord.Channel) {
 		return
 	}
 	if err := c.joinable(ch); err != nil {
-		u.voiceFailed("No se pudo entrar a "+ch.Name, err)
+		u.voiceFailed("Could not join "+ch.Name, err)
 		return
 	}
 	if c.demo {
@@ -151,7 +151,7 @@ func (c *chatView) joinVoice(ch discord.Channel) {
 			err = s.Toggle(true)
 		}
 		if err != nil {
-			u.post(func() { u.voiceFailed("No se pudo entrar a "+ch.Name, err) })
+			u.post(func() { u.voiceFailed("Could not join "+ch.Name, err) })
 		}
 	}()
 }
@@ -166,7 +166,7 @@ func (u *ui) leaveVoice() {
 	if s := v.session; s != nil {
 		go func() {
 			if err := s.Leave(); err != nil {
-				u.post(func() { u.voiceFailed("No se pudo salir del canal de voz", err) })
+				u.post(func() { u.voiceFailed("Could not leave the voice channel", err) })
 			}
 		}()
 	}
@@ -189,7 +189,7 @@ func (u *ui) toggleVoice(deafen bool) {
 	if s := v.session; s != nil && s.Status().Joined {
 		go func() {
 			if err := s.Toggle(deafen); err != nil {
-				u.post(func() { u.voiceFailed("No se pudo cambiar el micrófono o el sonido", err) })
+				u.post(func() { u.voiceFailed("Could not change the microphone or audio settings", err) })
 			}
 		}()
 	}
@@ -261,11 +261,11 @@ func (u *ui) layoutVoicePanel(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		var rows []layout.FlexChild
 		if status.ChannelID.IsValid() {
-			title, col := "Conectando…", colorYellow
+			title, col := "Connecting…", colorYellow
 			if status.Joined {
-				title, col = "Voz conectada", colorGreen
+				title, col = "Voice connected", colorGreen
 			}
-			where := "Canal de voz"
+			where := "Voice channel"
 			if ch, err := u.chat.st.Cabinet.Channel(status.ChannelID); err == nil {
 				where = ch.Name
 				if g, err := u.chat.st.Cabinet.Guild(ch.GuildID); err == nil {

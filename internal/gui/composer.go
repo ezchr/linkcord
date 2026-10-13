@@ -92,7 +92,7 @@ type composerState struct {
 func (c *chatView) attachFiles() {
 	owner := zenity.Attach(c.u.hwnd)
 	go func() {
-		paths, err := zenity.SelectFileMultiple(zenity.Title("Adjuntar archivos"), owner)
+		paths, err := zenity.SelectFileMultiple(zenity.Title("Attach files"), owner)
 		if err != nil {
 			if err != zenity.ErrCanceled {
 				slog.Error("failed to pick files", "err", err)
@@ -106,7 +106,7 @@ func (c *chatView) attachFiles() {
 					continue
 				}
 				if info.Size() > maxUpload {
-					c.sendErr = fmt.Sprintf("«%s» pesa %s; Discord solo acepta archivos de hasta 10 MB sin Nitro.", filepath.Base(p), formatSize(uint64(info.Size())))
+					c.sendErr = fmt.Sprintf("\"%s\" is %s; Discord only accepts files up to 10 MB without Nitro.", filepath.Base(p), formatSize(uint64(info.Size())))
 					continue
 				}
 				c.comp.files = append(c.comp.files, &pendingFile{path: p, name: filepath.Base(p), size: info.Size()})
@@ -330,7 +330,7 @@ func (c *chatView) rebuildMentions() {
 			}
 		}
 		if canEveryone {
-			for _, s := range []struct{ name, sub string }{{"everyone", "Avisa a todos los que tienen acceso a este canal."}, {"here", "Avisa a todos los conectados que tienen acceso a este canal."}} {
+			for _, s := range []struct{ name, sub string }{{"everyone", "Notifies everyone who can access this channel."}, {"here", "Notifies everyone online who can access this channel."}} {
 				if rank := matches(s.name); rank >= 0 {
 					roles = append(roles, ranked{mentionItem{name: s.name, sub: s.sub, color: colorMention, role: true, markup: "@" + s.name}, rank})
 				}
@@ -424,7 +424,7 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 					return rounded(gtx, colorInput, 8, func(gtx layout.Context) layout.Dimensions {
 						gtx.Constraints.Min.X = gtx.Constraints.Max.X
 						return layout.UniformInset(unit.Dp(14)).Layout(gtx,
-							label(th, 15, colorMuted, "No tienes permiso para enviar mensajes en este canal.").Layout)
+							label(th, 15, colorMuted, "You do not have permission to send messages in this channel.").Layout)
 					})
 				}
 				return rounded(gtx, colorInput, 8, func(gtx layout.Context) layout.Dimensions {
@@ -443,9 +443,9 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 											// Long messages grow the box up to a limit, then scroll.
 											gtx.Constraints.Max.Y = min(gtx.Constraints.Max.Y, gtx.Dp(200))
 											gtx.Constraints.Min.X = gtx.Constraints.Max.X
-											hint := "Enviar mensaje a #" + c.selChannel.Name
+											hint := "Message #" + c.selChannel.Name
 											if !c.selChannel.GuildID.IsValid() {
-												hint = "Enviar mensaje a @" + c.dmName(*c.selChannel)
+												hint = "Message @" + c.dmName(*c.selChannel)
 											}
 											e := material.Editor(th, &c.composer, hint)
 											e.HintColor = colorMuted
@@ -475,7 +475,7 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 					txt, col = c.act.notice, colorGreen
 				}
 				if cs.sending {
-					txt, col = "Subiendo archivos…", colorMuted
+					txt, col = "Uploading files…", colorMuted
 				}
 				if c.sendErr != "" {
 					txt, col = c.sendErr, colorRed
@@ -543,12 +543,12 @@ func (c *chatView) layoutMentions(gtx layout.Context) layout.Dimensions {
 	return rounded(gtx, colorPanel, 8, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			title := "MIEMBROS"
+			title := "MEMBERS"
 			if len(cs.mentionItems) > 0 && cs.mentionItems[0].role {
 				title = "ROLES"
 			}
 			if cs.mentionQuery != "" {
-				title += " QUE COINCIDEN CON @" + strings.ToUpper(cs.mentionQuery)
+				title += " MATCHING @" + strings.ToUpper(cs.mentionQuery)
 			}
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -589,7 +589,7 @@ func (c *chatView) send() {
 		return
 	}
 	if n := utf8.RuneCountInString(text); n > 2000 {
-		c.sendErr = fmt.Sprintf("El mensaje es demasiado largo (%d de 2000 caracteres).", n)
+		c.sendErr = fmt.Sprintf("The message is too long (%d of 2000 characters).", n)
 		return
 	}
 	content := c.withMarkup(text)
@@ -637,7 +637,7 @@ func (c *chatView) send() {
 		for _, f := range files {
 			file, err := os.Open(f.path)
 			if err != nil {
-				c.u.post(func() { c.sendErr = "No se pudo abrir «" + f.name + "»: " + err.Error() })
+				c.u.post(func() { c.sendErr = "Could not open \"" + f.name + "\": " + err.Error() })
 				return
 			}
 			opened = append(opened, file)
@@ -649,7 +649,7 @@ func (c *chatView) send() {
 			if err == nil || c.selChannel == nil || c.selChannel.ID != id {
 				return
 			}
-			c.sendErr = "No se pudo enviar el mensaje: " + err.Error()
+			c.sendErr = "Could not send the message: " + err.Error()
 			if c.composer.Text() == "" {
 				c.composer.SetText(text)
 			}
@@ -696,13 +696,13 @@ func (c *chatView) typingText() string {
 	case 0:
 		return ""
 	case 1:
-		return names[0] + " está escribiendo…"
+		return names[0] + " is typing…"
 	case 2:
-		return names[0] + " y " + names[1] + " están escribiendo…"
+		return names[0] + " and " + names[1] + " are typing…"
 	case 3:
-		return names[0] + ", " + names[1] + " y " + names[2] + " están escribiendo…"
+		return names[0] + ", " + names[1] + " and " + names[2] + " are typing…"
 	default:
-		return "Varias personas están escribiendo…"
+		return "Several people are typing…"
 	}
 }
 

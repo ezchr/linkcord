@@ -12,7 +12,7 @@ import (
 
 // ErrCaptcha is returned when Discord asks to solve a captcha, which this
 // client cannot show.
-var ErrCaptcha = errors.New("Discord pidió un captcha (la verificación de \"no soy un robot\"), que Linkcord no puede mostrar")
+var ErrCaptcha = errors.New("Discord requested a captcha (the \"I'm not a robot\" check), which Linkcord cannot display")
 
 // newLoginClient returns a client for logging in that behaves like the login
 // page of a browser: it first loads the experiments, as the page does, which
@@ -47,9 +47,9 @@ func friendly(err error) error {
 	case strings.Contains(msg, "captcha"):
 		return ErrCaptcha
 	case strings.Contains(msg, "INVALID_LOGIN"), strings.Contains(msg, "Login or password is invalid"):
-		return errors.New("correo o contraseña incorrectos")
+		return errors.New("incorrect email or password")
 	case strings.Contains(msg, "Invalid two-factor code"), strings.Contains(msg, "60008"):
-		return errors.New("código de verificación incorrecto")
+		return errors.New("incorrect verification code")
 	case strings.Contains(msg, "status 429"):
 		return errors.New("demasiados intentos; espera unos minutos y vuelve a probar")
 	}

@@ -201,9 +201,9 @@ func (c *chatView) layoutViewer(gtx layout.Context) layout.Dimensions {
 	v.imgRect = image.Rectangle{Min: pos.Round(), Max: pos.Add(f32.Pt(dw, dh)).Round()}
 
 	side := min(max(v.w, v.h), maxViewerSide)
-	img := c.u.images.get(mediaURL(v.proxy, v.original, min(v.w, maxViewerSide), min(v.h, maxViewerSide)), side)
+	img := c.u.images.frame(gtx, mediaURL(v.proxy, v.original, min(v.w, maxViewerSide), min(v.h, maxViewerSide)), side)
 	if img == nil && v.thumb != "" {
-		img = c.u.images.get(v.thumb, v.thumbSize)
+		img = c.u.images.frame(gtx, v.thumb, v.thumbSize)
 	}
 	if img != nil {
 		t := op.Offset(v.imgRect.Min).Push(gtx.Ops)
@@ -255,7 +255,7 @@ func (c *chatView) layoutViewer(gtx layout.Context) layout.Dimensions {
 	call.Add(gtx.Ops)
 	t.Pop()
 
-	hint := label(th, 12, colorMuted, "Rueda del ratón: zoom · Arrastrar: mover · Doble clic: acercar · Esc: cerrar")
+	hint := label(th, 12, colorMuted, "Mouse wheel: zoom · Drag: pan · Double-click: zoom in · Esc: close")
 	macro = op.Record(gtx.Ops)
 	hd := hint.Layout(bgtx)
 	call = macro.Stop()

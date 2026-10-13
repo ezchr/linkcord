@@ -55,15 +55,15 @@ func statusColor(s discord.Status) colorT {
 func statusName(s discord.Status) string {
 	switch s {
 	case discord.OnlineStatus:
-		return "En línea"
+		return "Online"
 	case discord.IdleStatus:
-		return "Inactivo"
+		return "Idle"
 	case discord.DoNotDisturbStatus:
-		return "No molestar"
+		return "Do not disturb"
 	case discord.InvisibleStatus:
 		return "Invisible"
 	}
-	return "Desconectado"
+	return "Offline"
 }
 
 // statusRank orders members as Discord does: online, idle, busy, offline.
@@ -115,19 +115,19 @@ func activityLine(p *discord.Presence) string {
 	return ""
 }
 
-// activityVerb is the header of an activity, such as "Jugando a Minecraft".
+// activityVerb is the header of an activity, such as "Playing Minecraft".
 func activityVerb(a discord.Activity) string {
 	switch a.Type {
 	case discord.GameActivity:
-		return "Jugando a " + a.Name
+		return "Playing " + a.Name
 	case discord.StreamingActivity:
-		return "Transmitiendo " + a.Name
+		return "Streaming " + a.Name
 	case discord.ListeningActivity:
-		return "Escuchando " + a.Name
+		return "Listening to " + a.Name
 	case discord.WatchingActivity:
-		return "Viendo " + a.Name
+		return "Watching " + a.Name
 	case discord.CompetingActivity:
-		return "Compitiendo en " + a.Name
+		return "Competing in " + a.Name
 	}
 	return a.Name
 }

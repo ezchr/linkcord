@@ -24,7 +24,7 @@ import (
 const remoteAuthGatewayURL = "wss://remote-auth-gateway.discord.gg/?v=2"
 
 // ErrQRCanceled is returned by QR when the login is canceled on the phone.
-var ErrQRCanceled = errors.New("el inicio de sesión se canceló en el teléfono")
+var ErrQRCanceled = errors.New("sign-in was canceled on the phone")
 
 // QRHandlers receive the progress of a QR login. They are called from the
 // goroutine running QR.
@@ -133,7 +133,7 @@ func QR(ctx context.Context, h QRHandlers) (string, error) {
 			// The payload is "id:discriminator:avatar:username".
 			parts := strings.Split(string(user), ":")
 			if len(parts) != 4 {
-				return "", errors.New("datos de usuario inválidos")
+				return "", errors.New("invalid user data")
 			}
 			if h.Scanned != nil {
 				h.Scanned(parts[3])

@@ -44,7 +44,7 @@ type imageEntry struct {
 	state imageState
 	// op is the picture, or the first frame of an animation.
 	op paint.ImageOp
-	// frames and delays are the frames of an animated GIF and how long each
+	// frames and delays are the frames of a GIF or APNG and how long each
 	// shows; cycle is how long they all take.
 	frames []paint.ImageOp
 	delays []time.Duration
@@ -80,7 +80,12 @@ type images struct {
 }
 
 func newImages(u *ui) *images {
-	dir := filepath.Join(filepath.Dir(logPath()), "imagenes")
+	base := filepath.Dir(logPath())
+	dir := filepath.Join(base, "images")
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		// Preserve the cache from releases that used the Spanish folder name.
+		_ = os.Rename(filepath.Join(base, "imagenes"), dir)
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		slog.Warn("failed to create image cache dir", "err", err)
 		dir = ""
@@ -186,8 +191,9 @@ func (im *images) load(key, url string, size int, e *imageEntry) {
 		e.state = imageReady
 	}
 	im.mu.Unlock()
-	// One redraw at most every 50 ms, however many images finish loading.
-	if err == nil && im.u != nil && im.redraw.CompareAndSwap(false, true) {
+	// One redraw at most every 50 ms, including failed loads so that their
+	// fallback appears without waiting for another user event.
+	if im.u != nil && im.redraw.CompareAndSwap(false, true) {
 		time.AfterFunc(50*time.Millisecond, func() {
 			im.redraw.Store(false)
 			im.u.win.Invalidate()
@@ -204,11 +210,16 @@ func (im *images) download(key, url string, size int) ([]image.Image, []time.Dur
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if isGIF(data) {
-		frames, delays, err := decodeGIF(data, size)
+	if isGIF(data) || isAPNG(data) {
+		frames, delays, err := decodeAnimation(data, size)
 		if err == nil && len(frames) > 1 {
 			im.animToDisk(key, data)
 			return frames, delays, nil, nil
+		}
+		if err == nil && len(frames) == 1 {
+			// A single APNG frame may differ from its default PNG poster.
+			im.toDisk(stillKey(key, url), frames[0])
+			return nil, nil, frames[0], nil
 		}
 	}
 	img, err := decodeScaled(data, size)
@@ -228,6 +239,10 @@ func stillKey(key, url string) string {
 	if strings.HasSuffix(path, ".gif") {
 		return key + "#still"
 	}
+	if strings.HasSuffix(path, ".png") || strings.HasSuffix(path, ".apng") {
+		// A cached PNG from before APNG support may contain only frame one.
+		return key + "#png-still-v2"
+	}
 	return key
 }
 
@@ -240,6 +255,9 @@ func (im *images) fetch(url string) ([]byte, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status %s", resp.Status)
+	}
+	if strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "video/") {
+		return nil, errors.New("media proxy returned a video instead of an image")
 	}
 	// Pictures shown in the chat are resized by Discord; a limit keeps a
 	// broken server from filling the memory.
@@ -380,8 +398,8 @@ func (im *images) toDisk(key string, img image.Image) {
 	writeFile(im.path(key), buf.Bytes())
 }
 
-// Animated GIFs are kept as downloaded, since a PNG holds one frame, and
-// decoded again when loaded.
+// Animations are kept as downloaded and decoded again when loaded. The .gif
+// cache extension stays for compatibility; the contents identify GIF or APNG.
 func (im *images) animPath(key string) string {
 	return strings.TrimSuffix(im.path(key), ".png") + ".gif"
 }
@@ -400,7 +418,7 @@ func (im *images) animFromDisk(key string, size int) ([]image.Image, []time.Dura
 	if err != nil {
 		return nil, nil, err
 	}
-	frames, delays, err := decodeGIF(data, size)
+	frames, delays, err := decodeAnimation(data, size)
 	if err == nil && len(frames) < 2 {
 		err = errors.New("not animated")
 	}

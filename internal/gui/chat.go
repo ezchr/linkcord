@@ -482,7 +482,7 @@ func (c *chatView) dmName(ch discord.Channel) string {
 		names = append(names, name)
 	}
 	if len(names) == 0 {
-		return "Mensaje directo"
+		return "Direct message"
 	}
 	return strings.Join(names, ", ")
 }
@@ -523,7 +523,7 @@ func (c *chatView) memberName(guildID discord.GuildID, userID discord.UserID, me
 	if u, err := c.st.Cabinet.User(userID); err == nil {
 		return u.DisplayOrUsername()
 	}
-	return "Usuario"
+	return "User"
 }
 
 func (c *chatView) selectChannel(ch discord.Channel) {
@@ -562,7 +562,7 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 			}
 			c.loading = false
 			if err != nil {
-				c.loadErr = "No se pudieron cargar los mensajes: " + err.Error()
+				c.loadErr = "Could not load messages: " + err.Error()
 				return
 			}
 			c.messages = sortedMessages(msgs)
@@ -933,7 +933,7 @@ func (c *chatView) dmsUnread() ningen.UnreadIndication {
 
 func (c *chatView) layoutChannels(gtx layout.Context) layout.Dimensions {
 	th := c.u.th
-	title := "Mensajes directos"
+	title := "Direct messages"
 	if c.selGuild.IsValid() {
 		if g, err := c.st.Cabinet.Guild(c.selGuild); err == nil {
 			title = g.Name

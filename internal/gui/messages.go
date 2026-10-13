@@ -3,6 +3,7 @@ package gui
 import (
 	"fmt"
 	"image"
+	"net/url"
 	"path"
 	"regexp"
 	"strconv"
@@ -29,7 +30,7 @@ const groupWindow = 7 * time.Minute
 func (c *chatView) layoutMessages(gtx layout.Context) layout.Dimensions {
 	th := c.u.th
 	if c.selChannel == nil {
-		return layout.Center.Layout(gtx, label(th, 16, colorMuted, "Elige una conversación o un canal").Layout)
+		return layout.Center.Layout(gtx, label(th, 16, colorMuted, "Choose a conversation or channel").Layout)
 	}
 	title := "# " + c.selChannel.Name
 	if !c.selChannel.GuildID.IsValid() {
@@ -108,7 +109,7 @@ func (c *chatView) layoutHistory(gtx layout.Context) layout.Dimensions {
 	case c.loadErr != "":
 		return layout.Center.Layout(gtx, label(th, 15, colorRed, c.loadErr).Layout)
 	case len(c.messages) == 0:
-		return layout.Center.Layout(gtx, label(th, 15, colorMuted, "Todavía no hay mensajes aquí. ¡Saluda!").Layout)
+		return layout.Center.Layout(gtx, label(th, 15, colorMuted, "No messages here yet. Say hello!").Layout)
 	}
 	// The first element is the top of the history: a spinner while older
 	// messages load, or the start of the conversation.
@@ -140,9 +141,9 @@ func (c *chatView) layoutHistoryTop(gtx layout.Context) layout.Dimensions {
 				return loader(th).Layout(gtx)
 			})
 		}
-		txt := "Este es el comienzo del canal #" + c.selChannel.Name + "."
+		txt := "This is the beginning of #" + c.selChannel.Name + "."
 		if !c.selChannel.GuildID.IsValid() {
-			txt = "Este es el comienzo de tu conversación con " + c.dmName(*c.selChannel) + "."
+			txt = "This is the beginning of your conversation with " + c.dmName(*c.selChannel) + "."
 		}
 		return label(th, 14, colorMuted, txt).Layout(gtx)
 	})
@@ -258,7 +259,7 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 						if m.EditedTimestamp.IsValid() {
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutContent(gtx, m) }),
-								layout.Rigid(label(th, 11, colorMuted, "(editado)").Layout),
+								layout.Rigid(label(th, 11, colorMuted, "(edited)").Layout),
 							)
 						}
 						return c.layoutContent(gtx, m)
@@ -269,12 +270,18 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 						return c.layoutAttachment(gtx, a)
 					}))
 				}
+				for _, s := range m.Stickers {
+					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return c.layoutSticker(gtx, s)
+					}))
+				}
 				for _, e := range m.Embeds {
-					// Links to pictures and GIFs show just the picture.
-					if (e.Type == discord.ImageEmbed || e.Type == discord.GIFVEmbed) && e.Thumbnail != nil {
-						t := e.Thumbnail
+					if p, ok := embedPreview(e); ok {
 						children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return c.layoutMedia(gtx, string(t.Proxy), string(t.URL), int(t.Width), int(t.Height), string(e.URL))
+							if p.video {
+								return c.layoutVideo(gtx, p)
+							}
+							return c.layoutMedia(gtx, p.proxy, p.original, p.width, p.height, p.openURL)
 						}))
 						continue
 					}
@@ -321,7 +328,7 @@ func (c *chatView) layoutReply(gtx layout.Context, ref discord.Message) layout.D
 	name := c.memberName(c.selChannel.GuildID, ref.Author.ID, nil)
 	snippet := strings.ReplaceAll(c.renderContent(ref), "\n", " ")
 	if snippet == "" && len(ref.Attachments) > 0 {
-		snippet = "Archivo adjunto"
+		snippet = "Attachment"
 	}
 	return layout.Inset{Bottom: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
@@ -370,11 +377,15 @@ func mediaURL(proxy, original string, w, h int) string {
 	if u == "" {
 		return ""
 	}
-	sep := "?"
-	if strings.Contains(u, "?") {
-		sep = "&"
+	parsed, err := url.Parse(u)
+	if err != nil || !discordMediaHost(parsed.Hostname()) {
+		return u
 	}
-	return fmt.Sprintf("%s%swidth=%d&height=%d", u, sep, w, h)
+	q := parsed.Query()
+	q.Set("width", strconv.Itoa(max(w, 1)))
+	q.Set("height", strconv.Itoa(max(h, 1)))
+	parsed.RawQuery = q.Encode()
+	return parsed.String()
 }
 
 // layoutMedia shows a picture of w×h pixels at most 400×300, which opens
@@ -393,6 +404,10 @@ func (c *chatView) layoutMedia(gtx layout.Context, proxy, original string, w, h 
 	}
 	dw, dh = max(dw, 1), max(dh, 1)
 	size := image.Pt(dw, dh)
+	source := mediaURL(proxy, original, dw, dh)
+	if c.u.images.failed(source, max(dw, dh)) {
+		return c.layoutMediaFallback(gtx, "Image", "Could not load · click to open", openURL)
+	}
 	cl := c.linkClick("media:" + openURL)
 	if cl.Clicked(gtx) {
 		c.openViewer(proxy, original, w, h, openURL, mediaURL(proxy, original, dw, dh), max(dw, dh))
@@ -417,6 +432,13 @@ func (c *chatView) layoutAttachment(gtx layout.Context, a discord.Attachment) la
 	if isImage(a) {
 		return c.layoutMedia(gtx, string(a.Proxy), string(a.URL), int(a.Width), int(a.Height), string(a.URL))
 	}
+	if isVideo(a) {
+		return c.layoutVideo(gtx, mediaPreview{
+			proxy: videoPosterURL(string(a.Proxy)), openURL: string(a.URL),
+			width: int(a.Width), height: int(a.Height), video: true,
+			title: a.Filename + " · " + formatSize(a.Size),
+		})
+	}
 	th := c.u.th
 	cl := c.linkClick(string(a.URL))
 	if cl.Clicked(gtx) {
@@ -438,7 +460,7 @@ func (c *chatView) layoutAttachment(gtx layout.Context, a discord.Attachment) la
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 								layout.Rigid(oneLine(label(th, 14, colorLink, a.Filename)).Layout),
-								layout.Rigid(label(th, 12, colorMuted, formatSize(a.Size)+" · clic para abrir").Layout),
+								layout.Rigid(label(th, 12, colorMuted, formatSize(a.Size)+" · click to open").Layout),
 							)
 						}),
 					)
@@ -532,14 +554,14 @@ func (c *chatView) renderContent(m discord.Message) string {
 		if r, err := c.st.Cabinet.Role(guildID, discord.RoleID(id)); err == nil {
 			return "@" + r.Name
 		}
-		return "@rol"
+		return "@role"
 	})
 	s = reChannelMention.ReplaceAllStringFunc(s, func(match string) string {
 		id, _ := discord.ParseSnowflake(reChannelMention.FindStringSubmatch(match)[1])
 		if ch, err := c.st.Cabinet.Channel(discord.ChannelID(id)); err == nil {
 			return "#" + ch.Name
 		}
-		return "#canal"
+		return "#channel"
 	})
 	s = reCustomEmoji.ReplaceAllString(s, ":$1:")
 	s = reTimestamp.ReplaceAllStringFunc(s, func(match string) string {
@@ -557,22 +579,22 @@ func (c *chatView) systemText(m discord.Message) string {
 	name := c.memberName(c.selChannel.GuildID, m.Author.ID, nil)
 	switch m.Type {
 	case discord.GuildMemberJoinMessage:
-		return "→ " + name + " se unió al servidor."
+		return "→ " + name + " joined the server."
 	case discord.ChannelPinnedMessage:
-		return "📌 " + name + " fijó un mensaje en este canal."
+		return "📌 " + name + " pinned a message in this channel."
 	case discord.CallMessage:
-		return "📞 " + name + " inició una llamada."
+		return "📞 " + name + " started a call."
 	case discord.RecipientAddMessage:
-		return "→ " + name + " añadió a alguien al grupo."
+		return "→ " + name + " added someone to the group."
 	case discord.RecipientRemoveMessage:
-		return "← " + name + " salió del grupo."
+		return "← " + name + " left the group."
 	case discord.ChannelNameChangeMessage:
-		return name + " cambió el nombre del canal: " + m.Content
+		return name + " changed the channel name: " + m.Content
 	}
 	if m.Content != "" {
 		return name + ": " + c.renderContent(m)
 	}
-	return name + " hizo algo que Linkcord aún no sabe mostrar."
+	return name + " performed an action Linkcord cannot display yet."
 }
 
 // formatTime shows when a message was sent, as Discord does in Spanish.
@@ -583,9 +605,9 @@ func formatTime(t time.Time) string {
 	y2, m2, d2 := now.Date()
 	switch {
 	case y1 == y2 && m1 == m2 && d1 == d2:
-		return "hoy a las " + t.Format("15:04")
+		return "today at " + t.Format("15:04")
 	case y1 == y2 && m1 == m2 && d1 == d2-1:
-		return "ayer a las " + t.Format("15:04")
+		return "yesterday at " + t.Format("15:04")
 	}
 	return t.Format("02/01/2006 15:04")
 }

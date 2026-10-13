@@ -1,141 +1,193 @@
 # Linkcord
 
-Cliente gráfico de Discord, liviano, que funciona en **Windows 7, 8, 10 y 11** con un solo `.exe`. Usa el código de [discordo](https://github.com/ayn2op/discordo) (cliente de Discord para la terminal, en Go) como base para la conexión, el inicio de sesión y la voz. La interfaz es propia: una ventana dibujada con [Gio](https://gioui.org).
+A lightweight graphical Discord client for **Windows 7, 8, 10, and 11**, distributed as a single `.exe`. Linkcord uses [discordo](https://github.com/ayn2op/discordo), a Go terminal client, for its connection, authentication, and voice foundations. Its graphical interface is built with [Gio](https://gioui.org).
 
-Se hizo para que gente con Windows 7, que ya no puede usar la app oficial, tenga algo mejor que Discord en el navegador.
+Linkcord was created for people on Windows 7 who can no longer run the official desktop application.
 
-> ⚠️ **Términos de servicio:** usar un cliente no oficial va contra los términos de Discord. El riesgo de suspensión es bajo (igual que con discordo, la app se hace pasar por el cliente web), pero existe.
+> **Unofficial client:** using an unofficial client carries a risk of account suspension under Discord's terms of service.
 
-## Estado
+## Features
 
-| Funciona | Falta |
+| Available | Remaining work |
 |---|---|
-| Inicio de sesión: código QR, correo + contraseña (con código 2FA), token (con un script para copiarlo desde el navegador) | |
-| La sesión se guarda en el Administrador de credenciales de Windows; se guarda también el token nuevo cuando Discord lo renueva | |
-| Servidores en el orden del usuario, mensajes directos, categorías plegables, permisos, no leídos y menciones | |
-| Mensajes con formato de Discord, menciones, citas, código, spoilers, enlaces, imágenes en el chat, vistas previas de enlaces, insignia BOT | Emojis propios de los servidores dentro de los mensajes (se ven como `:nombre:`) |
-| Visor de imágenes con zoom y arrastre | GIF animados, videos en el chat, stickers |
-| Fotos de perfil e iconos (con caché en disco), estado en línea, lista de miembros | Hilos y foros |
-| Perfiles (propios y ajenos), cambiar el estado | Lista de amigos, solicitudes, ajustes |
-| Escribir: adjuntar archivos, selector de emojis, autocompletado de @menciones, "está escribiendo" | Probar en un Windows 7 real (ver "Pendiente") |
-| Emojis a color en toda la app | |
-| Voz: entrar con clic en un canal de voz, panel con el canal, el ping y colgar, silenciar y ensordecer (también antes de entrar), quién habla en verde | |
-| Acciones sobre mensajes (al pasar el ratón): reaccionar, responder (con o sin mención), editar en el sitio, copiar el texto y eliminar con confirmación (Mayús + clic la salta). Reacciones bajo los mensajes. ↑ en la caja vacía edita el último mensaje propio | |
+| QR-code, email/password with 2FA, and token sign-in | Captcha rendering |
+| Windows Credential Manager session storage and refreshed-token persistence | |
+| Servers in the user's order, direct messages, collapsible categories, and channel permissions | Unread counters and notification previews |
+| Discord formatting, mentions, quotes, code, spoilers, links, and BOT badges | Threads and forums |
+| Server emoji as images, large emoji-only messages, and animated GIFs | |
+| PNG, animated APNG, and GIF stickers; animated Tenor embeds | Lottie sticker rendering |
+| Image viewer with zoom, pan, and animation | |
+| Video thumbnails and a play button that opens the video in the browser | In-client video playback |
+| Cached avatars and server icons, presence, member lists, and profile cards | Friends, requests, and settings |
+| Attachments, emoji picker, mention autocomplete, and typing indicators | |
+| Voice join/leave, mute/deafen, connection status, and speaking indicators | Verification in a real voice call |
+| React, reply, edit, copy, delete, and inline reaction controls | |
+| English interface and project documentation | Testing on a physical Windows 7 machine |
 
-## Compilar
+Shift-click Delete skips confirmation. Up Arrow in an empty composer edits your most recent message.
 
-Hace falta Windows y dos herramientas, que se instalan en la carpeta del usuario sin permisos de administrador:
+## Build
 
-1. **Go para Windows 7**: [go-legacy-win7 v1.27.2-1](https://github.com/thongtech/go-legacy-win7/releases/tag/v1.27.2-1), el archivo `go-legacy-win7-1.27.2-1.windows_amd64.zip`. Descomprimirlo en `%LOCALAPPDATA%\Programs\go-legacy-win7`. Es Go 1.27 con el soporte de Windows 7 que Go quitó en la versión 1.21. El Go normal compila, pero el `.exe` no abre en Windows 7.
-2. **Compilador de C** (para el audio de la voz): [WinLibs GCC 16.2.0 con **MSVCRT**](https://github.com/brechtsanders/winlibs_mingw/releases/tag/16.2.0posix-14.0.0-msvcrt-r2), el archivo `winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64msvcrt-14.0.0-r2.zip`. Descomprimir la carpeta `mingw64` en `%LOCALAPPDATA%\Programs\mingw64`. Tiene que ser la variante **MSVCRT** y no UCRT: MSVCRT viene con todos los Windows 7, UCRT no.
+Windows and two user-installed tools are required; administrator permissions are unnecessary.
 
-Después, desde esta carpeta:
+1. **Go with Windows 7 support:** [go-legacy-win7 v1.27.2-1](https://github.com/thongtech/go-legacy-win7/releases/tag/v1.27.2-1), asset `go-legacy-win7-1.27.2-1.windows_amd64.zip`. Extract it to `%LOCALAPPDATA%\Programs\go-legacy-win7`. Standard Go builds do not retain Windows 7 runtime support.
+2. **C compiler for voice audio:** [WinLibs GCC 16.2.0 with MSVCRT](https://github.com/brechtsanders/winlibs_mingw/releases/tag/16.2.0posix-14.0.0-msvcrt-r2), asset `winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64msvcrt-14.0.0-r2.zip`. Extract its `mingw64` folder to `%LOCALAPPDATA%\Programs\mingw64`. Use **MSVCRT**, which is available on Windows 7, rather than UCRT.
+
+From the repository:
 
 ```powershell
-.\build-linkcord.ps1            # deja ..\linkcord.exe
-.\build-linkcord.ps1 -Console   # con consola, para ver errores y panics
+.\build-linkcord.ps1            # writes ..\linkcord.exe
+.\build-linkcord.ps1 -Console   # retains a console for logs and panics
 ```
 
-Pruebas:
+Tests and static checks:
 
 ```powershell
 $env:PATH = "$env:LOCALAPPDATA\Programs\go-legacy-win7\bin;$env:LOCALAPPDATA\Programs\mingw64\bin;$env:PATH"
 $env:CGO_ENABLED = "1"
-go test ./internal/gui ./internal/auth
-go vet ./internal/gui ./internal/auth ./cmd/linkcord
+$env:CC = "gcc"
+go test ./internal/gui ./internal/auth ./internal/http
+go test ./internal/update
+go vet ./internal/gui ./internal/auth ./internal/http ./internal/update ./cmd/linkcord
 ```
 
-## Probar sin cuenta y sin Windows 7
-
-| Variable de entorno | Para qué |
-|---|---|
-| `LINKCORD_DEMO=1` | Abre con servidores, personas y mensajes inventados, sin conectarse a Discord. Sirve para revisar la interfaz. Los datos están en `internal/gui/demo.go`. |
-| `GIO_LEGACY_MOUSE=1` | Usa los mensajes de ratón de Windows 7 en vez de los de Windows 8+, para probar ese camino en Windows 10/11. |
-| `GIO_D3D11_WARP=1` | Dibuja sin tarjeta gráfica (WARP), como pasa en muchos Windows 7 viejos o en máquinas virtuales. |
-| `LINKCORD_TOKEN=...` | Usa ese token en vez del guardado. |
-
-`scripts\probar-ventana.ps1` abre la app y le manda clics, rueda del ratón y teclas **directamente a su ventana**, sin mover el ratón real, y guarda capturas aunque haya otras ventanas encima. Así se revisaron todos los cambios de la interfaz. El uso está al principio del script. Ejemplo:
+The updater has an optional Windows integration test that replaces and restores temporary executables, including paths containing spaces and apostrophes:
 
 ```powershell
-.\scripts\probar-ventana.ps1 -Demo -Script { Start-Sleep 4; Snap "inicio"; MouseClick 500 632; TypeText "@an"; Snap "menciones" }
+$env:LINKCORD_TEST_HANDOFF = "1"
+go test ./internal/update -run '^TestWindowsHandoff$' -count=1 -v
+Remove-Item Env:\LINKCORD_TEST_HANDOFF
 ```
 
-Archivos en la PC del usuario:
-- Registro: `%LOCALAPPDATA%\linkcord\logs.txt`
-- Caché de imágenes: `%LOCALAPPDATA%\linkcord\imagenes`
-- Token: en el Administrador de credenciales de Windows, con el nombre `linkcord`.
+## Automatic updates
 
-## Cómo está organizado
+Normal startup opens a short update screen before sign-in. Discord metadata and GitHub release checks run in parallel. Offline failures leave the installed client usable; **Skip checks** continues with the cached or built-in Discord metadata.
 
-Todo lo nuevo está en `cmd/linkcord`, `internal/gui`, `internal/auth` y `third_party`. Del código de discordo solo se tocaron 4 archivos: `go.mod`, `go.sum`, `internal/http/client.go` y `internal/http/client_standard.go` (se agregó `NewSessionClient`). Para traer actualizaciones de discordo hay que cambiar en ellas la ruta del módulo (`github.com/ayn2op/discordo` → `github.com/ezchr/linkcord`); fuera de eso, casi no hay conflictos. Importa porque Discord cambia cosas a menudo.
+Discord's current web-client build number is fetched from its login page, cached in `%LOCALAPPDATA%\linkcord\discord-build.json`, and used in HTTP headers and gateway identification. This updates metadata without a new executable. API, gateway, and authentication behavior still require code changes.
 
-| Archivo | Qué hace |
+For newer stable GitHub releases, Linkcord downloads the `linkcord.exe` asset, verifies its size and GitHub SHA-256 digest, and checks that it is a Windows AMD64 executable. A hidden PowerShell helper waits for the current process to exit, replaces the file, and starts the new client. The new client must acknowledge its version after its first GUI frame; otherwise the helper restores the previous executable. A failed startup is recorded so the same release and digest do not cause a restart loop.
+
+Replacement requires write access to the executable's folder. A release without a digest or with an invalid asset leaves the installed version in place. Update staging folders contain a backup and diagnostic logs beside the executable.
+
+The repository is currently private. Release checks use `LINKCORD_GITHUB_TOKEN`, if set, or the current GitHub CLI sign-in when `gh` is installed. The GitHub account must have access to `ezchr/linkcord`. Public releases require no GitHub credential. GitHub and Discord credentials are separate; neither is embedded in the executable, release cache, or helper script.
+
+| Option | Behavior |
 |---|---|
-| `cmd/linkcord/main.go` | Punto de entrada. |
-| `internal/auth/` | Inicio de sesión sin interfaz: `qr.go` (QR), `password.go` (correo + 2FA), `client.go` (cliente que abre Discord primero para recibir cookies y `X-Fingerprint`, así Discord pide captcha con menos frecuencia), `token.go` (Administrador de credenciales). |
-| `internal/gui/app.go` | La ventana, el bucle de eventos y las pantallas (login, conectando, chat). Contiene `post()`, que es la única forma segura de pasar trabajo de otra goroutine a la ventana. |
-| `internal/gui/session.go` | Arma el estado de Discord (arikawa + ningen) igual que discordo. Registra el evento `AUTH_TOKEN_REFRESH`, que arikawa no conoce. |
-| `internal/gui/chat.go` | La pantalla principal: servidores, canales, mensajes directos, panel del usuario, y los eventos del gateway (`pump` → `apply`). |
-| `internal/gui/messages.go` | Historial, mensajes, adjuntos, imágenes en el chat, embeds, la barra de arriba. |
-| `internal/gui/markdown.go` | Formato de Discord con `gioui.org/x/richtext`: negrita, cursiva, código, citas, spoilers, enlaces, menciones. |
-| `internal/gui/composer.go` | La caja de texto: enviar, adjuntar, autocompletado de @, "está escribiendo". |
-| `internal/gui/emoji.go` | Selector de emojis (la lista con palabras de búsqueda está ahí). También elige la reacción de un mensaje. |
-| `internal/gui/actions.go` | Acciones sobre mensajes: barra al pasar el ratón, responder, editar, eliminar, copiar y reacciones. |
-| `internal/gui/render_test.go` | Dibuja el modo demo sin ventana y guarda imágenes; sirve cuando no hay pantalla. Ver el comentario de `TestRenderDemo`. |
-| `internal/gui/members.go` | Lista de miembros (la lista perezosa de Discord, a través de ningen). |
-| `internal/gui/profile.go` | Tarjetas de perfil y menú de estado. |
-| `internal/gui/presence.go` | Estado en línea, actividades, puntos de estado. |
-| `internal/gui/viewer.go` | Visor de imágenes. |
-| `internal/gui/images.go` | Descarga de imágenes en segundo plano, reducidas al tamaño en que se ven, con caché en memoria y en disco. |
-| `internal/gui/theme.go` | Colores y fuentes (ver "Fuentes y emojis"). |
-| `internal/gui/widgets.go` | Piezas comunes: filas, botones, avatares, `vcenter`… |
-| `internal/gui/voice.go` | La llamada de voz: entrar, salir, silenciar, ensordecer, el panel sobre el nombre. Usa `internal/voice` (de discordo). |
-| `internal/gui/demo.go` | Datos del modo demo. |
+| `--version` | Prints the embedded application version and exits. |
+| `--check-updates` | Checks GitHub and Discord metadata, prints a JSON report, and exits without installing. |
+| `--no-update` or `LINKCORD_NO_UPDATE=1` | Skips executable update checks but still refreshes Discord metadata. |
+| `--demo` or `LINKCORD_DEMO=1` | Shows account-free demo data and performs no startup update requests. |
 
-**Regla de hilos:** el estado de la interfaz solo se toca desde la goroutine de la ventana. Lo que llega de Discord o de una descarga en segundo plano pasa por `c.u.post(func() { ... })`. Gio redibuja cuando hay eventos; `u.win.Invalidate()` pide un cuadro nuevo.
+Development builds identify themselves as `v1.4.0-dev`; they cannot downgrade to `v1.3.0`. For a release, build the graphical entry point with its exact GitHub tag:
 
-## Parches a librerías (`third_party`)
+```powershell
+.\build-linkcord.ps1 -Version v1.4.0 -Out ..\linkcord.exe
+```
 
-`go.mod` usa copias locales de dos librerías, con parches. Los cambios están también en `third_party/parches/*.patch`, para poder aplicarlos a versiones nuevas.
+Publish that executable as `linkcord.exe` on the matching stable release. The helper checks the restarted application's embedded version against the release tag. A fresh build uploaded under an incorrect tag will not acknowledge startup.
 
-1. **Gio v0.10.3** (`third_party/gioui`), para Windows 7:
-   - `SetThreadDpiAwarenessContext` (Windows 10) y `EnableMouseInPointer`/`GetPointerInfo` (Windows 8) se llamaban sin comprobar que existieran, y la app se cerraba en Windows 7. Ahora se comprueban, y cuando faltan el ratón usa los mensajes clásicos (`WM_MOUSEMOVE`, `WM_LBUTTONDOWN`, `WM_MOUSEWHEEL`…).
-   - Si Direct3D 11 por hardware falla, se usa WARP (dibujo por software).
-2. **gioui.org/x v0.10.3** (`third_party/giox`): `richtext` no dibujaba los glifos que son imágenes, y los emojis a color quedaban invisibles en los mensajes.
+If a fixed asset is uploaded under the same tag with a new digest, it can be tried again. The failure record is `%LOCALAPPDATA%\linkcord\updates\failed-version`; release metadata is cached in the same folder.
 
-## Fuentes y emojis
+## Test without an account
 
-- Los emojis a color salen de **Noto Color Emoji** (`internal/gui/fonts`, licencia OFL), incluida en el `.exe` (unos 10 MB). Usa imágenes PNG (tabla CBDT), que Gio sí sabe dibujar. **Segoe UI Emoji no sirve**: usa capas de color (COLR) que Gio no dibuja, y los emojis quedan en blanco.
-- Al cargarla se angosta su espacio (`narrowSpace` en `theme.go`): el dibujador de texto deja los espacios que siguen a un emoji en la fuente del emoji, y el espacio de Noto es tan ancho como un emoji. Hay una prueba en `theme_test.go`.
-- Detrás van Segoe UI Symbol y Cambria Math, de Windows, para símbolos y letras decorativas (𝓐𝓑𝓒, ᴬᴮᶜ). **No hay que fijar `th.Face`**: con una tipografía fija, el texto en negrita deja de buscar en las otras fuentes y salen cuadros (□).
+| Environment variable | Purpose |
+|---|---|
+| `LINKCORD_DEMO=1` | Displays made-up servers, users, and messages without connecting to Discord. Fixtures are in `internal/gui/demo.go`. |
+| `GIO_LEGACY_MOUSE=1` | Uses Windows 7 mouse messages to test that path on Windows 10/11. |
+| `GIO_D3D11_WARP=1` | Uses software rendering instead of a graphics card. |
+| `LINKCORD_TOKEN=...` | Overrides the locally saved Discord token. |
+| `LINKCORD_RENDER=...` | Output folder for screenless rendering tests. |
+| `LINKCORD_LIVE_TENOR=...` | A Tenor media URL for the optional live animation smoke test. |
+| `LINKCORD_LIVE_APNG=...` | An APNG URL for the optional live animation smoke test. |
 
-## Trampas de Gio que ya costaron tiempo
+`scripts/test-window.ps1` sends clicks, wheel events, and keys directly to the application's window without moving the real mouse, then captures its content even when another window covers it. See the script's header for usage.
 
-- `layout.W` deja la altura mínima del área al hijo: un texto queda tan alto como la barra y se dibuja arriba. Para centrar verticalmente hay que usar `vcenter` (en `widgets.go`).
-- En un `layout.Stack`, un hijo `Expanded` que devuelve tamaño cero se centra como si fuera un punto y se corre hacia abajo. Hay que devolver `gtx.Constraints.Min`.
-- Para que una ventana emergente no deje pasar clics a lo que tiene debajo, hay que registrar un manejador en toda su área: `solid()` en `profile.go`.
-- Para interceptar teclas de la caja de texto (flechas en la lista de @), hay que pedir los eventos con `key.Filter{Focus: &c.composer, ...}` **antes** de `composer.Update`.
-- En PowerShell 5, `Get-Content`/`Set-Content` sin `-Encoding` estropean los acentos. Para editar archivos desde scripts conviene usar `[IO.File]::ReadAllText`/`WriteAllText` con UTF-8 sin BOM.
+```powershell
+.\scripts\test-window.ps1 -Demo -Script { Start-Sleep 4; Snap "start"; MouseClick 500 632; TypeText "@an"; Snap "mentions" }
+```
 
-## Cosas de Discord a tener en cuenta
+For screenless media renders, set `LINKCORD_RENDER` and run `go test ./internal/gui -run '^TestRenderMedia$' -count=1`.
 
-- **Captcha:** a veces Discord pide un hCaptcha al iniciar sesión, y la app no puede mostrarlo. Por eso existe el inicio con token y el script para copiarlo desde el navegador (pestaña Token). El hCaptcha no se puede mostrar en una página local porque está atado al dominio de Discord.
-- `ReadyEvent.UserSettings` puede venir vacío: hay que comprobarlo.
-- El token se renueva con `AUTH_TOKEN_REFRESH` (en `session.go`). Si no se guarda el nuevo, la sesión puede perderse.
-- No hay que pedir perfiles de forma masiva: solo cuando el usuario abre uno. Discord vigila eso en los clientes no oficiales.
+Local application data:
 
-## Pendiente, por prioridad
+- Log: `%LOCALAPPDATA%\linkcord\logs.txt`.
+- Image cache: `%LOCALAPPDATA%\linkcord\images`.
+- Discord token: Windows Credential Manager, under the name `linkcord`.
 
-~~1. Voz~~ (hecho; falta probarla con una cuenta real). Notas de cuando se hizo: `internal/voice` (de discordo) ya hace todo lo difícil: conexión, Opus, cifrado DAVE, micrófono y altavoces con miniaudio (que funciona en Windows 7). Falta conectarlo en `internal/gui/voice.go`: unirse al hacer clic en un canal de voz (`joinVoice`), un panel sobre el del usuario con "Conectado a…" y el botón para salir (`layoutVoicePanel`), los botones de silenciar y ensordecer (`layoutVoiceButtons`), y el borde verde de quien habla (`voiceSpeaking`). En discordo se puede ver cómo lo usa: `internal/ui/chat/guildstree`. Necesita compilar con cgo, cosa que el script ya hace.
-~~2. Acciones sobre mensajes~~ (hecho).
-3. **Probar en un Windows 7 de verdad.** Revisar sobre todo que los certificados raíz del sistema permitan las conexiones TLS. Si un Windows 7 sin actualizaciones no tiene los certificados de Discord, habría que incluir los propios.
-4. Emojis de servidor dentro de los mensajes como imágenes (hoy `:nombre:`), stickers y GIF animados.
-5. Contador de mensajes no leídos y de menciones en servidores y mensajes directos. Notificaciones con vista previa.
-6. Hilos, foros, lista de amigos, ajustes (tamaño de letra, notificaciones), placa de nombre, efectos de perfil.
-7. Icono y manifiesto del `.exe`, instalador o actualizador.
+## Project layout
 
-## Licencias
+| Path | Responsibility |
+|---|---|
+| `cmd/linkcord/main.go` | Graphical application entry point. |
+| `internal/auth/` | QR-code and password/2FA sign-in, session cookies and fingerprints, credential storage. |
+| `internal/gui/app.go` | Window lifecycle, event loop, screens, and work posted to the UI goroutine. |
+| `internal/gui/session.go` | Arikawa/ningen state setup and `AUTH_TOKEN_REFRESH` handling. |
+| `internal/gui/chat.go` | Servers, channels, DMs, user panel, and gateway events. |
+| `internal/gui/messages.go` | History, message bodies, attachments, embeds, and channel header. |
+| `internal/gui/markdown.go` | Discord formatting, links, mentions, and spoilers. |
+| `internal/gui/composer.go` | Message sending, attachments, mention autocomplete, and typing indicators. |
+| `internal/gui/emoji.go` | Emoji picker and English search keywords. |
+| `internal/gui/actions.go` | Message actions and reactions. |
+| `internal/gui/media.go` | Sticker, Tenor, and video preview routing. |
+| `internal/gui/apng.go` | APNG frame decoding and compositing. |
+| `internal/gui/images.go` | Background downloads, scaling, animation timing, and image caching. |
+| `internal/gui/viewer.go` | Image viewing, zoom, and pan. |
+| `internal/gui/members.go` | Discord's lazy member list through ningen. |
+| `internal/gui/profile.go`, `presence.go` | Profile cards, status menus, activities, and presence indicators. |
+| `internal/gui/voice.go` | Voice controls and speaking indicators, backed by `internal/voice`. |
+| `internal/gui/theme.go`, `widgets.go` | Colors, fonts, and shared interface components. |
+| `internal/gui/demo.go` | Account-free demo fixtures. |
+| `internal/gui/render_test.go`, `media_render_test.go` | Screenless interface rendering tests. |
+| `internal/http/` | Discord request headers, client properties, and cached web-build refresh. |
+| `internal/update/` | GitHub release checks, verified downloads, Windows replacement, and rollback. |
+| `internal/version/` | Embedded version shared by both entry points. |
+| `third_party/patches/` | Patches to the vendored Gio libraries. |
 
-- Como usa código de discordo, que es GPL-3.0, Linkcord también es **GPL-3.0** (ver `LICENSE`). Si se reparte el `.exe`, hay que poder entregar el código fuente a quien lo pida.
-- Gio: MIT / Unlicense.
-- Noto Color Emoji: SIL Open Font License 1.1 (`internal/gui/fonts/OFL.txt`).
+The UI state belongs to the window goroutine. Background work must enter through `u.post(func() { ... })`; `u.win.Invalidate()` requests a new frame.
+
+When merging upstream discordo changes, replace `github.com/ayn2op/discordo` module imports with `github.com/ezchr/linkcord`. Linkcord's graphical interface is separate from the original terminal interface.
+
+## Vendored library patches
+
+`go.mod` uses local copies of Gio and its extensions. Patch files are retained in `third_party/patches/` so the changes can be reapplied to newer versions.
+
+- **Gio v0.10.3:** checks for Windows APIs unavailable on Windows 7 and falls back to classic mouse messages. Direct3D hardware failures fall back to WARP.
+- **gioui.org/x v0.10.3:** draws image glyphs in rich text so color emoji remain visible; also supports the project's rich-text span callback.
+
+## Fonts and color emoji
+
+Noto Color Emoji is embedded in the executable and supplies PNG-based CBDT glyphs. Segoe UI Emoji's COLR layers are unsupported by the current renderer.
+
+`narrowSpace` in `theme.go` reduces the emoji font's unusually wide space; `theme_test.go` covers it. Segoe UI Symbol and Cambria Math provide fallback symbols and decorative letters.
+
+Do not set a fixed `th.Face`: bold text must retain fallback-font lookup.
+
+## Interface implementation notes
+
+- Use `vcenter` rather than `layout.W` to center labels vertically.
+- Expanded `layout.Stack` children must return `gtx.Constraints.Min` instead of zero dimensions.
+- Popups must register input over their entire area; see `solid()` in `profile.go`.
+- Read composer key events with a focused `key.Filter` before calling `composer.Update`.
+- PowerShell 5's default text encoding can damage Unicode. Scripts should use UTF-8 without a BOM through `System.IO.File`.
+
+## Discord integration notes
+
+Captcha challenges cannot currently be displayed in the client. QR-code and token sign-in are available alternatives.
+
+`ReadyEvent.UserSettings` may be empty. Tokens can change through `AUTH_TOKEN_REFRESH` and must be saved. Fetch profiles on demand rather than loading every member's profile.
+
+Refreshing a Discord web-build number can update client metadata. Actual API, gateway, or authentication changes still require source changes and a new executable.
+
+## Remaining work
+
+- Test on a physical Windows 7 machine, including its root-certificate configuration.
+- Verify voice in a real call.
+- Unread counters, mention counters, and notification previews.
+- Lottie stickers, threads, forums, friends, and settings.
+- Executable icon/manifest and installation packaging.
+
+## Licenses
+
+Linkcord is **GPL-3.0**, inherited from discordo; see `LICENSE`. Distributing the executable requires making its corresponding source available under that license.
+
+Gio uses MIT/Unlicense terms. Noto Color Emoji uses the SIL Open Font License 1.1; see `internal/gui/fonts/OFL.txt`.

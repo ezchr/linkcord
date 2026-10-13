@@ -81,6 +81,7 @@ const (
 	screenLogin screen = iota
 	screenConnecting
 	screenChat
+	screenStartup
 )
 
 type ui struct {
@@ -92,9 +93,10 @@ type ui struct {
 	mu      sync.Mutex
 	pending []func()
 
-	screen screen
-	login  *loginView
-	chat   *chatView
+	screen  screen
+	login   *loginView
+	chat    *chatView
+	startup startupState
 
 	// focused reports whether the window has the keyboard focus.
 	focused bool
@@ -125,11 +127,7 @@ func newUI(w *app.Window) *ui {
 			slog.Error("failed to load token", "err", err)
 		}
 	}
-	if token != "" {
-		u.connect(token)
-	} else {
-		u.showLogin("")
-	}
+	u.beginStartup(token)
 	return u
 }
 
@@ -157,6 +155,9 @@ func (u *ui) loop() error {
 	for {
 		switch e := u.win.Event().(type) {
 		case app.DestroyEvent:
+			if u.startup.cancel != nil {
+				u.startup.cancel()
+			}
 			if u.chat != nil {
 				u.chat.close()
 			}
@@ -175,6 +176,7 @@ func (u *ui) loop() error {
 			gtx := app.NewContext(&ops, e)
 			u.layout(gtx)
 			e.Frame(gtx.Ops)
+			u.markHealthy()
 		}
 	}
 }
@@ -182,6 +184,8 @@ func (u *ui) loop() error {
 func (u *ui) layout(gtx layout.Context) layout.Dimensions {
 	fillMax(gtx, colorChat)
 	switch u.screen {
+	case screenStartup:
+		return u.layoutStartup(gtx)
 	case screenLogin:
 		return u.login.layout(gtx)
 	case screenConnecting:
@@ -234,10 +238,10 @@ func (u *ui) connect(token string) {
 			}
 			// A rejected token never works again.
 			if event, ok := errors.AsType[*ws.CloseEvent](err); ok && event.Code == closeCodeAuthenticationFailed {
-				u.logout("La sesión expiró o el token no es válido. Inicia sesión de nuevo.")
+				u.logout("Your session expired or the token is invalid. Sign in again.")
 				return
 			}
-			u.connectErr = "No se pudo conectar con Discord: " + err.Error()
+			u.connectErr = "Could not connect to Discord: " + err.Error()
 		})
 	}()
 }
@@ -301,7 +305,7 @@ func (u *ui) layoutConnecting(gtx layout.Context) layout.Dimensions {
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				txt := "Conectando con Discord…"
+				txt := "Connecting to Discord…"
 				c := colorText
 				if u.connectErr != "" {
 					txt, c = u.connectErr, colorRed
@@ -317,11 +321,11 @@ func (u *ui) layoutConnecting(gtx layout.Context) layout.Dimensions {
 				}
 				return layout.Flex{}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return button(gtx, u.th, &u.retry, colorAccent, "Reintentar")
+						return button(gtx, u.th, &u.retry, colorAccent, "Retry")
 					}),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return button(gtx, u.th, &u.cancel, colorSelected, "Cerrar sesión")
+						return button(gtx, u.th, &u.cancel, colorSelected, "Log out")
 					}),
 				)
 			}),

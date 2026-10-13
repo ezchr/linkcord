@@ -29,7 +29,7 @@ const (
 	tabCount
 )
 
-var tabNames = [tabCount]string{"Código QR", "Correo", "Token"}
+var tabNames = [tabCount]string{"QR code", "Email", "Token"}
 
 type loginView struct {
 	u    *ui
@@ -88,7 +88,7 @@ func (l *loginView) startQR() {
 	l.stop()
 	ctx, cancel := context.WithCancel(context.Background())
 	l.qrCancel, l.qrImage, l.qrStopped = cancel, nil, false
-	l.qrStatus = "Preparando el código…"
+	l.qrStatus = "Preparing the code…"
 	u := l.u
 	go func() {
 		token, err := auth.QR(ctx, auth.QRHandlers{
@@ -102,12 +102,12 @@ func (l *loginView) startQR() {
 				img.Filter = paint.FilterNearest
 				u.post(func() {
 					l.qrImage = &img
-					l.qrStatus = "Abre Discord en tu celular, ve a Ajustes → Escanear código QR y apunta a este código."
+					l.qrStatus = "Open Discord on your phone, go to Settings → Scan QR Code, and scan this code."
 				})
 			},
 			Scanned: func(username string) {
 				u.post(func() {
-					l.qrStatus = "Hola, " + username + ". Confirma el inicio de sesión en tu celular."
+					l.qrStatus = "Hello, " + username + ". Confirm sign-in on your phone."
 				})
 			},
 		})
@@ -122,10 +122,10 @@ func (l *loginView) startQR() {
 				case errors.Is(err, auth.ErrQRCanceled):
 					l.qrStatus = err.Error() + "."
 				case errors.Is(err, auth.ErrCaptcha):
-					l.qrStatus = "Discord pidió un captcha (\"no soy un robot\") y Linkcord no puede mostrarlo. " +
-						"Prueba a generar otro código; si vuelve a pasar, entra con tu token (pestaña Token, ahí te explico cómo)."
+					l.qrStatus = "Discord requested a captcha (\"I'm not a robot\"), which Linkcord cannot display. " +
+						"Try generating another code. If it happens again, sign in with your token; see the Token tab for instructions."
 				default:
-					l.qrStatus = "No se pudo usar el código QR: " + err.Error()
+					l.qrStatus = "Could not use the QR code: " + err.Error()
 				}
 				return
 			}
@@ -155,7 +155,7 @@ func (l *loginView) run(f func() (string, error)) {
 				l.mfa = mfa
 				l.code.SetText("")
 			case errors.Is(err, auth.ErrCaptcha):
-				l.err = "Discord pidió un captcha (\"no soy un robot\") y Linkcord no puede mostrarlo. Usa el código QR o tu token."
+				l.err = "Discord requested a captcha (\"I'm not a robot\"), which Linkcord cannot display. Use a QR code or your token."
 			case err != nil:
 				l.err = err.Error()
 			default:
@@ -173,7 +173,7 @@ func (l *loginView) submitPassword() {
 	}
 	email, password := strings.TrimSpace(l.email.Text()), l.password.Text()
 	if email == "" || password == "" {
-		l.err = "Escribe tu correo y tu contraseña."
+		l.err = "Enter your email and password."
 		return
 	}
 	l.run(func() (string, error) { return auth.Password(email, password) })
@@ -182,7 +182,7 @@ func (l *loginView) submitPassword() {
 func (l *loginView) submitToken() {
 	token := auth.CleanToken(l.token.Text())
 	if token == "" {
-		l.err = "Pega tu token."
+		l.err = "Paste your token."
 		return
 	}
 	l.err = ""
@@ -265,10 +265,10 @@ func (l *loginView) layoutCard(gtx layout.Context) layout.Dimensions {
 			return layout.UniformInset(unit.Dp(32)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return bold(label(th, 24, colorHeader, "¡Hola de nuevo!")).Layout(gtx)
+						return bold(label(th, 24, colorHeader, "Welcome back!")).Layout(gtx)
 					}),
 					layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-					layout.Rigid(label(th, 14, colorMuted, "Inicia sesión en Linkcord con tu cuenta de Discord").Layout),
+					layout.Rigid(label(th, 14, colorMuted, "Sign in to Linkcord with your Discord account").Layout),
 					layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
 					layout.Rigid(l.layoutTabs),
 					layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
@@ -333,7 +333,7 @@ func (l *loginView) layoutQR(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints = layout.Exact(box)
 				if l.qrStopped {
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return button(gtx, th, &l.qrRetry, colorAccent, "Generar otro código")
+						return button(gtx, th, &l.qrRetry, colorAccent, "Generate another code")
 					})
 				}
 				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -364,25 +364,25 @@ func (l *loginView) layoutPassword(gtx layout.Context) layout.Dimensions {
 	th := l.u.th
 	if l.mfa != nil {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(label(th, 14, colorText, "Escribe el código de 6 dígitos de tu app de autenticación.").Layout),
+			layout.Rigid(label(th, 14, colorText, "Enter the 6-digit code from your authenticator app.").Layout),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return textField(gtx, th, &l.code, "123456") }),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return l.submitButton(gtx, "Verificar") }),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return l.submitButton(gtx, "Verify") }),
 		)
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(bold(label(th, 12, colorMuted, "CORREO ELECTRÓNICO O TELÉFONO")).Layout),
+		layout.Rigid(bold(label(th, 12, colorMuted, "EMAIL OR PHONE NUMBER")).Layout),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return textField(gtx, th, &l.email, "") }),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
-		layout.Rigid(bold(label(th, 12, colorMuted, "CONTRASEÑA")).Layout),
+		layout.Rigid(bold(label(th, 12, colorMuted, "PASSWORD")).Layout),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return textField(gtx, th, &l.password, "") }),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return l.submitButton(gtx, "Iniciar sesión") }),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return l.submitButton(gtx, "Sign in") }),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-		layout.Rigid(label(th, 12, colorMuted, "Si Discord pide un captcha, usa el código QR.").Layout),
+		layout.Rigid(label(th, 12, colorMuted, "If Discord requests a captcha, use a QR code.").Layout),
 	)
 }
 
@@ -393,7 +393,7 @@ func (l *loginView) layoutPassword(gtx layout.Context) layout.Dimensions {
 // It asks the modules of the web client for the token, and falls back to
 // the copy that Discord keeps in the local storage, which the page hides
 // from itself but a new frame can read.
-const tokenScript = `// Linkcord: copia tu token al portapapeles. No lo envía a ningún sitio.
+const tokenScript = `// Linkcord: copies your token to the clipboard without sending it anywhere.
 (() => {
   let token;
   try {
@@ -417,19 +417,19 @@ const tokenScript = `// Linkcord: copia tu token al portapapeles. No lo envía a
       f.remove();
     } catch {}
   }
-  if (!token) return console.log("Linkcord: no encontré el token. ¿Iniciaste sesión en esta pestaña?");
+  if (!token) return console.log("Linkcord: token not found. Are you signed in on this tab?");
   copy(token);
-  console.log("Linkcord: ¡listo! Token copiado. Vuelve a Linkcord y pégalo con Ctrl+V.");
+  console.log("Linkcord: token copied! Return to Linkcord and paste it with Ctrl+V.");
 })();`
 
 // tokenSteps explain how to copy the token from Discord in a browser, where
 // the captcha can be solved.
 var tokenSteps = []string{
-	"1. Pulsa «Abrir Discord web» e inicia sesión (ahí sí puedes resolver el captcha).",
-	"2. Pulsa «Copiar código» aquí abajo.",
-	"3. En el navegador pulsa F12 y entra en la pestaña «Consola».",
-	"4. Pega el código con Ctrl+V y pulsa Enter. Si el navegador no te deja pegar, escribe «allow pasting», pulsa Enter y vuelve a pegar.",
-	"5. Vuelve aquí, haz clic en la casilla TOKEN, pega con Ctrl+V y pulsa Entrar.",
+	"1. Click Open Discord web and sign in; you can complete the captcha there.",
+	"2. Click Copy script below.",
+	"3. Press F12 in your browser and open the Console tab.",
+	"4. Paste the script with Ctrl+V and press Enter. If pasting is blocked, type allow pasting, press Enter, and paste again.",
+	"5. Return here, click the TOKEN field, paste with Ctrl+V, and click Sign in.",
 }
 
 func (l *loginView) layoutToken(gtx layout.Context) layout.Dimensions {
@@ -439,12 +439,12 @@ func (l *loginView) layoutToken(gtx layout.Context) layout.Dimensions {
 		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return textField(gtx, th, &l.token, "") }),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return l.submitButton(gtx, "Entrar") }),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return l.submitButton(gtx, "Sign in") }),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			txt := "¿Cómo consigo mi token?"
+			txt := "How do I get my token?"
 			if l.showGuide {
-				txt = "Ocultar instrucciones"
+				txt = "Hide instructions"
 			}
 			return l.guide.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				pointer.CursorPointer.Add(gtx.Ops)
@@ -467,14 +467,14 @@ func (l *loginView) layoutToken(gtx layout.Context) layout.Dimensions {
 							return layout.Flex{}.Layout(gtx,
 								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 									gtx.Constraints.Min.X = gtx.Constraints.Max.X
-									return button(gtx, th, &l.openWeb, colorSelected, "Abrir Discord web")
+									return button(gtx, th, &l.openWeb, colorSelected, "Open Discord web")
 								}),
 								layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 									gtx.Constraints.Min.X = gtx.Constraints.Max.X
-									txt := "Copiar código"
+									txt := "Copy script"
 									if l.copied {
-										txt = "¡Código copiado!"
+										txt = "Script copied!"
 									}
 									return button(gtx, th, &l.copyScript, colorAccent, txt)
 								}),
@@ -502,7 +502,7 @@ func (l *loginView) layoutToken(gtx layout.Context) layout.Dimensions {
 	}
 	children = append(children,
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
-		layout.Rigid(label(th, 12, colorRed, "Nunca le des tu token a nadie: quien lo tenga puede entrar a tu cuenta. Linkcord solo lo guarda en tu PC.").Layout),
+		layout.Rigid(label(th, 12, colorRed, "Never share your token: anyone who has it can access your account. Linkcord stores it only on your PC.").Layout),
 	)
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
@@ -510,7 +510,7 @@ func (l *loginView) layoutToken(gtx layout.Context) layout.Dimensions {
 func (l *loginView) submitButton(gtx layout.Context, txt string) layout.Dimensions {
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
 	if l.busy {
-		txt = "Un momento…"
+		txt = "Please wait…"
 	}
 	return button(gtx, l.u.th, &l.submit, colorAccent, txt)
 }

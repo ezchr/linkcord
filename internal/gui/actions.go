@@ -317,7 +317,7 @@ func (c *chatView) runAction(gtx layout.Context, m discord.Message, k actionKind
 	switch k {
 	case actCopy:
 		gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(c.renderContent(m)))})
-		c.showNotice("Texto copiado")
+		c.showNotice("Text copied")
 	case actReact:
 		// The picker opens above the box; the messages must not change while
 		// they are laid out, so the rest waits for the next frame.
@@ -369,15 +369,15 @@ func (c *chatView) layoutReplyBar(gtx layout.Context) layout.Dimensions {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
 			return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(8), Top: unit.Dp(4), Bottom: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(label(th, 14, colorMuted, "Respondiendo a ").Layout),
+					layout.Rigid(label(th, 14, colorMuted, "Replying to ").Layout),
 					layout.Flexed(1, oneLine(bold(label(th, 14, colorText, name))).Layout),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						if a.replyTo.Author.ID == c.me.ID {
 							return layout.Dimensions{}
 						}
-						txt, col := "@ ACTIVADO", colorLink
+						txt, col := "@ ON", colorLink
 						if !a.replyPing {
-							txt, col = "@ DESACTIVADO", colorMuted
+							txt, col = "@ OFF", colorMuted
 						}
 						return a.replyPingBtn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 							pointer.CursorPointer.Add(gtx.Ops)
@@ -443,7 +443,7 @@ func (c *chatView) saveEdit(id discord.MessageID) {
 		return
 	}
 	if n := utf8.RuneCountInString(text); n > 2000 {
-		c.sendErr = fmt.Sprintf("El mensaje es demasiado largo (%d de 2000 caracteres).", n)
+		c.sendErr = fmt.Sprintf("The message is too long (%d of 2000 characters).", n)
 		return
 	}
 	// Shown at once; the update from Discord confirms it.
@@ -457,7 +457,7 @@ func (c *chatView) saveEdit(id discord.MessageID) {
 	chID := c.selChannel.ID
 	go func() {
 		if _, err := c.st.EditMessage(chID, id, text); err != nil {
-			c.u.post(func() { c.sendErr = "No se pudo editar el mensaje: " + err.Error() })
+			c.u.post(func() { c.sendErr = "Could not edit the message: " + err.Error() })
 		}
 	}()
 }
@@ -519,10 +519,10 @@ func (c *chatView) layoutEditor(gtx layout.Context, m discord.Message) layout.Di
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
-				layout.Rigid(label(th, 12, colorText, "escape para ").Layout),
-				link(&a.editCancel, "cancelar"),
-				layout.Rigid(label(th, 12, colorText, " • enter para ").Layout),
-				link(&a.editSave, "guardar"),
+				layout.Rigid(label(th, 12, colorText, "escape to ").Layout),
+				link(&a.editCancel, "cancel"),
+				layout.Rigid(label(th, 12, colorText, " • enter to ").Layout),
+				link(&a.editSave, "save"),
 			)
 		}),
 	)
@@ -556,7 +556,7 @@ func (c *chatView) deleteMessage(m discord.Message) {
 		err := c.st.DeleteMessage(chID, m.ID, "")
 		c.u.post(func() {
 			if err != nil {
-				c.sendErr = "No se pudo eliminar el mensaje: " + err.Error()
+				c.sendErr = "Could not delete the message: " + err.Error()
 				return
 			}
 			if c.selChannel != nil && c.selChannel.ID == chID {
@@ -634,12 +634,12 @@ func (c *chatView) layoutDeleteConfirm(gtx layout.Context) {
 				snippet = string(r[:300]) + "…"
 			}
 			if snippet == "" && len(m.Attachments) > 0 {
-				snippet = "Archivo adjunto"
+				snippet = "Attachment"
 			}
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(bold(label(th, 20, colorHeader, "Eliminar mensaje")).Layout),
+				layout.Rigid(bold(label(th, 20, colorHeader, "Delete message")).Layout),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-				layout.Rigid(label(th, 15, colorText, "¿Seguro que quieres eliminar este mensaje?").Layout),
+				layout.Rigid(label(th, 15, colorText, "Are you sure you want to delete this message?").Layout),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return rounded(gtx, colorSidebar, 6, func(gtx layout.Context) layout.Dimensions {
@@ -653,7 +653,7 @@ func (c *chatView) layoutDeleteConfirm(gtx layout.Context) {
 					})
 				}),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-				layout.Rigid(label(th, 12, colorMuted, "Consejo: con Mayús + clic en eliminar no se pregunta.").Layout),
+				layout.Rigid(label(th, 12, colorMuted, "Tip: Shift-click Delete to skip confirmation.").Layout),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{}.Layout(gtx,
@@ -661,11 +661,11 @@ func (c *chatView) layoutDeleteConfirm(gtx layout.Context) {
 							return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return button(gtx, th, &a.delCancel, colorChat, "Cancelar")
+							return button(gtx, th, &a.delCancel, colorChat, "Cancel")
 						}),
 						layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return button(gtx, th, &a.delOK, colorRed, "Eliminar")
+							return button(gtx, th, &a.delOK, colorRed, "Delete")
 						}),
 					)
 				}),
@@ -746,7 +746,7 @@ func (c *chatView) toggleReaction(id discord.MessageID, e discord.Emoji) {
 	j := slices.IndexFunc(m.Reactions, func(r discord.Reaction) bool { return emojiKey(r.Emoji) == emojiKey(e) })
 	add := j < 0 || !m.Reactions[j].Me
 	if add && j < 0 && !c.canReact() {
-		c.sendErr = "No tienes permiso para añadir reacciones en este canal."
+		c.sendErr = "You do not have permission to add reactions in this channel."
 		return
 	}
 	applyReaction(m, e, add, true)
@@ -762,7 +762,7 @@ func (c *chatView) toggleReaction(id discord.MessageID, e discord.Emoji) {
 			err = c.st.Unreact(chID, id, e.APIString())
 		}
 		if err != nil {
-			c.u.post(func() { c.sendErr = "No se pudo cambiar la reacción: " + err.Error() })
+			c.u.post(func() { c.sendErr = "Could not update the reaction: " + err.Error() })
 		}
 	}()
 }

@@ -16,7 +16,7 @@ type MFARequired struct {
 }
 
 func (*MFARequired) Error() string {
-	return "se necesita el código de verificación en dos pasos"
+	return "a two-factor authentication code is required"
 }
 
 // Password logs in with an email or phone number and a password. It returns
@@ -32,11 +32,11 @@ func Password(login, password string) (string, error) {
 	}
 	if resp.MFA {
 		if !resp.TOTP {
-			return "", errors.New("esta cuenta solo admite verificación por SMS; usa el código QR o el token")
+			return "", errors.New("this account only supports SMS verification; use a QR code or token instead")
 		}
 		return "", &MFARequired{ticket: resp.Ticket, loginInstanceID: resp.LoginInstanceID, client: client}
 	}
-	return "", errors.New("Discord no devolvió un token")
+	return "", errors.New("Discord did not return a token")
 }
 
 // TOTP finishes a login that needs a code from an authenticator app.
@@ -47,7 +47,7 @@ func TOTP(mfa *MFARequired, code string) (string, error) {
 		return "", friendly(err)
 	}
 	if resp.Token == "" {
-		return "", errors.New("Discord no devolvió un token")
+		return "", errors.New("Discord did not return a token")
 	}
 	return resp.Token, nil
 }
