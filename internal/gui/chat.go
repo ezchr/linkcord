@@ -141,7 +141,6 @@ type chatView struct {
 	composer    widget.Editor
 	typingUntil time.Time
 	typers      map[discord.UserID]time.Time
-	logoutBtn   widget.Clickable
 
 	// comp is the box to write, and focusComposer asks to give it the
 	// keyboard focus on the next frame.
@@ -855,10 +854,6 @@ func (c *chatView) update(gtx layout.Context) {
 		}
 		break
 	}
-	if c.logoutBtn.Clicked(gtx) {
-		c.u.logout("")
-		return
-	}
 	if c.selfClick.Clicked(gtx) {
 		if c.profile != nil && c.profile.self {
 			c.profile = nil
@@ -1171,7 +1166,8 @@ func (c *chatView) dmAvatar(gtx layout.Context, r channelRow, selected, hovered 
 }
 
 // layoutUserPanel shows who is logged in at the bottom of the channels, with
-// the voice controls and the logout button.
+// the voice controls. Clicking the user opens their profile, whose menu has
+// the logout.
 func (c *chatView) layoutUserPanel(gtx layout.Context) layout.Dimensions {
 	th := c.u.th
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -1216,10 +1212,9 @@ func (c *chatView) layoutUserPanel(gtx layout.Context) layout.Dimensions {
 							})
 						})
 					}),
+					// Logging out is in the menu of the user's own profile,
+					// away from the voice buttons, where it is easy to hit.
 					layout.Rigid(c.u.layoutVoiceButtons),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return iconButton(gtx, &c.logoutBtn, iconLogout, colorMuted, colorRed)
-					}),
 				)
 			})
 		}),
