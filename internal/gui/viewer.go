@@ -268,13 +268,19 @@ func (c *chatView) layoutVisualViewer(gtx layout.Context, v *imageViewer, frame 
 	macro = op.Record(gtx.Ops)
 	var hd layout.Dimensions
 	if footer != nil {
-		bgtx.Constraints.Max.X = max(size.X-gtx.Dp(32), 1)
+		// A footer, such as a video's controls, lies over the bottom of the
+		// picture, as wide as it.
+		bgtx.Constraints.Max.X = max(min(v.imgRect.Dx(), size.X-gtx.Dp(32)), gtx.Dp(320))
 		hd = footer(bgtx)
 	} else {
 		hd = hint.Layout(bgtx)
 	}
 	call = macro.Stop()
-	t = op.Offset(image.Pt((size.X-hd.Size.X)/2, size.Y-hd.Size.Y-gtx.Dp(16))).Push(gtx.Ops)
+	footerY := size.Y - hd.Size.Y - gtx.Dp(16)
+	if footer != nil {
+		footerY = min(max(v.imgRect.Max.Y-hd.Size.Y, 0), footerY)
+	}
+	t = op.Offset(image.Pt((size.X-hd.Size.X)/2, footerY)).Push(gtx.Ops)
 	call.Add(gtx.Ops)
 	t.Pop()
 

@@ -25,6 +25,9 @@ type paneResize struct {
 	startX   float32
 	start    unit.Dp
 	hovered  bool
+	// shown is the width drawn last, which the window may hold below the
+	// one chosen, and limit the most the window allows.
+	shown, limit unit.Dp
 }
 
 func paneSettingsPath() string {
@@ -61,6 +64,12 @@ func (c *chatView) paneWidths(gtx layout.Context) (int, int, bool) {
 	if show {
 		channels = min(channels, max(available-gtx.Dp(320+160), 0))
 		members = min(members, max(available-channels-gtx.Dp(320), 0))
+	}
+	dp := func(px int) unit.Dp { return unit.Dp(float32(px) / max(gtx.Metric.PxPerDp, 1e-3)) }
+	c.channelResize.shown, c.channelResize.limit = dp(channels), dp(max(available-gtx.Dp(280), 0))
+	if show {
+		c.channelResize.limit = dp(max(available-gtx.Dp(320+160), 0))
+		c.memberResize.shown, c.memberResize.limit = dp(members), dp(max(available-channels-gtx.Dp(320), 0))
 	}
 	return channels, members, show
 }
@@ -99,7 +108,12 @@ func (r *paneResize) update(gtx layout.Context, width *unit.Dp, direction float3
 			if e.Buttons != pointer.ButtonPrimary {
 				continue
 			}
-			r.dragging, r.startX, r.start = true, e.Position.X, *width
+			// Start from the width on screen, not one the window cuts down.
+			start := *width
+			if r.shown > 0 {
+				start = r.shown
+			}
+			r.dragging, r.startX, r.start = true, e.Position.X, start
 			gtx.Execute(pointer.GrabCmd{Tag: r, ID: e.PointerID})
 		case pointer.Drag:
 			if r.dragging {
@@ -107,7 +121,11 @@ func (r *paneResize) update(gtx layout.Context, width *unit.Dp, direction float3
 				if scale <= 0 {
 					scale = 1
 				}
-				*width = unit.Dp(min(max(float32(r.start)+direction*(e.Position.X-r.startX)/scale, 160), 480))
+				most := float32(480)
+				if r.limit >= 160 {
+					most = min(most, float32(r.limit))
+				}
+				*width = unit.Dp(min(max(float32(r.start)+direction*(e.Position.X-r.startX)/scale, 160), most))
 			}
 		case pointer.Release:
 			changed = changed || r.dragging

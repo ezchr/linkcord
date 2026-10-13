@@ -19,7 +19,6 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
-	"gioui.org/widget/material"
 	"golang.org/x/exp/shiny/materialdesign/icons"
 )
 
@@ -57,8 +56,7 @@ type videoViewer struct {
 
 type videoControls struct {
 	play, mute, full widget.Clickable
-	volume, bar      widget.Float
-	seeking          bool
+	volume, bar      slider
 }
 
 const (
@@ -396,20 +394,18 @@ func (c *chatView) updateControls(gtx layout.Context, v *videoViewer, where int)
 	if k.full.Clicked(gtx) {
 		v.setShown(where == inTile)
 	}
-	if k.volume.Update(gtx) {
-		c.setVolume(v, k.volume.Value)
-		if v.muted.Load() && k.volume.Value > 0 {
+	if r := k.volume.update(gtx); r.changed {
+		c.setVolume(v, r.value)
+		if v.muted.Load() && r.value > 0 {
 			v.toggleMute()
 		}
 	}
 	v.mu.Lock()
 	dur := v.dur
 	v.mu.Unlock()
-	if k.bar.Update(gtx) || k.seeking && !k.bar.Dragging() {
-		k.seeking = k.bar.Dragging()
-		if !k.seeking && dur > 0 {
-			v.moveTo(time.Duration(float64(k.bar.Value) * float64(dur)))
-		}
+	// The video moves when the bar is let go, not on every step of a drag.
+	if r := k.bar.update(gtx); r.released && dur > 0 {
+		v.moveTo(time.Duration(float64(r.value) * float64(dur)))
 	}
 }
 
@@ -421,17 +417,16 @@ func (c *chatView) layoutControls(gtx layout.Context, v *videoViewer, where int)
 	v.mu.Lock()
 	pos, dur, ended := v.pos, v.dur, v.ended
 	v.mu.Unlock()
-	if !k.volume.Dragging() {
-		k.volume.Value = c.volume()
-		if v.muted.Load() {
-			k.volume.Value = 0
+	volume := c.volume()
+	if v.muted.Load() {
+		volume = 0
+	}
+	progress := float32(0)
+	if dur > 0 {
+		progress = min(1, float32(float64(pos)/float64(dur)))
+		if k.bar.dragging {
+			pos = time.Duration(float64(k.bar.value) * float64(dur))
 		}
-	}
-	if !k.bar.Dragging() && dur > 0 {
-		k.bar.Value = min(1, float32(float64(pos)/float64(dur)))
-	}
-	if k.bar.Dragging() && dur > 0 {
-		pos = time.Duration(float64(k.bar.Value) * float64(dur))
 	}
 	playIcon := iconPause
 	switch {
@@ -466,16 +461,7 @@ func (c *chatView) layoutControls(gtx layout.Context, v *videoViewer, where int)
 			})
 		}
 	}
-	slider := func(f *widget.Float, width unit.Dp) layout.Widget {
-		return func(gtx layout.Context) layout.Dimensions {
-			if width > 0 {
-				gtx.Constraints.Min.X, gtx.Constraints.Max.X = gtx.Dp(width), gtx.Dp(width)
-			}
-			s := material.Slider(th, f)
-			s.Color = colorAccent
-			return s.Layout(gtx)
-		}
-	}
+
 	// A dark band behind the controls, as on Discord's player.
 	return layout.Background{}.Layout(gtx,
 		func(gtx layout.Context) layout.Dimensions {
@@ -496,11 +482,13 @@ func (c *chatView) layoutControls(gtx layout.Context, v *videoViewer, where int)
 						if dur <= 0 {
 							return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 1)}
 						}
-						return slider(&k.bar, 0)(gtx)
+						return k.bar.layout(gtx, 0, progress)
 					}),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
 					layout.Rigid(btn(&k.mute, volIcon)),
-					layout.Rigid(slider(&k.volume, 64)),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return k.volume.layout(gtx, 64, volume)
+					}),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
 					layout.Rigid(btn(&k.full, fullIcon)),
 				)
@@ -549,9 +537,8 @@ func (c *chatView) layoutVideoViewer(gtx layout.Context) layout.Dimensions {
 		v.view.w, v.view.h = 640, 360
 	}
 	footer := func(gtx layout.Context) layout.Dimensions {
-		gtx.Constraints.Min.X = min(gtx.Dp(720), gtx.Constraints.Max.X)
-		gtx.Constraints.Max.X = gtx.Constraints.Min.X
-		return rounded(gtx, colorServers, 8, func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints.Min.X = gtx.Constraints.Max.X
+		return rounded(gtx, withAlpha(colorServers, 0xc8), 0, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return c.layoutControls(gtx, v, inLayer)
