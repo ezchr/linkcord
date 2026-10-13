@@ -11,6 +11,7 @@ import (
 
 	"gioui.org/font"
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
@@ -107,7 +108,29 @@ const (
 	metaURL     = "url"
 	metaUser    = "user"
 	metaSpoiler = "spoiler"
+	// metaEmoji is the picture of a server emoji, drawn over its span.
+	metaEmoji = "emoji"
 )
+
+var (
+	reEmojiParts = regexp.MustCompile(`^<(a?):(\w+):(\d+)>`)
+	reEmojiOnly  = regexp.MustCompile(`^(?:\s*<a?:\w+:\d+>)+\s*$`)
+)
+
+// emojiURL is the picture of a server emoji, moving if animated.
+func emojiURL(id string, animated bool, px int) string {
+	ext := "png"
+	if animated {
+		ext = "gif"
+	}
+	return fmt.Sprintf("https://cdn.discordapp.com/emojis/%s.%s?size=%d", id, ext, px)
+}
+
+// jumboEmoji reports whether a message is only server emoji, which Discord
+// shows bigger, as it does for up to 30 of them.
+func jumboEmoji(content string) bool {
+	return reEmojiOnly.MatchString(content) && strings.Count(content, "<") <= 30
+}
 
 // inlineSpans turns a line of Discord markup into styled spans: formatting,
 // code, links, mentions, spoilers and timestamps.
@@ -210,7 +233,27 @@ func (c *chatView) inlineSpans(s string, m discord.Message, base richtext.SpanSt
 					}
 					special(name, colorMention, "", "", false)
 				case mt[4] != "":
-					special(":"+mt[4]+":", colorMuted, "", "", false)
+					flush()
+					// A transparent letter makes room in the line for the
+					// picture, which richSlice draws over it.
+					parts := reEmojiParts.FindStringSubmatch(mt[0])
+					sp := style()
+					scale, px := float32(1.6), 48
+					if jumboEmoji(m.Content) {
+						scale, px = 3.2, 96
+					}
+					sp.Size = base.Size * unit.Sp(scale)
+					sp.Content = "M"
+					sp.Color = colorT{}
+					if st.spoiler && !revealed {
+						sp.Content = "█"
+						sp.Color = colorServers
+						sp.Interactive = true
+						sp.Set(metaSpoiler, "1")
+					} else {
+						sp.Set(metaEmoji, emojiURL(parts[3], parts[1] == "a", px))
+					}
+					spans = append(spans, sp)
 				case mt[5] != "":
 					txt := mt[0]
 					if sec, err := strconv.ParseInt(mt[5], 10, 64); err == nil {
@@ -413,7 +456,18 @@ func (c *chatView) buildContent(m discord.Message, revealed bool) ([]contentPart
 // keeps a slot for each span of all so that clicks map back to the span
 // under the pointer.
 func (c *chatView) richSlice(gtx layout.Context, state *richtextState, all []richtext.SpanStyle, start, end int) layout.Dimensions {
-	return richtext.Text(state.block(start), c.u.th.Shaper, all[start:end]...).Layout(gtx)
+	t := richtext.Text(state.block(start), c.u.th.Shaper, all[start:end]...)
+	t.SpanFunc = func(gtx layout.Context, span richtext.SpanStyle, dims layout.Dimensions) {
+		url, _ := span.Get(metaEmoji).(string)
+		if url == "" {
+			return
+		}
+		// The picture fills the room of its span, centered.
+		px := min(dims.Size.X, dims.Size.Y)
+		defer op.Offset(image.Pt((dims.Size.X-px)/2, (dims.Size.Y-px)/2)).Push(gtx.Ops).Pop()
+		c.u.picture(gtx, url, unit.Dp(float32(px)/gtx.Metric.PxPerDp), colorT{}, "", 0)
+	}
+	return t.Layout(gtx)
 }
 
 // richtextState holds the interactive state of the formatted text of one

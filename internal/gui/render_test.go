@@ -26,7 +26,7 @@ import (
 // LINKCORD_RENDER is the folder for the pictures. LINKCORD_RENDER_STEPS is
 // what to do, separated by ";":
 //
-//	move:x,y  click:x,y  shiftclick:x,y  key:Name  text:abc  wait:ms  snap:name
+//	move:x,y  click:x,y  shiftclick:x,y  scroll:x,y,dy  key:Name  text:abc  wait:ms  snap:name
 //
 // Keys are Return, Escape, Up, Down or Gio's names.
 func TestRenderDemo(t *testing.T) {
@@ -91,6 +91,19 @@ func TestRenderDemo(t *testing.T) {
 				pointer.Event{Kind: pointer.Move, Source: pointer.Mouse, Position: p},
 				pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, Position: p, Buttons: pointer.ButtonPrimary, Modifiers: mods},
 				pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, Position: p, Modifiers: mods},
+			)
+		case "scroll":
+			// scroll:x,y,dy with dy in pixels, negative to go up.
+			xy, dy, _ := strings.Cut(arg, ";")
+			parts := strings.Split(arg, ",")
+			if len(parts) == 3 {
+				xy, dy = parts[0]+","+parts[1], parts[2]
+			}
+			d, _ := strconv.ParseFloat(dy, 32)
+			p := point(xy)
+			router.Queue(
+				pointer.Event{Kind: pointer.Move, Source: pointer.Mouse, Position: p},
+				pointer.Event{Kind: pointer.Scroll, Source: pointer.Mouse, Position: p, Scroll: f32.Pt(0, float32(d))},
 			)
 		case "key":
 			name := key.Name(arg)

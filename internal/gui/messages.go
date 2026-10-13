@@ -402,7 +402,7 @@ func (c *chatView) layoutMedia(gtx layout.Context, proxy, original string, w, h 
 			pointer.CursorPointer.Add(gtx.Ops)
 			r := image.Rectangle{Max: size}
 			defer clip.UniformRRect(r, gtx.Dp(8)).Push(gtx.Ops).Pop()
-			img := c.u.images.get(mediaURL(proxy, original, dw, dh), max(dw, dh))
+			img := c.u.images.frame(gtx, mediaURL(proxy, original, dw, dh), max(dw, dh))
 			if img == nil {
 				paint.FillShape(gtx.Ops, colorSidebar, clip.Rect(r).Op())
 				return layout.Dimensions{Size: size}

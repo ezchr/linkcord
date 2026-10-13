@@ -1,0 +1,37 @@
+--- gioui.org/x@v0.10.3/richtext/richtext.go
++++ third_party/giox/richtext/richtext.go
+@@ -196,6 +196,11 @@
+ 	ss.metadata[key] = value
+ }
+ 
++// Get returns the metadata value for key, or nil if there is none.
++func (ss SpanStyle) Get(key string) interface{} {
++	return ss.metadata[key]
++}
++
+ // DeepCopy returns an identical SpanStyle with its own copy of its metadata.
+ func (ss SpanStyle) DeepCopy() SpanStyle {
+ 	out := ss
+@@ -221,6 +226,9 @@
+ 	// LineHeightScale applies a scaling factor to the LineHeight. If zero, a
+ 	// sensible default will be used.
+ 	LineHeightScale float32
++	// SpanFunc, if set, is called for every span once laid out, with gtx at
++	// its origin and dims its size, to draw over it.
++	SpanFunc func(gtx layout.Context, span SpanStyle, dims layout.Dimensions)
+ 	*text.Shaper
+ }
+ 
+@@ -264,8 +272,11 @@
+ 	text.Alignment = t.Alignment
+ 	text.LineHeight = t.LineHeight
+ 	text.LineHeightScale = t.LineHeightScale
+-	return text.Layout(gtx, func(gtx layout.Context, i int, _ layout.Dimensions) {
++	return text.Layout(gtx, func(gtx layout.Context, i int, dims layout.Dimensions) {
+ 		span := &t.Styles[i]
++		if t.SpanFunc != nil {
++			t.SpanFunc(gtx, *span, dims)
++		}
+ 		if !span.Interactive {
+ 			return
+ 		}

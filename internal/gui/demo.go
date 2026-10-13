@@ -115,6 +115,8 @@ func (u *ui) startDemo() {
 		m.Reactions = []discord.Reaction{{Count: 3, Emoji: discord.Emoji{Name: "🔥"}}, {Count: 1, Me: true, Emoji: discord.Emoji{Name: "😂"}}}
 	})
 	add(channels[0].ID, guild.ID, users[1], 5*time.Hour-time.Minute, "alguien para jugar *cs 1.6*? ~~ahora no~~ más tarde", nil)
+	add(channels[0].ID, guild.ID, users[0], 5*time.Hour-2*time.Minute, "yo me apunto <:StareNeutral:612368399732965376> pero gano yo", nil)
+	add(channels[0].ID, guild.ID, users[0], 5*time.Hour-3*time.Minute, "<a:StareNodGIF:614322540332056577><:StareNeutral:612368399732965376>", nil)
 	add(channels[0].ID, guild.ID, users[2], 4*time.Hour, "Miren esto: `go build ./...` y luego\n```\nlinkcord.exe --demo\n```\nfunciona en Windows 7 😎", nil)
 	add(channels[0].ID, guild.ID, me, 3*time.Hour, "> esto es una cita\nY esto un ||spoiler|| con https://github.com/ezchr/linkcord", func(m *discord.Message) {
 		m.Embeds = []discord.Embed{{Title: "GitHub - ezchr/linkcord", Description: "Cliente de Discord liviano para Windows 7, 8, 10 y 11. - ezchr/linkcord", URL: "https://github.com/ezchr/linkcord", Color: 0x1f2328}}
