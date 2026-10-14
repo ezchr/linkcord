@@ -117,6 +117,10 @@ type chatView struct {
 	gset   guildSettings
 	cset   channelSettings
 	chmenu channelMenu
+	// streamVolumes and streamMuted are how loud each streamer's stream
+	// plays, kept for when it is watched again.
+	streamVolumes map[discord.UserID]float32
+	streamMuted   map[discord.UserID]bool
 	// clips is the window that makes clips of the voice channel.
 	clips clipView
 	// shownBlocked are the messages of blocked users the user asked to see.

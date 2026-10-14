@@ -41,6 +41,8 @@ type userMenu struct {
 	channel discord.ChannelID
 	page    userMenuPage
 	volume  slider
+	// streamVolume is the slider of their stream's sound, when watched.
+	streamVolume slider
 }
 
 // timeouts are the lengths of time a member can be timed out for, as Discord
@@ -194,6 +196,21 @@ func (c *chatView) userMenuItems() []menuItem {
 				menuItem{w: c.layoutVolumeItem},
 				menuItem{text: "Mute", check: checked(u.voiceSettings().Muted[id]), act: stay(func() { u.toggleLocalMute(id) })},
 			)
+			// The sound of their stream, when it is watched.
+			if w := c.watch.w; w != nil && c.watch.streamer == id {
+				items = append(items,
+					menuItem{sep: true},
+					menuItem{w: c.layoutStreamVolumeItem},
+					menuItem{text: "Mute Stream", check: checked(w.AudioMuted()), act: stay(func() {
+						muted := !w.AudioMuted()
+						w.SetAudioMuted(muted)
+						if c.streamMuted == nil {
+							c.streamMuted = make(map[discord.UserID]bool)
+						}
+						c.streamMuted[id] = muted
+					})},
+				)
+			}
 		}
 	} else if um.channel.IsValid() && um.channel == u.voiceChannel() {
 		items = append(items,
@@ -334,6 +351,38 @@ func (c *chatView) layoutVolumeItem(gtx layout.Context) layout.Dimensions {
 		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return um.volume.layout(gtx, 0, vol/2)
+		}),
+	)
+}
+
+// layoutStreamVolumeItem is the slider of how loud the stream watched of
+// the user of the menu plays, from silent to twice as loud.
+func (c *chatView) layoutStreamVolumeItem(gtx layout.Context) layout.Dimensions {
+	th := c.u.th
+	um := &c.umenu
+	w := c.watch.w
+	if w == nil {
+		return layout.Dimensions{}
+	}
+	if r := um.streamVolume.update(gtx); r.changed || r.released {
+		vol := snapVolume(r.value * 2)
+		w.SetAudioVolume(vol)
+		if c.streamVolumes == nil {
+			c.streamVolumes = make(map[discord.UserID]float32)
+		}
+		c.streamVolumes[um.user.ID] = vol
+	}
+	vol := w.AudioVolume()
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, label(th, 14, colorText, "Stream Volume").Layout),
+				layout.Rigid(label(th, 12, colorMuted, fmt.Sprintf("%d%%", int(vol*100+0.5))).Layout),
+			)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return um.streamVolume.layout(gtx, 0, vol/2)
 		}),
 	)
 }

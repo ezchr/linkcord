@@ -118,6 +118,11 @@ func (c *chatView) startWatching(vs discord.VoiceState) {
 			}
 			w = started
 			c.watch.w = started
+			// As loud as last chosen for them.
+			if vol, ok := c.streamVolumes[vs.UserID]; ok {
+				started.SetAudioVolume(vol)
+			}
+			started.SetAudioMuted(c.streamMuted[vs.UserID])
 		})
 	}()
 }

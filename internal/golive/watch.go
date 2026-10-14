@@ -97,6 +97,11 @@ type Watch struct {
 	audio                                         *streamAudio
 	done                                          chan struct{}
 
+	// audioVolume is how loud the stream's sound plays, a thousandth more
+	// than its thousandths, zero as it comes; audioMuted mutes it.
+	audioVolume atomic.Uint32
+	audioMuted  atomic.Bool
+
 	// tw keeps which packets arrived when, for transport feedback; guarded
 	// by mu.
 	tw *twcc

@@ -34,6 +34,26 @@ type streamAudio struct {
 	playing     bool
 }
 
+// SetAudioVolume plays the stream's sound volume times as loud, 0 to 2.
+func (w *Watch) SetAudioVolume(volume float32) {
+	w.audioVolume.Store(uint32(min(max(volume, 0), 2)*1000) + 1)
+}
+
+// AudioVolume is how loud the stream's sound plays, 1 as it comes.
+func (w *Watch) AudioVolume() float32 {
+	v := w.audioVolume.Load()
+	if v == 0 {
+		return 1
+	}
+	return float32(v-1) / 1000
+}
+
+// SetAudioMuted mutes the stream's sound, or not.
+func (w *Watch) SetAudioMuted(muted bool) { w.audioMuted.Store(muted) }
+
+// AudioMuted reports whether the stream's sound is muted.
+func (w *Watch) AudioMuted() bool { return w.audioMuted.Load() }
+
 func newStreamAudio(w *Watch) (*streamAudio, error) {
 	a := &streamAudio{w: w, input: make(chan audioPacket, 32), done: make(chan struct{})}
 	stop, err := voice.StartMediaAudio(a.fill)
@@ -67,6 +87,16 @@ func (a *streamAudio) fill(output []byte) {
 	a.playing = true
 	n := copy(output, a.pcm)
 	a.pcm = a.pcm[n:]
+	// As loud as the user chose, or muted.
+	switch vol := a.w.AudioVolume(); {
+	case a.w.AudioMuted() || vol == 0:
+		clear(output[:n])
+	case vol != 1:
+		for i := 0; i+1 < n; i += 2 {
+			v := float32(int16(binary.LittleEndian.Uint16(output[i:]))) * vol
+			binary.LittleEndian.PutUint16(output[i:], uint16(int16(max(-32768, min(32767, v)))))
+		}
+	}
 	if len(a.pcm) == 0 {
 		a.playing = false
 	}
