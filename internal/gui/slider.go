@@ -84,6 +84,14 @@ func (s *slider) layout(gtx layout.Context, width unit.Dp, value float32) layout
 		paint.FillShape(gtx.Ops, colorHeader, clip.Ellipse(knob).Op(gtx.Ops))
 	}
 
+	s.input(gtx, thumb, track, h)
+	return layout.Dimensions{Size: image.Pt(w, h)}
+}
+
+// input has the slider take the pointer over a track track wide, which
+// starts thumb from its left, and h high.
+func (s *slider) input(gtx layout.Context, thumb, track, h int) {
+	s.width = track
 	// The whole slider takes the pointer, with the hand cursor; drag
 	// positions count from the start of the track.
 	off := op.Offset(image.Pt(thumb, 0)).Push(gtx.Ops)
@@ -95,5 +103,4 @@ func (s *slider) layout(gtx layout.Context, width unit.Dp, value float32) layout
 	pass.Pop()
 	area.Pop()
 	off.Pop()
-	return layout.Dimensions{Size: image.Pt(w, h)}
 }

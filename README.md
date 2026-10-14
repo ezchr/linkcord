@@ -18,12 +18,13 @@ Linkcord was created for people on Windows 7 who can no longer run the official 
 | PNG, animated APNG, and GIF stickers; animated Tenor embeds | Lottie sticker rendering |
 | Image viewer with zoom, pan, and animation | |
 | Video thumbnails and a play button that opens the video in the browser | In-client video playback |
-| Cached avatars and server icons, presence, member lists with avatar decorations, nameplates, server tags, boosts, and who is in voice, and profile cards | Settings |
+| Cached avatars and server icons, presence, member lists with avatar decorations, nameplates, server tags, boosts, and who is in voice, and profile cards | |
 | Friends (online, all, pending, blocked), sending, accepting, and canceling friend requests, and message requests | |
 | Attachments, emoji picker, mention autocomplete, and typing indicators | |
 | Voice join/leave, mute/deafen, connection status, and speaking indicators | Verification in a real voice call |
 | Call view with a card for everyone in the channel, full screen, invite links, soundboard, and microphone/speaker choice; a click on a card shows it big | Camera and activities |
-| Screen sharing (Go Live) of a screen or a window, end-to-end encrypted, with its sound, a button to turn the sound on and off, quality choice, and who is watching | Watching other people's streams |
+| Screen sharing (Go Live) of a screen, games in full screen included, or a window, end-to-end encrypted, with its sound, a button to turn the sound on and off, quality choice, and who is watching | Watching other people's streams |
+| Settings: microphone and speakers, input and output volume, a microphone test that plays your voice back, voice activity sensitivity or push to talk, keybinds to talk, mute and deafen that work in any window, and Performance Mode | Settings beyond voice |
 | Right-click menu on voice members: per-user volume and mute, notes, friends, blocking, roles, nicknames, server mute/deafen, move, disconnect, timeout, kick, and ban, as permissions allow | Ignore, apps, and moderator view |
 | React, reply, edit, copy, delete, and inline reaction controls | |
 | Selecting text in messages and embeds with the mouse (double click for a word, triple for all), copied with Ctrl+C or the right-click menu | Selecting across several messages |
@@ -133,7 +134,11 @@ For a controlled diagnostic session, set `LINKCORD_PROFILE` to an output folder.
 
 ## Screen sharing
 
-Screen sharing encodes with Cisco's OpenH264 2.6.0, which is not in the executable: the first stream downloads it from Cisco, as browsers do, so that Cisco covers its H264 licence, checks its SHA-256 digest, and keeps it in `%LOCALAPPDATA%\linkcord`. It needs only kernel32, so it runs on Windows 7. A window's sound is captured from its own processes on Windows 10 version 2004 and later, and a screen's from every process but Linkcord; older Windows send the sound of the whole system. Frames are encrypted with DAVE as Discord's own clients do.
+Screen sharing encodes with Cisco's OpenH264 2.6.0, which is not in the executable: the first stream downloads it from Cisco, as browsers do, so that Cisco covers its H264 licence, checks its SHA-256 digest, and keeps it in `%LOCALAPPDATA%\linkcord`. It needs only kernel32, so it runs on Windows 7. A screen is captured with DXGI's desktop duplication on Windows 8 and later, which also sees games in full screen and follows the screen when they change its resolution, and with GDI on Windows 7. A window's sound is captured from its own processes on Windows 10 version 2004 and later. A screen's is that of every program playing but Linkcord and Discord, each captured on its own and mixed, since Windows leaves only one program out of a capture: Discord's sound is the voice channel's, which would otherwise be sent back to it. Older Windows send the sound of the whole system. Frames are encrypted with DAVE as Discord's own clients do. While streaming, your own card shows what you share as wide as the card, ten times a second.
+
+## Settings
+
+The gear beside the microphone and headset buttons opens the settings; Escape or the round button closes them. Voice & Video has the microphone and speakers, their volumes from 0 to 200%, a microphone test, and the input mode: voice activity, with a sensitivity dragged over the level of the microphone, or push to talk. Keybinds sets the keys to talk, mute and deafen; they work in any window, even while Linkcord is hidden, by reading the state of the keys rather than taking them, so other programs still get them, and on Windows 7. Mouse side buttons can be keybinds too. The choices are saved in `voice.json` beside the log. The demo does not save them.
 
 ## Test without an account
 
@@ -158,7 +163,7 @@ For screenless media renders, set `LINKCORD_RENDER` and run `go test ./internal/
 
 Local application data:
 
-- Log: `%LOCALAPPDATA%\linkcord\logs.txt`; crashes are written to `crash.txt` beside it.
+- Log: `%LOCALAPPDATA%\linkcord\logs.txt`; crashes are written to `crash.txt` beside it. The demo writes `demo-logs.txt` instead.
 - Image cache: `%LOCALAPPDATA%\linkcord\images`.
 - Discord token: Windows Credential Manager, under the name `linkcord`.
 
@@ -192,6 +197,8 @@ Local application data:
 | `internal/gui/render_test.go`, `media_render_test.go` | Screenless interface rendering tests. |
 | `internal/http/` | Discord request headers, client properties, and cached web-build refresh. |
 | `internal/update/` | GitHub release checks, verified downloads, Windows replacement, and rollback. |
+| `internal/gui/settings.go` | The settings screen: voice and video, keybinds, and Performance Mode. |
+| `internal/hotkey/` | Keybinds that work in any window, and recording the keys pressed. |
 | `internal/install/` | The installed copy that every copy started opens, and its desktop shortcut. |
 | `internal/version/` | Embedded version shared by both entry points. |
 | `third_party/patches/` | Patches to the vendored Gio libraries. |
@@ -238,7 +245,7 @@ Refreshing a Discord web-build number can update client metadata. Actual API, ga
 - Test on a physical Windows 7 machine, including its root-certificate configuration.
 - Verify voice in a real call.
 - Unread counters, mention counters, and notification previews.
-- Lottie stickers, threads, forums, friends, and settings.
+- Lottie stickers, threads, forums, and friends.
 - Executable icon/manifest and installation packaging.
 
 ## Licenses

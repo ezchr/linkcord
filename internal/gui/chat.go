@@ -223,6 +223,8 @@ type chatView struct {
 	demoNotes map[discord.UserID]string
 	// sel is the text selected in the messages.
 	sel textSelection
+	// settings is the screen of the user's settings, while open.
+	settings settingsView
 }
 
 // msgClickKey is the avatar (part 0) or the name (part 1) of a message.
@@ -383,6 +385,7 @@ func (c *chatView) close() {
 	}
 	c.closeVideo()
 	c.stopVoice()
+	c.closeSettings()
 	// A call does not outlive the session it belongs to.
 	c.u.leaveVoice()
 	c.u.voice.demoChannel = 0
@@ -1028,6 +1031,13 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 	if c.copyText != "" {
 		gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(c.copyText))})
 		c.copyText = ""
+	}
+	if c.settings.open {
+		dims := c.layoutSettings(gtx)
+		if c.u.chat == c {
+			c.layoutOverlays(gtx)
+		}
+		return dims
 	}
 	if c.call.open && c.call.full {
 		// The call fills the screen, without the columns.

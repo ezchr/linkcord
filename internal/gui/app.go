@@ -39,7 +39,13 @@ const tokenEnvVar = "LINKCORD_TOKEN"
 // Run opens the main window and blocks until it is closed.
 func Run() error {
 	moveLegacyDir()
-	if closer, err := logger.Load(logPath(), slog.LevelInfo); err == nil {
+	// The demo, which tests run beside a signed-in Linkcord, keeps its own
+	// log rather than start that one's over.
+	log := logPath()
+	if os.Getenv("LINKCORD_DEMO") == "1" {
+		log = filepath.Join(filepath.Dir(log), "demo-logs.txt")
+	}
+	if closer, err := logger.Load(log, slog.LevelInfo); err == nil {
 		defer closer.Close()
 	}
 	// A crash, of Go or of C code, is written beside the log, which a
@@ -179,6 +185,7 @@ func (u *ui) loop() error {
 	defer stopProfile()
 	stopResumeWatchdog := u.startResumeWatchdog()
 	defer stopResumeWatchdog()
+	u.applyKeybinds()
 	var ops op.Ops
 	for {
 		switch e := u.win.Event().(type) {
@@ -193,6 +200,9 @@ func (u *ui) loop() error {
 			slog.Info("window closed", "err", e.Err)
 			if u.tray != nil {
 				u.tray.Close()
+			}
+			if u.voice.keys != nil {
+				u.voice.keys.Close()
 			}
 			// Tell Discord the stream ended, rather than leave it hanging.
 			if s := u.voice.stream; s != nil {
@@ -230,6 +240,10 @@ func (u *ui) loop() error {
 			u.slowFrame(start, pending, laid)
 			u.frameCount++
 			u.markHealthy()
+		default:
+			// A window hidden in the notification area draws no frames, but
+			// what is posted, as by a keybind, is still woken up for.
+			u.runPending()
 		}
 	}
 }

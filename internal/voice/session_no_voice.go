@@ -24,6 +24,26 @@ func (*Session) Toggle(bool) error            { return nil }
 
 func (*Session) SetVolume(discord.UserID, float32) {}
 func (*Session) SetDevices(string, string) error   { return nil }
+func (*Session) SetSensitivity(float64)            {}
+func (*Session) SetInputVolume(float32)            {}
+func (*Session) SetOutputVolume(float32)           {}
+func (*Session) SetPushToTalk(bool)                {}
+func (*Session) SetTalking(bool)                   {}
+
+// SilentLevel is the level of silence, in dB.
+const SilentLevel = -100
+
+// MicTest captures nothing.
+type MicTest struct{}
+
+func StartMicTest(string) (*MicTest, error) { return nil, errNoVoice }
+
+func (*MicTest) SetInputVolume(float32)  {}
+func (*MicTest) SetOutputVolume(float32) {}
+func (*MicTest) Level() float64          { return SilentLevel }
+func (*MicTest) Echo(string, bool) error { return errNoVoice }
+func (*MicTest) Echoing() bool           { return false }
+func (*MicTest) Stop()                   {}
 
 // Devices finds no device.
 func Devices() (inputs, outputs []Device, err error) { return nil, nil, errNoVoice }

@@ -138,7 +138,11 @@ func startDeviceOn(kind malgo.DeviceType, id string, channels int, data func(out
 type Session struct {
 	state *state.State
 	// threshold is how loud a sample of the microphone must be for what is said to be sent.
-	threshold int
+	threshold atomic.Int64
+	// gain is how many times as loud what the microphone captures is sent, and volume how many times as loud everyone is played, as the bits of a float32.
+	gain, volume atomic.Uint32
+	// pushToTalk sends what the microphone captures only while talking, which a key held reports, rather than when it is loud enough.
+	pushToTalk, talking atomic.Bool
 	// updates is sent to when the status or who is speaking changes.
 	updates chan struct{}
 	// mic is sent what the microphone captures.
@@ -165,17 +169,44 @@ type Session struct {
 // New returns a Session that sends what the microphone captures louder than sensitivity, in dB.
 func New(state *state.State, sensitivity float64) *Session {
 	s := &Session{
-		state:     state,
-		threshold: int(math.Pow(10, sensitivity/20) * math.MaxInt16),
-		updates:   make(chan struct{}, 1),
-		mic:       make(chan []byte, 4),
-		speaking:  make(map[discord.UserID]bool),
-		speakers:  make(map[uint32]*speaker),
-		volumes:   make(map[discord.UserID]float32),
+		state:    state,
+		updates:  make(chan struct{}, 1),
+		mic:      make(chan []byte, 4),
+		speaking: make(map[discord.UserID]bool),
+		speakers: make(map[uint32]*speaker),
+		volumes:  make(map[discord.UserID]float32),
 	}
+	s.SetSensitivity(sensitivity)
+	s.SetInputVolume(1)
+	s.SetOutputVolume(1)
 	state.AddHandler(s.follow)
 
 	return s
+}
+
+// SetSensitivity sends what the microphone captures louder than sensitivity, in dB.
+func (s *Session) SetSensitivity(sensitivity float64) {
+	s.threshold.Store(int64(math.Pow(10, sensitivity/20) * math.MaxInt16))
+}
+
+// SetInputVolume sends what the microphone captures gain times as loud: 0 silences it, and 2 is twice as loud.
+func (s *Session) SetInputVolume(gain float32) {
+	s.gain.Store(math.Float32bits(gain))
+}
+
+// SetOutputVolume plays everyone volume times as loud, on top of how loud each is played.
+func (s *Session) SetOutputVolume(volume float32) {
+	s.volume.Store(math.Float32bits(volume))
+}
+
+// SetPushToTalk sends what the microphone captures only while SetTalking says the user talks, if on, or whenever it is loud enough otherwise.
+func (s *Session) SetPushToTalk(on bool) {
+	s.pushToTalk.Store(on)
+}
+
+// SetTalking says whether the key to talk is held, with push to talk.
+func (s *Session) SetTalking(talking bool) {
+	s.talking.Store(talking)
 }
 
 // follow keeps up with the user being moved to another voice channel or disconnected, by someone else or by connecting from another client.
@@ -461,13 +492,14 @@ func (s *Session) mix(output, _ []byte) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 
+	master := math.Float32frombits(s.volume.Load())
 	for _, speaker := range s.speakers {
 		volume, ok := s.volumes[speaker.user]
 		if !ok {
 			volume = 1
 		}
 
-		speaker.mix(output, volume)
+		speaker.mix(output, volume*master)
 	}
 }
 
@@ -531,10 +563,20 @@ func (s *Session) send(session *voice.Session) {
 	for captured := range s.mic {
 		for pcm = append(pcm, captured...); len(pcm) >= frameBytes; pcm = pcm[frameBytes:] {
 			quiet++
+			gain, threshold := math.Float32frombits(s.gain.Load()), int(s.threshold.Load())
 			for i := range samples {
-				samples[i] = int16(binary.LittleEndian.Uint16(pcm[2*i:]))
-				if int(samples[i]) >= s.threshold || -int(samples[i]) >= s.threshold {
+				samples[i] = amplify(int16(binary.LittleEndian.Uint16(pcm[2*i:])), gain)
+				if int(samples[i]) >= threshold || -int(samples[i]) >= threshold {
 					quiet = 0
+				}
+			}
+
+			// With push to talk, what is said is sent while the key is held, however quiet, and not after.
+			if s.pushToTalk.Load() {
+				if s.talking.Load() {
+					quiet = 0
+				} else {
+					quiet = max(quiet, hangover)
 				}
 			}
 

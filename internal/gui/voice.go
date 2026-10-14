@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"gioui.org/io/pointer"
@@ -20,6 +21,7 @@ import (
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/ningen/v3"
 	"github.com/ezchr/linkcord/internal/golive"
+	"github.com/ezchr/linkcord/internal/hotkey"
 	"github.com/ezchr/linkcord/internal/voice"
 	"golang.org/x/exp/shiny/materialdesign/icons"
 )
@@ -43,6 +45,10 @@ type voiceState struct {
 	// join, for the state it was made with.
 	session *voice.Session
 	st      *ningen.State
+	// talker is session, for the key to talk to reach from the goroutine
+	// that watches keys, and keys watches the keybinds.
+	talker atomic.Pointer[voice.Session]
+	keys   *hotkey.Watcher
 
 	// muted and deafened are what the user chose with the buttons, which also
 	// apply to the next call joined.
@@ -79,7 +85,7 @@ type voiceState struct {
 	info     bool
 	errUntil time.Time
 
-	muteBtn, deafBtn, leaveBtn                           widget.Clickable
+	muteBtn, deafBtn, leaveBtn, settingsBtn              widget.Clickable
 	channelBtn, camBtn, screenBtn, activityBtn, soundBtn widget.Clickable
 }
 
@@ -100,6 +106,107 @@ type voiceSettings struct {
 	StreamFPS    int `json:"stream_fps,omitempty"`
 	// StreamMute streams without sound.
 	StreamMute bool `json:"stream_mute,omitempty"`
+	// InputVolume and OutputVolume are how many times as loud the
+	// microphone is sent and calls are played, from 0 to 2; nil is 1.
+	InputVolume  *float32 `json:"input_volume,omitempty"`
+	OutputVolume *float32 `json:"output_volume,omitempty"`
+	// Sensitivity is how loud, in dB, the microphone must be for what it
+	// captures to be sent; nil is voiceSensitivity.
+	Sensitivity *float64 `json:"sensitivity,omitempty"`
+	// PushToTalk sends what the microphone captures only while the key of
+	// push_to_talk is held.
+	PushToTalk bool `json:"push_to_talk,omitempty"`
+	// Keybinds are the keys of each action of keybindActions, which act in
+	// any window.
+	Keybinds map[string]hotkey.Combo `json:"keybinds,omitempty"`
+}
+
+// inputVolume is how many times as loud the microphone is sent.
+func (s *voiceSettings) inputVolume() float32 {
+	if s.InputVolume == nil {
+		return 1
+	}
+	return *s.InputVolume
+}
+
+// outputVolume is how many times as loud calls are played.
+func (s *voiceSettings) outputVolume() float32 {
+	if s.OutputVolume == nil {
+		return 1
+	}
+	return *s.OutputVolume
+}
+
+// sensitivity is how loud, in dB, the microphone must be to be sent.
+func (s *voiceSettings) sensitivity() float64 {
+	if s.Sensitivity == nil {
+		return voiceSensitivity
+	}
+	return *s.Sensitivity
+}
+
+// applyVoiceSettings has the call and the microphone test follow the
+// volumes, sensitivity and input mode chosen.
+func (u *ui) applyVoiceSettings() {
+	s := u.voiceSettings()
+	if vs := u.voice.session; vs != nil {
+		vs.SetInputVolume(s.inputVolume())
+		vs.SetOutputVolume(s.outputVolume())
+		vs.SetSensitivity(s.sensitivity())
+		vs.SetPushToTalk(s.PushToTalk)
+	}
+	if c := u.chat; c != nil && c.settings.test != nil {
+		c.settings.test.SetInputVolume(s.inputVolume())
+		c.settings.test.SetOutputVolume(s.outputVolume())
+	}
+}
+
+// keybindActions are what keybinds can do, in the order the settings list
+// them.
+var keybindActions = []struct{ id, name, about string }{
+	{"push_to_talk", "Push to Talk", "Hold to talk, when the input mode is Push to Talk."},
+	{"toggle_mute", "Toggle Mute", "Mutes or unmutes your microphone."},
+	{"toggle_deafen", "Toggle Deafen", "Deafens or undeafens you."},
+}
+
+// applyKeybinds watches the keys chosen for each action, from any window,
+// even while Linkcord's is hidden.
+func (u *ui) applyKeybinds() {
+	v := &u.voice
+	if v.keys == nil {
+		v.keys = hotkey.Start()
+	}
+	toggle := func(deafen bool) func() {
+		return func() {
+			u.post(func() {
+				u.toggleVoice(deafen)
+				u.syncDemoVoice()
+			})
+		}
+	}
+	talk := func(on bool) func() {
+		return func() {
+			if s := v.talker.Load(); s != nil {
+				s.SetTalking(on)
+			}
+		}
+	}
+	var binds []hotkey.Bind
+	for id, keys := range u.voiceSettings().Keybinds {
+		b := hotkey.Bind{Keys: keys}
+		switch id {
+		case "push_to_talk":
+			b.Down, b.Up = talk(true), talk(false)
+		case "toggle_mute":
+			b.Down = toggle(false)
+		case "toggle_deafen":
+			b.Down = toggle(true)
+		default:
+			continue
+		}
+		binds = append(binds, b)
+	}
+	v.keys.Set(binds)
 }
 
 func voiceSettingsPath() string {
@@ -128,6 +235,10 @@ func (u *ui) voiceSettings() *voiceSettings {
 
 // saveVoiceSettings writes the settings to the disk.
 func (u *ui) saveVoiceSettings() {
+	// What is chosen in the demo is not kept over the user's settings.
+	if c := u.chat; c != nil && c.demo {
+		return
+	}
 	data, err := json.Marshal(u.voiceSettings())
 	if err != nil {
 		return
@@ -278,8 +389,10 @@ func (u *ui) voiceSession(st *ningen.State) *voice.Session {
 	if v.session != nil && v.st == st {
 		return v.session
 	}
-	v.session, v.st = voice.New(st.State, voiceSensitivity), st
 	settings := u.voiceSettings()
+	v.session, v.st = voice.New(st.State, settings.sensitivity()), st
+	v.talker.Store(v.session)
+	u.applyVoiceSettings()
 	if err := v.session.SetDevices(settings.Input, settings.Output); err != nil {
 		slog.Warn("could not choose the audio devices", "err", err)
 	}
@@ -450,6 +563,9 @@ func (u *ui) updateVoice(gtx layout.Context) {
 	if v.soundBtn.Clicked(gtx) {
 		c.openSoundboard()
 	}
+	if v.settingsBtn.Clicked(gtx) {
+		c.openSettings()
+	}
 }
 
 // syncDemoVoice shows the user's mute and deafen in the demo's channel list.
@@ -606,6 +722,9 @@ func (u *ui) layoutVoiceButtons(gtx layout.Context) layout.Dimensions {
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return iconButton(gtx, &v.deafBtn, headset, headCol, colorHeader)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return iconButton(gtx, &v.settingsBtn, iconSettings, colorMuted, colorHeader)
 		}),
 	)
 }
