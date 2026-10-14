@@ -36,6 +36,12 @@ type media struct {
 	// The RTP state of the video.
 	ssrc     uint32
 	seq      uint16
+	rtxSSRC  uint32
+	// resent and resendMissed count the packets resent for NACKs, and
+	// those asked for that could not be.
+	resent, resendMissed int
+	rtxSeq   uint16
+	history  [1024]sentPacket
 	packets  uint32
 	octets   uint32
 	lastTS   uint32
@@ -92,6 +98,8 @@ func dialMedia(ctx context.Context, addr string, ssrc uint32) (*media, string, u
 
 // useSecret encrypts with secret in mode.
 func (m *media) useSecret(mode string, secret [32]byte) (err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	switch mode {
 	case modes[0]:
 		var block cipher.Block
@@ -143,20 +151,7 @@ func (m *media) read() {
 			return
 		}
 		if n >= 8 && buf[0]>>6 == 2 && buf[1] >= 192 && buf[1] <= 223 {
-			m.rtcpMu.Lock()
-			if m.rtcp == nil {
-				m.rtcp = make(map[string]int)
-			}
-			m.rtcp[fmt.Sprintf("%d/%d", buf[1], buf[0]&0x1F)]++
-			m.rtcpMu.Unlock()
-		}
-		if n >= 8 && buf[0]>>6 == 2 && buf[1] == 206 {
-			if f := buf[0] & 0x1F; f == 1 || f == 4 {
-				select {
-				case m.keyframe <- struct{}{}:
-				default:
-				}
-			}
+			m.receiveFeedback(buf[:n])
 		}
 	}
 }
@@ -213,6 +208,11 @@ func (m *media) sendFrame(frame []byte, ts uint32) error {
 		pkt := m.seal(header, p)
 		if _, err := m.conn.Write(pkt); err != nil {
 			return err
+		}
+		seq := binary.BigEndian.Uint16(header[2:])
+		m.history[int(seq)%len(m.history)] = sentPacket{
+			valid: true, seq: seq, ts: ts, marker: last,
+			payload: bytes.Clone(p), at: time.Now(),
 		}
 		m.packets++
 		m.octets += uint32(len(p))

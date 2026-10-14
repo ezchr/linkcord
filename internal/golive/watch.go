@@ -66,10 +66,12 @@ type Watch struct {
 	nonce [24]byte // our counter, for the RTCP we send
 	ourSSRC,
 	videoSSRC uint32
-	frame  *image.RGBA
-	frames atomic.Int64
+	rtxSSRC, audioSSRC uint32
+	frame              *image.RGBA
+	frames             atomic.Int64
 	// The counts of how the stream goes, which are logged.
 	packets, assembled, lost, daveFailed, skipped atomic.Int64
+	rtxSeen, rtxIgnored                           atomic.Int64
 	padded                                        atomic.Int64
 	videoBytes                                    atomic.Int64
 	reception                                     watchReception // guarded by mu
@@ -80,6 +82,9 @@ type Watch struct {
 	once                                          sync.Once
 	decoder                                       *exec.Cmd
 	decIn                                         io.WriteCloser
+	decodeQueue                                   chan pictureJob
+	videoGeneration                               atomic.Uint64
+	audio                                         *streamAudio
 	done                                          chan struct{}
 }
 
@@ -104,6 +109,7 @@ type videoEvent struct {
 	UserID    discord.UserID `json:"user_id"`
 	AudioSSRC uint32         `json:"audio_ssrc"`
 	VideoSSRC uint32         `json:"video_ssrc"`
+	RTXSSRC   uint32         `json:"rtx_ssrc"`
 	Streams   []videoStream  `json:"streams"`
 }
 
@@ -126,9 +132,10 @@ type joinVariant struct {
 }
 
 var joinVariants = []joinVariant{
-	// As the Userdoccers describe a viewer: offering no stream of its own.
-	{name: "viewer", video: true},
+	// Discord advertises screen parameters for the stream context, including
+	// when watching. Keep the older variants as compatibility fallbacks.
 	{name: "viewer-screen", video: true, streams: []streamInfo{{Type: "screen", RID: "100", Quality: 100}}},
+	{name: "viewer", video: true},
 	{name: "no-video"},
 }
 
@@ -265,7 +272,7 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 	w.cancel = loopCancel
 	w.conn, w.ops = dial(loopCtx, se.Endpoint, identifyCommand{
 		ServerID:  ce.RTCServerID,
-		ChannelID: ce.RTCChannelID,
+		ChannelID: daveChannel.String(),
 		UserID:    p.UserID,
 		SessionID: p.SessionID,
 		Token:     se.Token,
@@ -328,7 +335,14 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 	if w.p.FFmpeg == "" {
 		return nil, errors.New("golive: FFmpeg is needed to watch streams")
 	}
+	w.decodeQueue = make(chan pictureJob, 4)
+	if audio, err := newStreamAudio(w); err != nil {
+		w.log.Warn("stream audio unavailable", "err", err)
+	} else {
+		w.audio = audio
+	}
 	ok = true
+	go w.decodeLoop()
 	go w.follow(early)
 	go w.receive()
 	go w.askKeyframes()
@@ -387,17 +401,25 @@ func waitOp(ctx context.Context, log *slog.Logger, ops <-chan ws.Op, keep chan w
 func (w *Watch) follow(early chan ws.Op) {
 	handle := func(op ws.Op) {
 		if v, ok := op.Data.(*videoEvent); ok && v.UserID == w.p.StreamerID {
-			ssrc := v.VideoSSRC
+			ssrc, rtx := v.VideoSSRC, v.RTXSSRC
+			w.mu.Lock()
+			w.audioSSRC = v.AudioSSRC
+			w.mu.Unlock()
 			bestQuality, bestPixels := -1, -1
 			for _, s := range v.Streams {
 				pixels := s.MaxResolution.Width * s.MaxResolution.Height
 				if s.Active && s.SSRC != 0 && (s.Quality > bestQuality || s.Quality == bestQuality && pixels > bestPixels) {
-					ssrc, bestQuality, bestPixels = s.SSRC, s.Quality, pixels
+					ssrc, rtx, bestQuality, bestPixels = s.SSRC, s.RTXSSRC, s.Quality, pixels
 				}
 			}
 			if ssrc != 0 {
 				w.mu.Lock()
-				w.videoSSRC = ssrc
+				changed := w.videoSSRC != ssrc
+				w.videoSSRC, w.rtxSSRC = ssrc, rtx
+				if changed {
+					w.requireKeyframe()
+					w.lastPLI.Store(0)
+				}
 				w.mu.Unlock()
 				w.sendWants(context.Background(), ssrc)
 				// The first keyframe is asked for as soon as it can be.
@@ -522,19 +544,112 @@ func (w *Watch) open(pkt []byte) (header []byte, payload []byte, err error) {
 // receive reads the streamer's video, rebuilds each picture from its
 // packets, removes the end-to-end encryption and decodes it.
 func (w *Watch) receive() {
-	buf := make([]byte, 2048)
+	buf := make([]byte, 65536)
 	var (
-		au       []byte // the picture being rebuilt, in Annex B
-		auTS     uint32
-		lastSeq  uint16
-		haveSeq  bool
-		lost     bool
-		fuActive bool
+		au                      []byte
+		auTS, source            uint32
+		lastSeq                 uint16
+		haveSeq, lost, fuActive bool
+		order                   packetOrder
 	)
 	startCode := []byte{0, 0, 0, 1}
+	consume := func(p receivedPacket) {
+		gap := haveSeq && p.seq != lastSeq+1
+		lastSeq, haveSeq = p.seq, true
+		if p.ts != auTS {
+			if len(au) > 0 || lost {
+				w.lost.Add(1)
+				w.requireKeyframe()
+				w.requestKeyframe()
+			}
+			au, auTS, lost, fuActive = au[:0], p.ts, false, false
+		}
+		if gap {
+			lost = true
+		}
+		payload := p.payload
+		switch typ := payload[0] & 0x1F; {
+		case typ >= 1 && typ <= 23:
+			if fuActive {
+				lost = true
+			}
+			au = append(au, startCode...)
+			au = append(au, payload...)
+		case typ == 24:
+			if fuActive {
+				lost = true
+			}
+			for rest := payload[1:]; len(rest) > 0; {
+				if len(rest) < 2 {
+					lost = true
+					break
+				}
+				size := int(binary.BigEndian.Uint16(rest))
+				if size == 0 || len(rest) < 2+size {
+					lost = true
+					break
+				}
+				au = append(au, startCode...)
+				au = append(au, rest[2:2+size]...)
+				rest = rest[2+size:]
+			}
+		case typ == 28 && len(payload) >= 3:
+			start, end := payload[1]&0x80 != 0, payload[1]&0x40 != 0
+			if start {
+				if fuActive || end {
+					lost = true
+				}
+				au = append(au, startCode...)
+				au = append(au, payload[0]&0xE0|payload[1]&0x1F)
+				fuActive = true
+			}
+			if !fuActive {
+				lost = true
+			} else {
+				au = append(au, payload[2:]...)
+			}
+			if end {
+				fuActive = false
+			}
+		default:
+			lost = true
+		}
+		if len(au) > 16<<20 {
+			au, lost = nil, true
+		}
+		if !p.marker {
+			return
+		}
+		lost = lost || fuActive
+		if !lost && len(au) > 0 {
+			w.submitPicture(au)
+		} else if lost {
+			w.lost.Add(1)
+			w.requireKeyframe()
+			w.requestKeyframe()
+		}
+		au, lost, fuActive = au[:0], false, false
+	}
+	drain := func(now time.Time) {
+		for {
+			p, ok := order.pop(now)
+			if !ok {
+				break
+			}
+			consume(p)
+		}
+		if missing := order.missing(now); len(missing) > 0 {
+			w.sendNACK(source, missing)
+		}
+	}
 	for {
+		drain(time.Now())
+		w.udp.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
 		n, err := w.udp.Read(buf)
 		if err != nil {
+			if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
+				continue
+			}
 			w.end(err)
 			return
 		}
@@ -542,7 +657,7 @@ func (w *Watch) receive() {
 		if n < 8 || pkt[0]>>6 != 2 {
 			continue
 		}
-		if pkt[1] >= 200 && pkt[1] <= 223 {
+		if pkt[1] >= 192 && pkt[1] <= 223 {
 			w.receiveReport(pkt, time.Now())
 			continue
 		}
@@ -550,92 +665,66 @@ func (w *Watch) receive() {
 			continue
 		}
 		pt := pkt[1] & 0x7F
-		if pt != payloadH264 {
-			continue
-		}
-		ssrc := binary.BigEndian.Uint32(pkt[8:])
-		w.mu.Lock()
-		want := w.videoSSRC
-		if want == 0 && ssrc != w.ourSSRC {
-			// Before the server says, the first video is the streamer's.
-			w.videoSSRC, want = ssrc, ssrc
-		}
-		w.mu.Unlock()
-		if ssrc != want {
+		if pt != payloadH264 && pt != payloadH264RTX && pt != payloadOpus {
 			continue
 		}
 		hdr, payload, err := w.open(pkt)
 		if err != nil || len(payload) == 0 {
 			continue
 		}
+		ssrc := binary.BigEndian.Uint32(hdr[8:])
+		seq := binary.BigEndian.Uint16(hdr[2:])
+		ts := binary.BigEndian.Uint32(hdr[4:])
+		if pt == payloadOpus {
+			w.receiveAudio(ssrc, seq, payload)
+			continue
+		}
+		w.mu.Lock()
+		want, rtx := w.videoSSRC, w.rtxSSRC
+		if want == 0 && pt == payloadH264 && ssrc != w.ourSSRC {
+			w.videoSSRC, want = ssrc, ssrc
+		}
+		w.mu.Unlock()
+		if pt == payloadH264RTX {
+			w.rtxSeen.Add(1)
+			// Resends before their SSRC was told: only the streamer resends
+			// video here, so the first resend stream is theirs.
+			if rtx == 0 && want != 0 && ssrc != w.ourSSRC && ssrc != want {
+				w.mu.Lock()
+				if w.rtxSSRC == 0 {
+					w.rtxSSRC = ssrc
+				}
+				rtx = w.rtxSSRC
+				w.mu.Unlock()
+			}
+			if rtx == 0 || ssrc != rtx || len(payload) < 3 {
+				w.rtxIgnored.Add(1)
+				continue
+			}
+			seq, payload, ssrc = binary.BigEndian.Uint16(payload), payload[2:], want
+		}
+		if ssrc != want || want == 0 {
+			continue
+		}
+		if source != ssrc {
+			if source != 0 {
+				w.requireKeyframe()
+			}
+			source, order, haveSeq = ssrc, packetOrder{}, false
+			au, lost, fuActive = au[:0], false, false
+		}
+		now := time.Now()
+		if !order.push(receivedPacket{seq: seq, ts: ts, marker: hdr[1]&0x80 != 0, payload: payload, at: now}) {
+			continue
+		}
 		w.packets.Add(1)
 		if hdr[0]&0x20 != 0 {
 			w.padded.Add(1)
 		}
-		seq := binary.BigEndian.Uint16(hdr[2:])
-		ts := binary.BigEndian.Uint32(hdr[4:])
 		w.videoBytes.Add(int64(len(payload)))
 		w.mu.Lock()
-		w.reception.record(ssrc, seq, ts, time.Now())
+		w.reception.record(ssrc, seq, ts, now)
 		w.mu.Unlock()
-		marker := hdr[1]&0x80 != 0
-		gap := haveSeq && seq != lastSeq+1
-		lastSeq, haveSeq = seq, true
-		if ts != auTS {
-			// A new picture: the last one was cut short.
-			if len(au) > 0 {
-				w.lost.Add(1)
-				w.needIDR.Store(true)
-				w.requestKeyframe()
-			}
-			au, auTS, lost, fuActive = au[:0], ts, false, false
-		}
-		// After the reset: a gap before a picture's first packet loses that
-		// picture too.
-		if gap {
-			lost = true
-		}
-		switch typ := payload[0] & 0x1F; {
-		case typ >= 1 && typ <= 23:
-			au = append(au, startCode...)
-			au = append(au, payload...)
-		case typ == 24: // STAP-A
-			for p := payload[1:]; len(p) >= 2; {
-				size := int(binary.BigEndian.Uint16(p))
-				if size == 0 || len(p) < 2+size {
-					break
-				}
-				au = append(au, startCode...)
-				au = append(au, p[2:2+size]...)
-				p = p[2+size:]
-			}
-		case typ == 28 && len(payload) >= 2: // FU-A
-			start, endFU := payload[1]&0x80 != 0, payload[1]&0x40 != 0
-			if start {
-				au = append(au, startCode...)
-				au = append(au, payload[0]&0xE0|payload[1]&0x1F)
-				fuActive = true
-			}
-			if fuActive {
-				au = append(au, payload[2:]...)
-			}
-			if endFU {
-				fuActive = false
-			}
-		}
-		if !marker {
-			continue
-		}
-		if !lost && len(au) > 0 {
-			w.decode(au)
-		} else if lost {
-			// A picture with a packet missing cannot be shown, nor those
-			// after it, until a keyframe.
-			w.lost.Add(1)
-			w.needIDR.Store(true)
-			w.requestKeyframe()
-		}
-		au, lost, fuActive = au[:0], false, false
 	}
 }
 
@@ -669,7 +758,7 @@ func (w *Watch) decode(au []byte) {
 			}
 			w.log.Info("could not decrypt a picture", attrs...)
 		}
-		w.needIDR.Store(true)
+		w.requireKeyframe()
 		w.requestKeyframe()
 		return
 	}
@@ -688,7 +777,7 @@ func (w *Watch) decode(au []byte) {
 		if len(nal) > 1 && nal[0]&0x1F == 7 {
 			if sw, sh, err := spsSize(nal[1:]); err == nil {
 				w.mu.Lock()
-				changed := sw != w.srcW || sh != w.srcH
+				changed := sw != w.srcW || sh != w.srcH || w.decIn == nil
 				w.srcW, w.srcH = sw, sh
 				w.mu.Unlock()
 				if changed && w.p.FFmpeg != "" {
@@ -708,7 +797,23 @@ func (w *Watch) decode(au []byte) {
 		w.requestKeyframe()
 		return
 	}
-	in.Write(pic)
+	// A stalled child must not pin the decoder worker indefinitely.
+	w.mu.Lock()
+	cmd := w.decoder
+	w.mu.Unlock()
+	var stalled *time.Timer
+	if cmd != nil && cmd.Process != nil {
+		stalled = time.AfterFunc(time.Second, func() { cmd.Process.Kill() })
+		defer stalled.Stop()
+	}
+	if n, err := in.Write(pic); err != nil || n != len(pic) {
+		w.log.Warn("decoder input failed", "err", err, "written", n, "bytes", len(pic))
+		w.requireKeyframe()
+		if cmd != nil && cmd.Process != nil {
+			cmd.Process.Kill()
+		}
+		w.requestKeyframe()
+	}
 }
 
 // maxWatchW and maxWatchH bound the pictures decoded: bigger streams are
@@ -751,43 +856,60 @@ func (w *Watch) startDecoder(sw, sh int) error {
 	if err != nil {
 		return err
 	}
-	var stderr bytes.Buffer
+	var stderr decoderLog
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("golive: could not start FFmpeg: %w", err)
 	}
 	w.mu.Lock()
+	select {
+	case <-w.done:
+		w.mu.Unlock()
+		cmd.Process.Kill()
+		in.Close()
+		out.Close()
+		cmd.Wait()
+		return errors.New("golive: stream ended before decoder startup")
+	default:
+	}
 	old, oldIn := w.decoder, w.decIn
 	w.decoder, w.decIn = cmd, in
 	w.mu.Unlock()
+	if old != nil && old.Process != nil {
+		old.Process.Kill()
+	}
 	if oldIn != nil {
 		oldIn.Close()
 	}
-	if old != nil && old.Process != nil {
-		old.Process.Kill()
-		go old.Wait()
-	}
 	go func() {
+		defer func() {
+			err := cmd.Wait()
+			in.Close()
+			w.mu.Lock()
+			current := w.decoder == cmd
+			if current {
+				w.decoder, w.decIn = nil, nil
+			}
+			w.mu.Unlock()
+			if current {
+				w.requireKeyframe()
+				if msg := strings.TrimSpace(stderr.String()); msg != "" {
+					w.log.Info("decoder stopped", "err", err, "ffmpeg", msg)
+					// An FFmpeg too old for -fps_mode (before 5.1) is started
+					// again with -vsync, from a keyframe asked for at once.
+					if strings.Contains(msg, "fps_mode") && !oldFFmpeg.Swap(true) {
+						if err := w.startDecoder(sw, sh); err != nil {
+							w.log.Warn("could not start the decoder", "err", err)
+						}
+						w.lastPLI.Store(0)
+					}
+				}
+				w.requestKeyframe()
+			}
+		}()
 		for {
 			img := image.NewRGBA(image.Rect(0, 0, ow, oh))
 			if _, err := io.ReadFull(out, img.Pix); err != nil {
-				if msg := strings.TrimSpace(stderr.String()); msg != "" {
-					w.log.Info("decoder stopped", "ffmpeg", msg)
-					// An FFmpeg too old for -fps_mode is started again with
-					// -vsync, from a keyframe asked for at once.
-					if strings.Contains(msg, "fps_mode") && !oldFFmpeg.Swap(true) {
-						w.mu.Lock()
-						current := w.decoder == cmd
-						w.mu.Unlock()
-						if current {
-							if err := w.startDecoder(sw, sh); err != nil {
-								w.log.Warn("could not start the decoder", "err", err)
-							}
-							w.lastPLI.Store(0)
-							w.requestKeyframe()
-						}
-					}
-				}
 				return
 			}
 			w.mu.Lock()
@@ -993,14 +1115,16 @@ func (w *Watch) teardown() {
 		w.udp.Close()
 	}
 	w.mu.Lock()
-	if w.decIn != nil {
-		w.decIn.Close()
-		w.decIn = nil
-	}
-	if w.decoder != nil && w.decoder.Process != nil {
-		w.decoder.Process.Kill()
-		go w.decoder.Wait()
-		w.decoder = nil
-	}
+	decoder, in, audio := w.decoder, w.decIn, w.audio
+	w.decoder, w.decIn, w.audio = nil, nil, nil
 	w.mu.Unlock()
+	if decoder != nil && decoder.Process != nil {
+		decoder.Process.Kill()
+	}
+	if in != nil {
+		in.Close()
+	}
+	if audio != nil {
+		audio.stop()
+	}
 }

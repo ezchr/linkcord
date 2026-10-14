@@ -155,7 +155,7 @@ func Start(ctx context.Context, p Params) (*Stream, error) {
 	s.cancel = loopCancel
 	s.conn, s.ops = dial(loopCtx, se.Endpoint, identifyCommand{
 		ServerID:  ce.RTCServerID,
-		ChannelID: ce.RTCChannelID,
+		ChannelID: daveChannel.String(),
 		UserID:    p.UserID,
 		SessionID: p.SessionID,
 		Token:     se.Token,
@@ -181,8 +181,11 @@ func Start(ctx context.Context, p Params) (*Stream, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.med.mu.Lock()
 	s.med.ssrc = r.Streams[0].SSRC
+	s.med.rtxSSRC = r.Streams[0].RTXSSRC
 	s.med.audioSSRC = r.SSRC
+	s.med.mu.Unlock()
 	// As Discord's clients do: the server's version, and the stream told
 	// before it is active.
 	s.conn.send(wait, &versionCommand{})
