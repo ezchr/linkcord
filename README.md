@@ -24,7 +24,10 @@ Linkcord was created for people on Windows 7 who can no longer run the official 
 | Voice join/leave, mute/deafen, connection status, and speaking indicators | Verification in a real voice call |
 | Call view with a card for everyone in the channel, full screen, invite links, soundboard, and microphone/speaker choice; a click on a card shows it big | Camera and activities |
 | Screen sharing (Go Live) of a screen, games in full screen included, or a window, end-to-end encrypted, with its sound, a button to turn the sound on and off, quality choice, and who is watching | Watching other people's streams |
-| Settings: microphone and speakers, input and output volume, a microphone test that plays your voice back, noise suppression, automatic gain control, voice activity sensitivity or push to talk, keybinds to talk, mute and deafen that work in any window, Discord's sounds, and Performance Mode | Settings beyond voice |
+| Settings: microphone and speakers, input and output volume, a microphone test that plays your voice back, noise suppression, automatic gain control, voice activity sensitivity or push to talk, keybinds to talk, mute and deafen that work in any window, Discord's sounds each on or off with its volume, appearance with ten presets and every color to change, and Performance Mode | Account and privacy settings |
+| Polls: voting, results as they come, taking a vote back, ending one's own | Creating polls |
+| Rich Presence: games and programs show what the user does through Discord's local RPC | RPC commands beyond activities |
+| Linkcord's logo beside who else uses Linkcord, and crash and freeze reports, through Linkcord's server | |
 | Discord's own sounds: muting, deafening, joining and leaving, people joining and leaving your voice channel and your stream, push to talk, and messages | |
 | Voice channels show their status under their name, and their chat and menu beside it | Editing channels |
 | Right-click menu on voice members: per-user volume and mute, notes, friends, blocking, roles, nicknames, server mute/deafen, move, disconnect, timeout, kick, and ban, as permissions allow | Ignore, apps, and moderator view |
@@ -138,6 +141,16 @@ For a controlled diagnostic session, set `LINKCORD_PROFILE` to an output folder.
 
 Screen sharing encodes with Cisco's OpenH264 2.6.0, which is not in the executable: the first stream downloads it from Cisco, as browsers do, so that Cisco covers its H264 licence, checks its SHA-256 digest, and keeps it in `%LOCALAPPDATA%\linkcord`. It needs only kernel32, so it runs on Windows 7. A screen is captured with DXGI's desktop duplication on Windows 8 and later, which also sees games in full screen and follows the screen when they change its resolution, and with GDI on Windows 7. A window's sound is captured from its own processes on Windows 10 version 2004 and later. A screen's is that of every program playing but Linkcord and Discord, each captured on its own and mixed, since Windows leaves only one program out of a capture: Discord's sound is the voice channel's, which would otherwise be sent back to it. Older Windows send the sound of the whole system. Frames are encrypted with DAVE as Discord's own clients do. While streaming, your own card shows what you share as wide as the card, ten times a second.
 
+## Rich Presence
+
+Linkcord serves Discord's local RPC on the first free pipe of `\\.\pipe\discord-ipc-0` to `-9`, as Discord's app does, so that games and programs that show Rich Presence show it on the user's profile. Only the handshake, `SET_ACTIVITY` and pings are answered. The activity is sent to the gateway as Discord's app sends it: with the application's name, its pictures by ID, or proxied from the web, times in milliseconds, and buttons. When Discord's app runs too, it has the first pipe, and programs talk to it.
+
+## Linkcord's server
+
+`server/linkcord-api` is a small server, run at `https://zidpvp.xyz/linkcord`, that Linkcord tells the user uses Linkcord, by Discord ID and version, and learns every ten minutes who else does, to show Linkcord's logo beside their names. Crashes and freezes written to `crash.txt` and `freeze.txt` are sent there once; what was in them before is not. No messages, tokens or addresses are kept. Both can be turned off in the Advanced settings; they are kept in `community.json`. Reports are read at `/admin/reports?token=…`, with the token the server writes to its data folder.
+
+The server runs as the `linkcord-api` systemd service (`server/linkcord-api/linkcord-api.service`) on `127.0.0.1:5310`, behind nginx's `location /linkcord/`. To update it: `GOOS=linux CGO_ENABLED=0 go build` in its folder, copy the binary to `/opt/linkcord-api/`, and restart the service.
+
 ## Settings
 
 The gear beside the microphone and headset buttons opens the settings; Escape or the round button closes them. Voice & Video has the microphone and speakers, their volumes from 0 to 200%, a microphone test, and the input mode: voice activity, with a sensitivity dragged over the level of the microphone, or push to talk. Keybinds sets the keys to talk, mute and deafen; they work in any window, even while Linkcord is hidden, by reading the state of the keys rather than taking them, so other programs still get them, and on Windows 7. Mouse side buttons can be keybinds too. The choices are saved in `voice.json` beside the log. The demo does not save them.
@@ -207,6 +220,10 @@ Local application data:
 | `internal/update/` | GitHub release checks, verified downloads, Windows replacement, and rollback. |
 | `internal/gui/settings.go` | The settings screen: voice and video, keybinds, and Performance Mode. |
 | `internal/hotkey/` | Keybinds that work in any window, and recording the keys pressed. |
+| `internal/gui/appearance.go`, `appearance_page.go`, `colorpicker.go` | Presets and colors of the interface, and their page in the settings. |
+| `internal/gui/poll.go` | Polls in messages. |
+| `internal/rpc/`, `internal/gui/richpresence.go` | Discord's local RPC, and the activities it shows. |
+| `internal/hub/`, `internal/gui/community.go`, `server/linkcord-api/` | Linkcord's server: who uses Linkcord, and error reports. |
 | `internal/install/` | The installed copy that every copy started opens, and its desktop shortcut. |
 | `internal/version/` | Embedded version shared by both entry points. |
 | `third_party/patches/` | Patches to the vendored Gio libraries. |
@@ -222,6 +239,7 @@ When merging upstream discordo changes, replace `github.com/ayn2op/discordo` mod
 - **Gio v0.10.3:** checks for Windows APIs unavailable on Windows 7 and falls back to classic mouse messages. Direct3D hardware failures fall back to WARP.
 - **gioui.org/x v0.10.3:** draws image glyphs in rich text so color emoji remain visible; also supports the project's rich-text span callback, and reports where every span and its letters are laid out, for selecting text.
 - **Arikawa (ayn2op fork, 2026-10-12):** users carry their avatar decoration, nameplate and server tag (`avatar_decoration_data`, `collectibles`, `primary_guild`), which Discord sends with every user and Arikawa dropped. A voice session tells every voice server it is moved to that it speaks, as it told the first; otherwise, after Discord moves a call to another server, nobody hears the user.
+- **Arikawa, polls:** messages carry their poll (`poll`), which Arikawa dropped.
 - **RNNoise 0.1.1:** vendored unchanged in `third_party/rnnoise`, with its trained model and an empty `config.h`, for noise suppression.
 - **dave-go v0.5.1:** adds end-to-end encryption of H264 frames laid out as libdave does, taking a fresh nonce for every retry, for screen sharing. Upstream encrypts Opus only.
 
