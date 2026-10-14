@@ -81,7 +81,9 @@ func (u *ui) startDemo() {
 		{ID: discord.ChannelID(id(120)), GuildID: guild.ID, Type: discord.GuildText, Name: "╭・━━-👋-welcome", Position: 0, Topic: "Welcome to the demo server ✨"},
 		{ID: discord.ChannelID(id(121)), GuildID: guild.ID, Type: discord.GuildText, Name: "├・━━-💀-goodbye", Position: 1},
 		{ID: discord.ChannelID(id(122)), GuildID: guild.ID, Type: discord.GuildText, Name: "╰・━━-🔴-streams", Position: 2},
-		{ID: discord.ChannelID(id(123)), GuildID: guild.ID, Type: discord.GuildText, Name: "🔒private🔒", Position: 3, ParentID: cat.ID},
+		{ID: discord.ChannelID(id(123)), GuildID: guild.ID, Type: discord.GuildText, Name: "🔒private🔒", Position: 3, ParentID: cat.ID,
+			// Hidden from everyone but some, which shows a lock.
+			Overwrites: []discord.Overwrite{{ID: discord.Snowflake(guild.ID), Type: discord.OverwriteRole, Deny: discord.PermissionViewChannel}}},
 		{ID: discord.ChannelID(id(124)), GuildID: guild.ID, Type: discord.GuildText, Name: "general-chat", Position: 4, ParentID: cat.ID},
 		{ID: discord.ChannelID(id(125)), GuildID: guild.ID, Type: discord.GuildVoice, Name: "🏝 Game Room", Position: 5, ParentID: voiceCat.ID},
 		{ID: discord.ChannelID(id(126)), GuildID: guild.ID, Type: discord.GuildVoice, Name: "General", Position: 6, ParentID: voiceCat.ID},

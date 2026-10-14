@@ -238,6 +238,8 @@ type chatView struct {
 	// their names; voiceChatBtns open their text chat, and voiceGearBtns
 	// their menu.
 	voiceStatuses map[discord.ChannelID]string
+	// voiceStarts are when people came into each voice channel.
+	voiceStarts   map[discord.ChannelID]time.Time
 	voiceChatBtns map[discord.ChannelID]*widget.Clickable
 	voiceGearBtns map[discord.ChannelID]*widget.Clickable
 	// pressTag is what was last pressed, at pressAt, for double clicks.
@@ -1357,14 +1359,23 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 				case rowDM:
 					return c.dmAvatar(gtx, r, selected, hovered)
 				case rowVoice:
-					return layout.Inset{Left: unit.Dp(1), Right: unit.Dp(1)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return icon(gtx, iconVoice, 18, colorChannel)
+					// Green in the channel the user is in, as in Discord.
+					col := colorChannel
+					if inVoice {
+						col = colorGreen
+					}
+					return locked(gtx, privateChannel(r.ch), func(gtx layout.Context) layout.Dimensions {
+						return layout.Inset{Left: unit.Dp(1), Right: unit.Dp(1)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return icon(gtx, iconVoice, 18, col)
+						})
 					})
 				default:
-					gtx.Constraints.Min.X = gtx.Dp(20)
-					l := label(th, 20, colorChannel, "#")
-					l.Alignment = text.Middle
-					return l.Layout(gtx)
+					return locked(gtx, privateChannel(r.ch), func(gtx layout.Context) layout.Dimensions {
+						gtx.Constraints.Min.X = gtx.Dp(20)
+						l := label(th, 20, colorChannel, "#")
+						l.Alignment = text.Middle
+						return l.Layout(gtx)
+					})
 				}
 			}),
 			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
@@ -1380,8 +1391,16 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 				)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				// How long a voice channel has had people in it, where its
+				// buttons are not.
+				if r.kind != rowVoice || hovered {
+					return layout.Dimensions{}
+				}
+				return c.layoutVoiceTime(gtx, r.ch.ID)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				// A voice channel's chat and menu, as Discord shows them.
-				if r.kind != rowVoice || !(hovered || selected || inVoice) {
+				if r.kind != rowVoice || !hovered {
 					return layout.Dimensions{}
 				}
 				small := func(cl *widget.Clickable, ic *widget.Icon) layout.FlexChild {
@@ -1447,7 +1466,15 @@ func (c *chatView) layoutVoiceMember(gtx layout.Context, r channelRow, hovered b
 					return dims
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-				layout.Flexed(1, oneLine(label(th, 14, col, r.label)).Layout),
+				// The name, with the server tag beside it, as in the
+				// member list.
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					m := discord.Member{User: c.voiceUser(r)}
+					dims := c.layoutMemberName(gtx, &m, r.ch.GuildID, label(th, 14, col, r.label))
+					// The whole width, for what follows to stay at the right.
+					dims.Size.X = gtx.Constraints.Max.X
+					return dims
+				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					if !r.live {
 						return layout.Dimensions{}
