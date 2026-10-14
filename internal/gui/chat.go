@@ -1209,7 +1209,7 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 	}
 	c.updateSelectionKeys(gtx)
 	if c.copyText != "" {
-		gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(c.copyText))})
+		gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(strings.ReplaceAll(c.copyText, wordJoiner, "")))})
 		c.copyText = ""
 	}
 	if c.cset.open {

@@ -184,6 +184,7 @@ func (u *ui) startDemo() {
 			m.Attachments = []discord.Attachment{{Filename: "clip.mp4", URL: discord.URL(video), Size: 2 << 20, ContentType: "video/mp4", Width: uint(vw), Height: uint(vh)}}
 		})
 	}
+	add(channels[0].ID, guild.ID, users[1], 2*time.Minute, "https://example.com/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=http://localhost:51514/callback&scope=org:create_api_key+user:profile+user:inference&state=u2VtMFWSXJ6b6YfOLxMm5_yHOMVahUZsoZM5gk5_Isw", nil)
 	add(channels[0].ID, guild.ID, me, time.Hour, "on my way", func(m *discord.Message) {
 		ref := asked
 		m.ReferencedMessage = &ref

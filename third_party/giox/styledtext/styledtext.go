@@ -180,7 +180,15 @@ func (t TextStyle) layoutSpan(gtx layout.Context, maxWidth int, span SpanStyle) 
 			// If we're only wrapping on word boundaries, we failed to display any runes whatsoever,
 			// and it wasn't due to a hard newline, we need to line-wrap without truncation to discover
 			// the word that doesn't fit on the line.
-			call, ti = t.iterateSpan(gtx, maxWidth, span, false)
+			// A word longer than the room left, such as a link, breaks at
+			// the edge, as browsers break long words, rather than running
+			// past it.
+			g := t
+			g.WrapPolicy = WrapGraphemes
+			call, ti = g.iterateSpan(gtx, maxWidth, span, true)
+			if ti.runes == 0 {
+				call, ti = t.iterateSpan(gtx, maxWidth, span, false)
+			}
 			runesDisplayed = ti.runes
 			multiLine = runesDisplayed < utf8.RuneCountInString(span.Content)
 			endedWithNewline = ti.hasNewline

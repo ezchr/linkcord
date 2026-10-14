@@ -299,7 +299,7 @@ func (c *chatView) inlineSpans(s string, m discord.Message, base richtext.SpanSt
 				case mt[6] != "":
 					special(mt[6], colorLink, metaURL, mt[7], false)
 				case mt[8] != "":
-					special(mt[8], colorLink, metaURL, mt[8], false)
+					special(unbreakable(mt[8]), colorLink, metaURL, mt[8], false)
 				}
 				i += len(mt[0])
 				continue
@@ -631,4 +631,20 @@ func (c *chatView) richState(id discord.MessageID) *richtextState {
 		c.richStates[id] = s
 	}
 	return s
+}
+
+// wordJoiner glues the characters of a link together, so that it breaks
+// only where the line ends, as Discord's do, not at every / or &. It is
+// taken out of what is copied.
+const wordJoiner = "⁠"
+
+func unbreakable(s string) string {
+	var b strings.Builder
+	for i, r := range s {
+		if i > 0 {
+			b.WriteString(wordJoiner)
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
