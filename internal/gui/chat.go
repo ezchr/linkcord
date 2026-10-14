@@ -18,6 +18,7 @@ import (
 	"gioui.org/io/clipboard"
 	"gioui.org/io/event"
 	"gioui.org/io/pointer"
+	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -1123,7 +1124,8 @@ func (c *chatView) update(gtx layout.Context) {
 		if r.kind == rowVoiceMember {
 			continue
 		}
-		if !c.click(discord.Snowflake(r.ch.ID)).Clicked(gtx) {
+		click, ok := c.click(discord.Snowflake(r.ch.ID)).Update(gtx)
+		if !ok {
 			continue
 		}
 		switch r.kind {
@@ -1141,7 +1143,12 @@ func (c *chatView) update(gtx layout.Context) {
 				c.openHome(homeFriends)
 			}
 		case rowVoice:
-			c.joinVoice(r.ch)
+			// Shift joins it in a second call, staying in the one joined.
+			if click.Modifiers.Contain(key.ModShift) && c.u.wantsSecondCall(r.ch, true) {
+				c.joinSecondCall(r.ch)
+			} else {
+				c.joinVoice(r.ch)
+			}
 			c.openCall(r.ch)
 		}
 		break
@@ -1771,6 +1778,7 @@ func (c *chatView) dmAvatar(gtx layout.Context, r channelRow, selected, hovered 
 func (c *chatView) layoutUserPanel(gtx layout.Context) layout.Dimensions {
 	th := c.u.th
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(c.layoutSecondCall),
 		layout.Rigid(c.u.layoutVoicePanel),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			h := gtx.Dp(52)

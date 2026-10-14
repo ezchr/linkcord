@@ -137,6 +137,8 @@ func startDeviceOn(kind malgo.DeviceType, id string, channels int, data func(out
 
 // Session is the voice channel that the user is in, if any.
 type Session struct {
+	// guild is the server of the channel joined, none for a call.
+	guild discord.GuildID
 	state *state.State
 	// threshold is how loud a sample of the microphone must be for what is said to be sent.
 	threshold atomic.Int64
@@ -250,6 +252,13 @@ func (s *Session) follow(event *gateway.VoiceStateUpdateEvent) {
 	defer s.mu.Unlock()
 
 	status, own := s.Status(), event.SessionID == s.state.Ready().SessionID
+	// Another connection of the user's, such as a second call of
+	// Linkcord's, in another server or in a direct message while this is
+	// in a server, leaves this call as it is: Discord keeps a voice state
+	// for each server, and one for calls.
+	if !own && event.GuildID != s.guild {
+		return
+	}
 	switch {
 	case !status.Joined || own && event.ChannelID == status.ChannelID:
 	case own && event.ChannelID.IsValid():
@@ -444,6 +453,9 @@ func (s *Session) Join(channelID discord.ChannelID) (err error) {
 	}
 
 	s.setStatus(Status{ChannelID: channelID, Joined: true})
+	if ch, err := s.state.Channel(channelID); err == nil {
+		s.guild = ch.GuildID
+	}
 
 	return nil
 }

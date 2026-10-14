@@ -502,7 +502,13 @@ func (c *chatView) joinable(ch discord.Channel) error {
 // joinVoice joins the voice channel ch, leaving the one the user is in.
 func (c *chatView) joinVoice(ch discord.Channel) {
 	u := c.u
-	if u.voiceChannel() == ch.ID {
+	if u.voiceChannel() == ch.ID || u.inSecondCall(ch.ID) {
+		return
+	}
+	// A call while in a server's channel, or a server's channel while in a
+	// call, is joined in a second call, as a phone and a computer would.
+	if u.wantsSecondCall(ch, false) {
+		c.joinSecondCall(ch)
 		return
 	}
 	if err := c.joinable(ch); err != nil {
@@ -593,6 +599,7 @@ func (u *ui) toggleVoice(deafen bool) {
 	default:
 		u.playSound(dcsound.Unmute)
 	}
+	u.applySecondCall()
 	if s := v.session; s != nil && s.Status().Joined {
 		muted, deafened := v.muted, v.deafened
 		go func() {
