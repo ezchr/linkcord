@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -237,8 +238,69 @@ func (w *progressWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Prepare downloads into the executable's directory, so replacement stays
-// on the same filesystem. The installed file is untouched until handoff.
+// stagePrefix starts the name of the folder of each update: its download,
+// the executable it replaced, and its log.
+const stagePrefix = ".linkcord-update-"
+
+// keepStages is how many of the latest updates keep their folder, for their
+// logs and the executable to go back to.
+const keepStages = 3
+
+// stagingDir makes the folder to stage an update of target in: in the update
+// cache, out of the executable's folder, where nothing cleans it up; or
+// beside target if the cache is on another drive, since replacing a file
+// needs both on one. Folders of older updates are removed, as are those that
+// earlier versions left beside the executable.
+func (m *Manager) stagingDir(target string) (string, error) {
+	pruneStages(filepath.Dir(target), 0)
+	dir := m.cacheDir
+	if !strings.EqualFold(filepath.VolumeName(dir), filepath.VolumeName(target)) {
+		dir = filepath.Dir(target)
+	} else if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	pruneStages(dir, keepStages-1)
+	return os.MkdirTemp(dir, stagePrefix)
+}
+
+// pruneStages removes the folders of finished updates in dir but the keep
+// latest.
+func pruneStages(dir string, keep int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	type stage struct {
+		path string
+		mod  time.Time
+	}
+	var stages []stage
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), stagePrefix) {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		// One whose helper never wrote a result may still be in use, unless
+		// it is old.
+		if _, err := os.Stat(filepath.Join(path, "result")); err != nil && time.Since(info.ModTime()) < 24*time.Hour {
+			continue
+		}
+		stages = append(stages, stage{path, info.ModTime()})
+	}
+	slices.SortFunc(stages, func(a, b stage) int { return b.mod.Compare(a.mod) })
+	for i, s := range stages {
+		if i >= keep {
+			os.RemoveAll(s.path)
+		}
+	}
+}
+
+// Prepare downloads the update into its own folder, on the executable's
+// drive. The installed file is untouched until handoff.
 func (m *Manager) Prepare(ctx context.Context, release *Release, target string, progress func(int)) (plan *Plan, err error) {
 	newer, err := Newer(release.Tag, m.Version)
 	if err != nil || !newer {
@@ -259,9 +321,9 @@ func (m *Manager) Prepare(ctx context.Context, release *Release, target string, 
 	if err != nil {
 		return nil, err
 	}
-	stageDir, err := os.MkdirTemp(filepath.Dir(target), ".linkcord-update-")
+	stageDir, err := m.stagingDir(target)
 	if err != nil {
-		return nil, fmt.Errorf("executable folder is not writable: %w", err)
+		return nil, fmt.Errorf("update folder is not writable: %w", err)
 	}
 	defer func() {
 		if err != nil {

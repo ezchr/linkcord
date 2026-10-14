@@ -59,7 +59,7 @@ func MarkHealthy(actualVersion string) error {
 	if path == "" && expected == "" {
 		return nil
 	}
-	if filepath.Base(path) != "healthy" || !strings.HasPrefix(filepath.Base(filepath.Dir(path)), ".linkcord-update-") {
+	if filepath.Base(path) != "healthy" || !strings.HasPrefix(filepath.Base(filepath.Dir(path)), stagePrefix) {
 		return errors.New("invalid update health-marker path")
 	}
 	if strings.TrimPrefix(actualVersion, "v") != strings.TrimPrefix(expected, "v") {

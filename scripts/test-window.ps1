@@ -37,6 +37,8 @@ public static class P {
 # Windows 7 mouse messages, which can be posted, unlike the pointer messages
 # of Windows 8 and later.
 $env:GIO_LEGACY_MOUSE = "1"
+# The build tested runs, rather than the copy installed for the user.
+$env:LINKCORD_PORTABLE = "1"
 if ($Demo) { $env:LINKCORD_DEMO = "1" } else { Remove-Item Env:LINKCORD_DEMO -ErrorAction SilentlyContinue }
 if ($Warp) { $env:GIO_D3D11_WARP = "1" } else { Remove-Item Env:GIO_D3D11_WARP -ErrorAction SilentlyContinue }
 

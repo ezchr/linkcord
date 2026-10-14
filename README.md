@@ -68,13 +68,15 @@ Remove-Item Env:\LINKCORD_TEST_HANDOFF
 
 ## Automatic updates
 
+Linkcord runs from one installed copy, `%LOCALAPPDATA%\Programs\Linkcord\linkcord.exe`, which updates replace. The first time any `linkcord.exe` starts, it copies itself there, puts a **Linkcord** shortcut to it on the desktop, and starts it. From then on, starting another copy opens the installed one instead, after installing itself first if it is the newer of the two, so an old download never updates itself again. The shortcut is made once; if it is deleted, it is not made again. Set `LINKCORD_PORTABLE=1` to run a copy where it is, as the test scripts do.
+
 Normal startup opens a short update screen before sign-in. Discord metadata and GitHub release checks run in parallel. Offline failures leave the installed client usable; **Skip checks** continues with the cached or built-in Discord metadata.
 
 Discord's current web-client build number is fetched from its login page, cached in `%LOCALAPPDATA%\linkcord\discord-build.json`, and used in HTTP headers and gateway identification. This updates metadata without a new executable. API, gateway, and authentication behavior still require code changes.
 
 For newer stable GitHub releases, Linkcord downloads the `linkcord.exe` asset, verifies its size and GitHub SHA-256 digest, and checks that it is a Windows AMD64 executable. A hidden PowerShell helper waits for the current process to exit, replaces the file, and starts the new client. The new client must acknowledge its version after its first GUI frame; otherwise the helper restores the previous executable. A failed startup is recorded so the same release and digest do not cause a restart loop.
 
-Replacement requires write access to the executable's folder. A release without a digest or with an invalid asset leaves the installed version in place. Update staging folders contain a backup and diagnostic logs beside the executable.
+Replacement requires write access to the executable's folder. A release without a digest or with an invalid asset leaves the installed version in place. Each update is staged in its own folder in `%LOCALAPPDATA%\linkcord\updates`, out of the executable's folder, with the download, the executable it replaced and a log; the folders of the last three updates are kept and older ones removed. A copy on another drive than that folder stages beside itself, since a file can only be replaced from the same drive.
 
 The repository is currently private. Release checks use `LINKCORD_GITHUB_TOKEN`, if set, or the current GitHub CLI sign-in when `gh` is installed. The GitHub account must have access to `ezchr/linkcord`. Public releases require no GitHub credential. GitHub and Discord credentials are separate; neither is embedded in the executable, release cache, or helper script.
 
@@ -123,6 +125,7 @@ For a controlled diagnostic session, set `LINKCORD_PROFILE` to an output folder.
 
 | Environment variable | Purpose |
 |---|---|
+| `LINKCORD_PORTABLE=1` | Runs the copy started where it is, instead of the installed one. |
 | `LINKCORD_DEMO=1` | Displays made-up servers, users, and messages without connecting to Discord. Fixtures are in `internal/gui/demo.go`. |
 | `GIO_LEGACY_MOUSE=1` | Uses Windows 7 mouse messages to test that path on Windows 10/11. |
 | `GIO_D3D11_WARP=1` | Uses software rendering instead of a graphics card. |
@@ -173,6 +176,7 @@ Local application data:
 | `internal/gui/render_test.go`, `media_render_test.go` | Screenless interface rendering tests. |
 | `internal/http/` | Discord request headers, client properties, and cached web-build refresh. |
 | `internal/update/` | GitHub release checks, verified downloads, Windows replacement, and rollback. |
+| `internal/install/` | The installed copy that every copy started opens, and its desktop shortcut. |
 | `internal/version/` | Embedded version shared by both entry points. |
 | `third_party/patches/` | Patches to the vendored Gio libraries. |
 

@@ -15,6 +15,7 @@ import (
 	"gioui.org/app"
 	"github.com/ezchr/linkcord/internal/gui"
 	discordhttp "github.com/ezchr/linkcord/internal/http"
+	"github.com/ezchr/linkcord/internal/install"
 	"github.com/ezchr/linkcord/internal/instance"
 	"github.com/ezchr/linkcord/internal/update"
 	"github.com/ezchr/linkcord/internal/version"
@@ -53,6 +54,12 @@ func main() {
 	// A fixed window class lets a second start find this window whatever
 	// the executable is called.
 	app.ID = instance.WindowClass
+	// Linkcord runs from its installed copy, which the desktop shortcut
+	// starts and updates replace: an older copy started opens it instead of
+	// updating itself again, and a newer one installs itself first.
+	if os.Getenv("LINKCORD_DEMO") != "1" && install.Ensure(version.String(), update.Newer) {
+		return
+	}
 	// Only one Linkcord runs per session; starting it again brings the open
 	// one to the front. The demo is left out, so that test tools can run it
 	// beside a signed-in Linkcord.
