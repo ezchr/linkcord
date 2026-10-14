@@ -242,6 +242,9 @@ type chatView struct {
 	voiceStarts   map[discord.ChannelID]time.Time
 	voiceChatBtns map[discord.ChannelID]*widget.Clickable
 	voiceGearBtns map[discord.ChannelID]*widget.Clickable
+	// rpcActivities are what programs connected to the RPC show the user
+	// doing, by connection.
+	rpcActivities map[string]rpcActivity
 	// pollClicks are the clicks of the answers and buttons of polls, and
 	// pollChoice the answers chosen of those that take several, until
 	// voted.
@@ -434,6 +437,13 @@ func (c *chatView) close() {
 func (c *chatView) load(ready *gateway.ReadyEvent) {
 	c.me = ready.User
 	c.inter.sessionID = ready.SessionID
+	// Games and programs show what the user does in them through the RPC,
+	// as Discord's app has them.
+	if !c.demo {
+		me := ready.User
+		c.u.rpcMe.Store(&me)
+		c.u.startRPC()
+	}
 
 	seen := make(map[discord.GuildID]bool)
 	var order []discord.GuildID

@@ -22,6 +22,7 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/gateway"
 	"github.com/ayn2op/arikawa/v3/utils/ws"
 	"github.com/ayn2op/ningen/v3"
@@ -133,6 +134,10 @@ type ui struct {
 	images *images
 	// appearance are the colors the user chose.
 	appearance appearanceSettings
+	// rpcStarted reports whether Discord's RPC is served, and rpcMe is who
+	// it says the user is.
+	rpcStarted bool
+	rpcMe      atomic.Pointer[discord.User]
 
 	// tray is the icon in the notification area, made when the window is
 	// first closed, and trayHinted reports whether its balloon was shown.
