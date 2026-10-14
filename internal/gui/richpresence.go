@@ -77,6 +77,13 @@ func (c *chatView) setRPCActivity(conn, clientID string, activity json.RawMessag
 		}
 		delete(c.rpcActivities, conn)
 	} else {
+		// One activity per program: one that reconnected without closing
+		// left its old connection, which kept the song before.
+		for k, a := range c.rpcActivities {
+			if k != conn && a.clientID == clientID {
+				delete(c.rpcActivities, k)
+			}
+		}
 		c.rpcActivities[conn] = rpcActivity{clientID, activity}
 	}
 	acts := make([]rpcActivity, 0, len(c.rpcActivities))
@@ -86,6 +93,7 @@ func (c *chatView) setRPCActivity(conn, clientID string, activity json.RawMessag
 	status := discord.OnlineStatus
 	var custom []json.RawMessage
 	if p, _ := c.st.PresenceStore.Presence(0, c.me.ID); p != nil {
+		// The status the user chose stays with the activity.
 		if p.Status != "" {
 			status = p.Status
 		}

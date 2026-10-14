@@ -514,7 +514,7 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 
 	// Activities other than the custom status.
 	if presence != nil {
-		for _, a := range presence.Activities {
+		for _, a := range latestActivities(presence.Activities) {
 			if a.Type == discord.CustomActivity {
 				continue
 			}
