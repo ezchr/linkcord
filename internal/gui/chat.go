@@ -334,11 +334,12 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 	c.messageList.ScrollToEnd = true
 	c.composer.Submit = true
 
-	stopChan, stopStatus, stopPolls := st.AddChanHandler(c.events), c.watchVoiceStatus(), c.watchPolls()
+	stopChan, stopStatus, stopPolls, stopMine := st.AddChanHandler(c.events), c.watchVoiceStatus(), c.watchPolls(), c.watchMyPresence()
 	c.stopEvents = func() {
 		stopChan()
 		stopStatus()
 		stopPolls()
+		stopMine()
 	}
 	go c.pump()
 	return c
