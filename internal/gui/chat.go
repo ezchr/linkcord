@@ -112,6 +112,8 @@ type chatView struct {
 	newChannel createChannel
 	// search finds messages of the server or conversation open.
 	search searchView
+	// gset is the settings of a server, open over everything.
+	gset guildSettings
 
 	// detached is set while older messages show in place of the newest,
 	// after a jump; flashID is lit until flashUntil.
@@ -1143,6 +1145,13 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 	if c.copyText != "" {
 		gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(c.copyText))})
 		c.copyText = ""
+	}
+	if c.gset.open {
+		dims := c.layoutGuildSettings(gtx)
+		if c.u.chat == c {
+			c.layoutOverlays(gtx)
+		}
+		return dims
 	}
 	if c.settings.open {
 		dims := c.layoutSettings(gtx)

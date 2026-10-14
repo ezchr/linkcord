@@ -241,8 +241,9 @@ func (c *chatView) guildMenuItems() []menuItem {
 	if ch, ok := c.inviteChannel(guildID); ok {
 		items = append(items, menuItem{text: "Invite to Server", col: colorAccent, lead: menuIcon(iconMenuInvite, colorAccent), act: func() { c.copyInvite(ch) }})
 	}
-	// The server's settings come later; until then the line says so.
-	items = append(items, menuItem{key: "settings", text: "Server Settings (soon)", col: colorMuted, lead: menuIcon(iconMenuSettings, colorMuted)})
+	if perms.Has(discord.PermissionManageGuild) || perms.Has(discord.PermissionManageRoles) || perms.Has(discord.PermissionBanMembers) {
+		items = append(items, menuItem{text: "Server Settings", lead: menuIcon(iconMenuSettings, colorText), act: func() { c.openGuildSettings(guildID) }})
+	}
 	if perms.Has(discord.PermissionManageChannels) {
 		items = append(items,
 			menuItem{text: "Create Channel", lead: menuIcon(iconMenuChannel, colorText), act: func() { c.openCreateChannel(guildID, false) }},
