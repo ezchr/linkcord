@@ -11,7 +11,6 @@ import (
 var (
 	user32          = syscall.NewLazyDLL("user32.dll")
 	procFlashWindow = user32.NewProc("FlashWindowEx")
-	procMessageBeep = user32.NewProc("MessageBeep")
 )
 
 type flashInfo struct {
@@ -23,23 +22,21 @@ type flashInfo struct {
 }
 
 const (
-	flashTray        = 0x2
-	flashTimerNoFG   = 0xc
-	beepNotification = 0x40 // MB_ICONASTERISK
+	flashTray      = 0x2
+	flashTimerNoFG = 0xc
 )
 
 // notify flashes the taskbar button until the window is focused and plays
-// Discord's sound of a message, or Windows' notification sound if Discord's
-// sounds are off, which works the same on Windows 7 and later.
+// Discord's sound of a message, unless it is turned off in the settings.
 func (u *ui) notify() {
 	if u.hwnd != 0 && !u.focused {
 		fi := flashInfo{hwnd: u.hwnd, flags: flashTray | flashTimerNoFG}
 		fi.size = uint32(unsafe.Sizeof(fi))
 		procFlashWindow.Call(uintptr(unsafe.Pointer(&fi)))
 	}
-	if !u.playSound(dcsound.Message) {
-		procMessageBeep.Call(beepNotification)
-	}
+	// Turned off in the settings, it is silent, not replaced by Windows'
+	// beep.
+	u.playSound(dcsound.Message)
 }
 
 // viewEvent keeps the native window handle, which notify needs.
