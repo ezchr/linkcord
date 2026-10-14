@@ -531,7 +531,14 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 											e.Color = colorText
 											e.TextSize = 15
 											e.SelectionColor = withAlpha(colorAccent, 0x60)
-											return e.Layout(gtx)
+											// The mentions picked show in their box, as once sent,
+											// drawn under the text.
+											macro := op.Record(gtx.Ops)
+											d := e.Layout(gtx)
+											call := macro.Stop()
+											c.paintComposerMentions(gtx, d.Size)
+											call.Add(gtx.Ops)
+											return d
 										})
 									}),
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
