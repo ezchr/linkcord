@@ -92,8 +92,23 @@ func (c *chatView) joinSecondCall(ch discord.Channel) {
 	token := u.token
 	go func() {
 		st := voiceOnlyState(token)
+		// What the connection hears of voice, for when a join fails.
+		st.AddHandler(func(ev *gateway.VoiceStateUpdateEvent) {
+			slog.Info("second call voice state", "channel", ev.ChannelID, "guild", ev.GuildID, "user", ev.UserID)
+		})
+		st.AddHandler(func(ev *gateway.VoiceServerUpdateEvent) {
+			slog.Info("second call voice server", "guild", ev.GuildID, "endpoint", ev.Endpoint != "")
+		})
 		err := st.Open(context.Background())
+		slog.Info("second call connection", "err", err)
 		var s *voice.Session
+		if err == nil && !ch.GuildID.IsValid() {
+			// As Discord's app, this connection asks about the call first,
+			// or Discord does not tell it where the call's voice is.
+			if cerr := st.SendGateway(context.Background(), &callConnectCommand{ChannelID: ch.ID}); cerr != nil {
+				slog.Warn("could not ask about the call", "err", cerr)
+			}
+		}
 		if err == nil {
 			s = voice.New(st, settings.sensitivity())
 			if derr := s.SetDevices(settings.Input, settings.Output); derr != nil {
