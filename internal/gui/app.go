@@ -131,6 +131,8 @@ type ui struct {
 
 	voice  voiceState
 	images *images
+	// appearance are the colors the user chose.
+	appearance appearanceSettings
 
 	// tray is the icon in the notification area, made when the window is
 	// first closed, and trayHinted reports whether its balloon was shown.
@@ -147,7 +149,10 @@ type ui struct {
 }
 
 func newUI(w *app.Window) *ui {
-	u := &ui{win: w, th: newTheme(), focused: true}
+	// The colors chosen are set before anything takes its own copy of them.
+	appearance := loadAppearance()
+	applyAppearance(appearance)
+	u := &ui{win: w, th: newTheme(), focused: true, appearance: appearance}
 	u.images = newImages(u)
 	if os.Getenv(demoEnvVar) == "1" {
 		u.startDemo()

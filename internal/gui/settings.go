@@ -30,11 +30,12 @@ const (
 	pageVoice settingsPage = iota
 	pageKeybinds
 	pageSounds
+	pageAppearance
 	pageAdvanced
 	settingsPages
 )
 
-var settingsPageNames = [settingsPages]string{"Voice & Video", "Keybinds", "Sounds", "Advanced"}
+var settingsPageNames = [settingsPages]string{"Voice & Video", "Keybinds", "Sounds", "Appearance", "Advanced"}
 
 // settingsView is the screen of the user's settings, over the whole window,
 // as Discord's, opened by the gear beside the voice buttons.
@@ -68,7 +69,10 @@ type settingsView struct {
 	// Sounds: each one's switch, volume, and button to hear it.
 	soundSwitch, soundHear map[string]*widget.Clickable
 	soundVolume            map[string]*slider
-	keybindsLink           widget.Clickable
+
+	// Appearance.
+	look         appearanceView
+	keybindsLink widget.Clickable
 
 	// Keybinds: recording is the action whose keys are being recorded.
 	record, clear map[string]*widget.Clickable
@@ -307,6 +311,7 @@ func (c *chatView) updateSettings(gtx layout.Context) {
 		u.playSound(dcsound.Unmute)
 	}
 	c.updateSoundSettings(gtx)
+	c.updateAppearance(gtx)
 	if s.agcBtn.Clicked(gtx) {
 		settings.NoAutoGain = !settings.NoAutoGain
 		u.applyVoiceSettings()
@@ -500,6 +505,8 @@ func (c *chatView) layoutSettingsPage(gtx layout.Context) layout.Dimensions {
 		rows = c.keybindRows()
 	case pageSounds:
 		rows = c.soundRows()
+	case pageAppearance:
+		rows = c.appearanceRows()
 	case pageAdvanced:
 		rows = c.advancedRows()
 	}
