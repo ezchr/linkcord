@@ -89,7 +89,9 @@ func header(gtx layout.Context, th *material.Theme, title string) layout.Dimensi
 }
 
 // rowItem is a selectable line of a sidebar list.
-func rowItem(gtx layout.Context, click *widget.Clickable, w func(gtx layout.Context, hovered bool) layout.Dimensions, selected bool) layout.Dimensions {
+// rowItem is a row of a list with its hover and selection background. A
+// highlighted row, such as a conversation with unread messages, is tinted.
+func rowItem(gtx layout.Context, click *widget.Clickable, w func(gtx layout.Context, hovered bool) layout.Dimensions, selected bool, highlighted ...bool) layout.Dimensions {
 	return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		pointer.CursorPointer.Add(gtx.Ops)
 		hovered := click.Hovered()
@@ -101,6 +103,8 @@ func rowItem(gtx layout.Context, click *widget.Clickable, w func(gtx layout.Cont
 					bg = colorSelected
 				case hovered:
 					bg = colorHover
+				case len(highlighted) > 0 && highlighted[0]:
+					bg = withAlpha(colorAccent, 0x30)
 				}
 				size := image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Min.Y)
 				paint.FillShape(gtx.Ops, bg, clip.UniformRRect(image.Rectangle{Max: size}, gtx.Dp(4)).Op(gtx.Ops))

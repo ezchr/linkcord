@@ -214,6 +214,8 @@ type chatView struct {
 	rightTags map[string]*int
 	// voiceClicks open the profiles of the people in voice channels.
 	voiceClicks map[discord.UserID]*widget.Clickable
+	// unreadDMClicks open the unread conversations above the servers.
+	unreadDMClicks map[discord.ChannelID]*widget.Clickable
 	// copyText is copied to the clipboard on the next frame.
 	copyText string
 	// demoNotes are the notes written in the demo.
@@ -249,27 +251,28 @@ func (c *chatView) msgClick(id discord.MessageID, part int) *widget.Clickable {
 
 func newChatView(u *ui, st *ningen.State) *chatView {
 	c := &chatView{
-		u:           u,
-		st:          st,
-		events:      make(chan gateway.Event, 64),
-		done:        make(chan struct{}),
-		clicks:      make(map[discord.Snowflake]*widget.Clickable),
-		lastChannel: make(map[discord.GuildID]discord.ChannelID),
-		collapsed:   make(map[discord.ChannelID]bool),
-		selectables: make(map[discord.MessageID]*widget.Selectable),
-		linkClicks:  make(map[string]*widget.Clickable),
-		typers:      make(map[discord.UserID]time.Time),
-		profiles:    make(map[profileKey]*profileData),
-		userClicks:  make(map[discord.UserID]*widget.Clickable),
-		msgClicks:   make(map[msgClickKey]*widget.Clickable),
-		rightTags:   make(map[string]*int),
-		voiceClicks: make(map[discord.UserID]*widget.Clickable),
-		demoNotes:   make(map[discord.UserID]string),
-		richStates:  make(map[discord.MessageID]*richtextState),
-		textStates:  make(map[string]*richtextState),
-		revealed:    make(map[discord.MessageID]bool),
-		showMembers: true,
-		act:         newActionState(),
+		u:              u,
+		st:             st,
+		events:         make(chan gateway.Event, 64),
+		done:           make(chan struct{}),
+		clicks:         make(map[discord.Snowflake]*widget.Clickable),
+		lastChannel:    make(map[discord.GuildID]discord.ChannelID),
+		collapsed:      make(map[discord.ChannelID]bool),
+		selectables:    make(map[discord.MessageID]*widget.Selectable),
+		linkClicks:     make(map[string]*widget.Clickable),
+		typers:         make(map[discord.UserID]time.Time),
+		profiles:       make(map[profileKey]*profileData),
+		userClicks:     make(map[discord.UserID]*widget.Clickable),
+		msgClicks:      make(map[msgClickKey]*widget.Clickable),
+		rightTags:      make(map[string]*int),
+		voiceClicks:    make(map[discord.UserID]*widget.Clickable),
+		unreadDMClicks: make(map[discord.ChannelID]*widget.Clickable),
+		demoNotes:      make(map[discord.UserID]string),
+		richStates:     make(map[discord.MessageID]*richtextState),
+		textStates:     make(map[string]*richtextState),
+		revealed:       make(map[discord.MessageID]bool),
+		showMembers:    true,
+		act:            newActionState(),
 	}
 	if os.Getenv(demoEnvVar) != "" {
 		c.deleted = newDeletedLog("")
@@ -1091,17 +1094,28 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 
 func (c *chatView) layoutGuilds(gtx layout.Context) layout.Dimensions {
 	th := c.u.th
-	// The first element is the button for direct messages.
-	return listLayout(gtx, th, &c.guildList, len(c.guildOrder)+1, func(gtx layout.Context, i int) layout.Dimensions {
-		if i == 0 {
-			unread := c.dmsUnread()
-			dims := c.guildButton(gtx, &c.homeClick, !c.selGuild.IsValid(), unread, func(gtx layout.Context, active bool) layout.Dimensions {
-				bg := colorSidebar
-				if active {
-					bg = colorAccent
-				}
-				return circleIcon(gtx, bg, iconHome, active)
-			})
+	// The first element is the button for direct messages, then the
+	// conversations with unread messages, as on Discord, then the servers.
+	dms := c.unreadDMs()
+	head := 1 + len(dms)
+	return listLayout(gtx, th, &c.guildList, len(c.guildOrder)+head, func(gtx layout.Context, i int) layout.Dimensions {
+		if i < head {
+			var dims layout.Dimensions
+			if i == 0 {
+				unread := c.dmsUnread()
+				dims = c.guildButton(gtx, &c.homeClick, !c.selGuild.IsValid(), unread, func(gtx layout.Context, active bool) layout.Dimensions {
+					bg := colorSidebar
+					if active {
+						bg = colorAccent
+					}
+					return circleIcon(gtx, bg, iconHome, active)
+				})
+			} else {
+				dims = c.layoutUnreadDM(gtx, dms[i-1])
+			}
+			if i < head-1 {
+				return dims
+			}
 			// A line separates the servers from the direct messages.
 			return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return dims }),
@@ -1114,12 +1128,12 @@ func (c *chatView) layoutGuilds(gtx layout.Context) layout.Dimensions {
 				}),
 			)
 		}
-		id := c.guildOrder[i-1]
+		id := c.guildOrder[i-head]
 		guild, err := c.st.Cabinet.Guild(id)
 		if err != nil {
 			return layout.Dimensions{}
 		}
-		unread := c.st.GuildIsUnread(id, ningen.GuildUnreadOpts{})
+		unread := c.guildUnread(id)
 		return c.guildButton(gtx, c.click(discord.Snowflake(id)), id == c.selGuild, unread, func(gtx layout.Context, active bool) layout.Dimensions {
 			bg := colorSidebar
 			radius := -1
@@ -1188,7 +1202,7 @@ func (c *chatView) dmsUnread() ningen.UnreadIndication {
 		if c.friends.requestIDs[ch.ID] {
 			continue
 		}
-		if c.st.ChannelIsUnread(ch.ID, ningen.UnreadOpts{}) != ningen.ChannelRead {
+		if c.channelUnread(ch.ID) != ningen.ChannelRead {
 			return ningen.ChannelMentioned
 		}
 	}
@@ -1262,7 +1276,7 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 	selected := c.selChannel != nil && c.selChannel.ID == r.ch.ID || c.call.open && r.kind == rowVoice && c.call.channel == r.ch.ID
 	unread := ningen.ChannelRead
 	if r.kind != rowVoice {
-		unread = c.st.ChannelIsUnread(r.ch.ID, ningen.UnreadOpts{})
+		unread = c.channelUnread(r.ch.ID)
 	}
 	inVoice := r.kind == rowVoice && c.u.voiceChannel() == r.ch.ID
 	return rowItem(gtx, c.click(discord.Snowflake(r.ch.ID)), func(gtx layout.Context, hovered bool) layout.Dimensions {
@@ -1296,10 +1310,16 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 				if unread != ningen.ChannelMentioned {
 					return layout.Dimensions{}
 				}
+				// Conversations show how many messages wait, servers a dot.
+				if r.kind == rowDM {
+					if n := c.dmUnreadCount(r.ch.ID); n > 0 {
+						return countBadge(gtx, c.u, n)
+					}
+				}
 				return dot(gtx, colorRed, 8)
 			}),
 		)
-	}, selected)
+	}, selected, r.kind == rowDM && unread != ningen.ChannelRead)
 }
 
 // layoutVoiceMember is someone in a voice channel, under it: their picture,

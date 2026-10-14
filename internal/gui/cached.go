@@ -3,6 +3,7 @@ package gui
 import (
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/state"
+	"github.com/ayn2op/ningen/v3"
 )
 
 // The window's thread must never wait for Discord. State's own lookups fetch
@@ -66,4 +67,50 @@ func (c *chatView) cachedPerms(chID discord.ChannelID) (discord.Permissions, boo
 func (c *chatView) privateChannels() []discord.Channel {
 	chs, _ := c.st.Cabinet.PrivateChannels()
 	return chs
+}
+
+// channelUnread is ningen's ChannelIsUnread from the cache: ningen's checks
+// the permission to see the channel with State, which fetches what it lacks
+// and waits, for each channel of each server, each frame.
+func (c *chatView) channelUnread(chID discord.ChannelID) ningen.UnreadIndication {
+	rs := c.st.ReadState.ReadState(chID)
+	if rs == nil || !rs.LastMessageID.IsValid() {
+		return ningen.ChannelRead
+	}
+	// Mentions override mutes.
+	if rs.MentionCount > 0 {
+		return ningen.ChannelMentioned
+	}
+	if c.st.ChannelIsMuted(chID, ningen.UnreadOpts{}) {
+		return ningen.ChannelRead
+	}
+	last := c.st.LastMessage(chID)
+	if !last.IsValid() || rs.LastMessageID >= last {
+		return ningen.ChannelRead
+	}
+	if !c.can(chID, discord.PermissionViewChannel) {
+		return ningen.ChannelRead
+	}
+	return ningen.ChannelUnread
+}
+
+// guildUnread is ningen's GuildIsUnread from the cache.
+func (c *chatView) guildUnread(guildID discord.GuildID) ningen.UnreadIndication {
+	chs, err := c.st.Cabinet.Channels(guildID)
+	if err != nil {
+		return ningen.ChannelRead
+	}
+	ind := ningen.ChannelRead
+	for _, ch := range chs {
+		s := c.channelUnread(ch.ID)
+		if s == ningen.ChannelMentioned {
+			return s
+		}
+		ind = max(ind, s)
+	}
+	// Muted servers show only mentions.
+	if c.st.MutedState.Guild(guildID, false) && ind != ningen.ChannelMentioned {
+		return ningen.ChannelRead
+	}
+	return ind
 }

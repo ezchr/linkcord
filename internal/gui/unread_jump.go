@@ -50,7 +50,7 @@ func (c *chatView) jumpUnreadChannel(step int) {
 	for k := 1; k <= n; k++ {
 		i := ((cur+step*k)%n + n) % n
 		r := c.rows[i]
-		if (r.kind == rowText || r.kind == rowDM) && c.st.ChannelIsUnread(r.ch.ID, ningen.UnreadOpts{}) != ningen.ChannelRead {
+		if (r.kind == rowText || r.kind == rowDM) && c.channelUnread(r.ch.ID) != ningen.ChannelRead {
 			c.selectChannel(r.ch)
 			return
 		}
@@ -73,7 +73,7 @@ func (c *chatView) jumpUnreadGuild(step int) {
 		id := places[((cur+step*k)%n+n)%n]
 		unread := false
 		if id.IsValid() {
-			unread = c.st.GuildIsUnread(id, ningen.GuildUnreadOpts{}) != ningen.ChannelRead
+			unread = c.guildUnread(id) != ningen.ChannelRead
 		} else {
 			unread = c.dmsUnread() != ningen.ChannelRead
 		}
