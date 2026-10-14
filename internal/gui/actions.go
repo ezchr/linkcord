@@ -255,7 +255,9 @@ func (c *chatView) mentionsMe(m discord.Message) bool {
 	if m.Author.ID == c.me.ID {
 		return false
 	}
-	if c.demo {
+	// Discord notifies of every message of a DM, but marks only those that
+	// name the user, or answer them with a ping, which names them too.
+	if c.demo || c.selChannel == nil || !c.selChannel.GuildID.IsValid() {
 		for _, u := range m.Mentions {
 			if u.ID == c.me.ID {
 				return true
