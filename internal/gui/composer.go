@@ -46,6 +46,10 @@ type pendingFile struct {
 	path, name string
 	size       int64
 	remove     widget.Clickable
+	// A picture shows a preview, thumb, which opens the editor, edit.
+	thumb        *paint.ImageOp
+	thumbLoading bool
+	edit         widget.Clickable
 }
 
 // mentionItem is a person or role offered when typing @.
@@ -602,6 +606,14 @@ func (c *chatView) layoutPendingFiles(gtx layout.Context) layout.Dimensions {
 	}
 	var cards []layout.FlexChild
 	for _, f := range cs.files {
+		if isImageFile(f.path) {
+			cards = append(cards, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Right: unit.Dp(8), Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return c.layoutImageChip(gtx, f)
+				})
+			}))
+			continue
+		}
 		cards = append(cards, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Right: unit.Dp(8), Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Max.X = gtx.Dp(220)

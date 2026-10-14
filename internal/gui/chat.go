@@ -172,6 +172,8 @@ type chatView struct {
 	guildOrder []discord.GuildID
 	// tagCard is the card of a server tag clicked, tagClicks the tags.
 	tagCard   *tagCard
+	// imgEdit is the editor of a picture to send, while open.
+	imgEdit *imageEditor
 	// incoming is the call ringing the user, nil when none does.
 	incoming *incomingCall
 	tagClicks map[discord.GuildID]*widget.Clickable
@@ -1284,6 +1286,9 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 	}
 	if c.tagCard != nil {
 		c.layoutTagCard(gtx)
+	}
+	if c.imgEdit != nil {
+		c.layoutImageEditor(gtx)
 	}
 	if c.incoming != nil {
 		c.layoutIncomingCall(gtx)
