@@ -52,7 +52,30 @@ lc_capture *lc_capture_open(uintptr_t hwnd, int x, int y, int w, int h, int curs
 // for a window minimized or closed. *gone reports a window closed.
 const uint8_t *lc_capture_grab(lc_capture *c, int *w, int *h, int *stride, int *gone);
 
+// lc_capture_duplicates reports whether the screen is captured with DXGI's
+// desktop duplication rather than GDI.
+int lc_capture_duplicates(lc_capture *c);
+
 void lc_capture_close(lc_capture *c);
+
+// lc_dpi_aware has the calling thread see screens in their own pixels and
+// returns what lc_dpi_restore takes to undo it.
+void *lc_dpi_aware(void);
+void lc_dpi_restore(void *old);
+
+typedef struct lc_dupl lc_dupl;
+
+// lc_dupl_open duplicates the screen whose top left is at x, y on the
+// desktop, as Windows 8 and later can, which sees games in full screen.
+lc_dupl *lc_dupl_open(int x, int y);
+
+// lc_dupl_grab points *pix to the latest picture of the screen, in BGRA
+// with rows *w*4 bytes apart, valid until the next call, and returns 1. It
+// returns 0 when there is no picture yet, and -1 when the screen cannot be
+// duplicated, as on Windows 7.
+int lc_dupl_grab(lc_dupl *d, const uint8_t **pix, int *w, int *h);
+
+void lc_dupl_close(lc_dupl *d);
 
 // lc_source is a screen or a window that can be shared.
 typedef struct {
@@ -82,5 +105,9 @@ lc_ploop *lc_ploop_open(uint32_t pid, int include, int *err);
 int lc_ploop_read(lc_ploop *c, int16_t *dst, int max);
 
 void lc_ploop_close(lc_ploop *c);
+
+// lc_audio_pids fills out with up to max processes playing sound now, on any
+// speakers, and returns how many.
+int lc_audio_pids(uint32_t *out, int max);
 
 #endif

@@ -114,6 +114,14 @@ func (c *capturer) grab() (p picture, ok, gone bool) {
 
 func (c *capturer) close() { C.lc_capture_close(c.c) }
 
+// method is how the picture is captured, for the log.
+func (c *capturer) method() string {
+	if C.lc_capture_duplicates(c.c) != 0 {
+		return "desktop duplication"
+	}
+	return "GDI"
+}
+
 // Sources returns the screens and the windows that can be shared, leaving
 // out the window self, each with a picture of what it shows, thumbW pixels
 // wide.

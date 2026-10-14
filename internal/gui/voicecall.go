@@ -378,7 +378,11 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 	if vs.UserID == c.me.ID {
 		if img := c.u.streamPreview(); img != nil {
 			c.layoutStreamCard(gtx, img, size, radius)
-			gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(time.Second)})
+			// The preview is made as wide as the card, and shown as it is.
+			if s := c.u.voice.stream; s != nil {
+				s.SetPreviewWidth(size.X)
+			}
+			gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(100 * time.Millisecond)})
 			c.layoutCardName(gtx, vs, name, size, true)
 			if rightClicked(gtx, c.rightTag("card"+vs.UserID.String()), size) {
 				c.openUserMenu(vs.UserID, guildID, vs.ChannelID)

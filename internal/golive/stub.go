@@ -24,6 +24,7 @@ func Sources(self uintptr, thumbW int) []Source { return nil }
 func Start(ctx context.Context, p Params) (*Stream, error) { return nil, errUnsupported }
 
 func (*Stream) Preview() *image.RGBA      { return nil }
+func (*Stream) SetPreviewWidth(int)       {}
 func (*Stream) Viewers() []discord.UserID { return nil }
 func (*Stream) Stop()                     {}
 

@@ -11,6 +11,7 @@
 #include <objbase.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
+#include <audiopolicy.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -203,4 +204,72 @@ void lc_ploop_close(lc_ploop *c) {
 		CoUninitialize();
 	}
 	free(c);
+}
+
+static const CLSID lc_CLSID_MMDeviceEnumerator = {0xBCDE0395, 0xE52F, 0x467C, {0x8E, 0x3D, 0xC4, 0x57, 0x92, 0x91, 0x69, 0x2E}};
+static const IID lc_IID_IMMDeviceEnumerator = {0xA95664D2, 0x9614, 0x4F35, {0xA7, 0x46, 0xDE, 0x8D, 0xB6, 0x36, 0x17, 0xE6}};
+static const IID lc_IID_IAudioSessionManager2 = {0x77AA99A0, 0x1BD6, 0x484F, {0x8B, 0xC7, 0x2C, 0x65, 0x4C, 0x9A, 0x9B, 0x6F}};
+static const IID lc_IID_IAudioSessionControl2 = {0xbfb7ff88, 0x7239, 0x4fc9, {0x8f, 0xa2, 0x07, 0xc9, 0x50, 0xbe, 0x9c, 0x6d}};
+
+// sessions adds to out the processes playing on dev.
+static void sessions(IMMDevice *dev, uint32_t *out, int max, int *n) {
+	IAudioSessionManager2 *mgr = NULL;
+	if (FAILED(IMMDevice_Activate(dev, &lc_IID_IAudioSessionManager2, CLSCTX_ALL, NULL, (void **)&mgr))) {
+		return;
+	}
+	IAudioSessionEnumerator *en = NULL;
+	if (SUCCEEDED(IAudioSessionManager2_GetSessionEnumerator(mgr, &en))) {
+		int count = 0;
+		IAudioSessionEnumerator_GetCount(en, &count);
+		for (int i = 0; i < count && *n < max; i++) {
+			IAudioSessionControl *ctl = NULL;
+			if (FAILED(IAudioSessionEnumerator_GetSession(en, i, &ctl))) {
+				continue;
+			}
+			AudioSessionState state = AudioSessionStateInactive;
+			IAudioSessionControl2 *ctl2 = NULL;
+			if (SUCCEEDED(IAudioSessionControl_GetState(ctl, &state)) && state == AudioSessionStateActive &&
+				SUCCEEDED(IAudioSessionControl_QueryInterface(ctl, &lc_IID_IAudioSessionControl2, (void **)&ctl2))) {
+				DWORD pid = 0;
+				IAudioSessionControl2_GetProcessId(ctl2, &pid);
+				int seen = pid == 0;
+				for (int j = 0; j < *n && !seen; j++) {
+					seen = out[j] == pid;
+				}
+				if (!seen) {
+					out[(*n)++] = pid;
+				}
+				IAudioSessionControl2_Release(ctl2);
+			}
+			IAudioSessionControl_Release(ctl);
+		}
+		IAudioSessionEnumerator_Release(en);
+	}
+	IAudioSessionManager2_Release(mgr);
+}
+
+int lc_audio_pids(uint32_t *out, int max) {
+	int com = SUCCEEDED(CoInitializeEx(NULL, COINIT_MULTITHREADED));
+	int n = 0;
+	IMMDeviceEnumerator *en = NULL;
+	if (SUCCEEDED(CoCreateInstance(&lc_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL, &lc_IID_IMMDeviceEnumerator, (void **)&en))) {
+		IMMDeviceCollection *col = NULL;
+		if (SUCCEEDED(IMMDeviceEnumerator_EnumAudioEndpoints(en, eRender, DEVICE_STATE_ACTIVE, &col))) {
+			UINT count = 0;
+			IMMDeviceCollection_GetCount(col, &count);
+			for (UINT i = 0; i < count; i++) {
+				IMMDevice *dev = NULL;
+				if (SUCCEEDED(IMMDeviceCollection_Item(col, i, &dev))) {
+					sessions(dev, out, max, &n);
+					IMMDevice_Release(dev);
+				}
+			}
+			IMMDeviceCollection_Release(col);
+		}
+		IMMDeviceEnumerator_Release(en);
+	}
+	if (com) {
+		CoUninitialize();
+	}
+	return n;
 }

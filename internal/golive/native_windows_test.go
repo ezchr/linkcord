@@ -39,6 +39,7 @@ func TestCaptureEncode(t *testing.T) {
 	if !ok {
 		t.Fatal("nothing captured")
 	}
+	t.Log("captured with", capt.method())
 	q := Quality{Height: 720, FPS: 30}
 	w, h := q.size(pic.w, pic.h)
 	enc, err := newEncoder(w, h, 30, q.bitrate(w, h), 120)

@@ -288,6 +288,9 @@ struct lc_capture {
 	HWND hwnd;
 	int x, y, w, h;
 	int cursor;
+	// dupl duplicates the screen, unless nodupl, where GDI captures it.
+	lc_dupl *dupl;
+	int nodupl;
 	HDC mem;
 	HBITMAP bmp;
 	HGDIOBJ old;
@@ -365,7 +368,38 @@ static void draw_cursor(lc_capture *c, int ox, int oy) {
 	DrawIconEx(c->mem, x, y, ci.hCursor, 0, 0, 0, NULL, DI_NORMAL);
 }
 
+// dpi_aware has the thread see the screens in their own pixels, rather than
+// scaled as for programs older than scaling, and returns how it saw them,
+// for dpi_restore. Before Windows 10, the thread sees them as the process.
+typedef HANDLE(WINAPI *set_dpi_context_fn)(HANDLE);
+
+HANDLE lc_dpi_aware(void) {
+	static set_dpi_context_fn set;
+	static int loaded;
+	if (!loaded) {
+		loaded = 1;
+		set = (set_dpi_context_fn)GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetThreadDpiAwarenessContext");
+	}
+	return set ? set((HANDLE)(intptr_t)-4) : NULL; // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+}
+
+void lc_dpi_restore(HANDLE old) {
+	if (old) {
+		((set_dpi_context_fn)GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetThreadDpiAwarenessContext"))(old);
+	}
+}
+
+static const uint8_t *grab(lc_capture *c, int *w, int *h, int *stride, int *gone);
+
 const uint8_t *lc_capture_grab(lc_capture *c, int *w, int *h, int *stride, int *gone) {
+	// Screens are captured in their own pixels, as the pointer is placed.
+	HANDLE old = lc_dpi_aware();
+	const uint8_t *pix = grab(c, w, h, stride, gone);
+	lc_dpi_restore(old);
+	return pix;
+}
+
+static const uint8_t *grab(lc_capture *c, int *w, int *h, int *stride, int *gone) {
 	*gone = 0;
 	if (c->hwnd) {
 		if (!IsWindow(c->hwnd)) {
@@ -397,7 +431,43 @@ const uint8_t *lc_capture_grab(lc_capture *c, int *w, int *h, int *stride, int *
 			ClientToScreen(c->hwnd, &o);
 			draw_cursor(c, o.x, o.y);
 		}
+	} else if (!c->nodupl) {
+		if (!c->dupl) {
+			c->dupl = lc_dupl_open(c->x, c->y);
+		}
+		const uint8_t *pix;
+		int pw, ph;
+		int r = lc_dupl_grab(c->dupl, &pix, &pw, &ph);
+		if (r < 0) {
+			lc_dupl_close(c->dupl);
+			c->dupl = NULL;
+			c->nodupl = 1;
+			return grab(c, w, h, stride, gone);
+		}
+		if (r == 0) {
+			return NULL;
+		}
+		HDC sdc = GetDC(NULL);
+		int ok = ensure(c, sdc, pw, ph);
+		ReleaseDC(NULL, sdc);
+		if (!ok) {
+			return NULL;
+		}
+		// The picture is kept clean of the pointer, drawn over a copy.
+		memcpy(c->bits, pix, (size_t)pw * ph * 4);
+		if (c->cursor) {
+			draw_cursor(c, c->x, c->y);
+		}
 	} else {
+		// The screen may have changed resolution since it was chosen.
+		POINT at = {c->x, c->y};
+		MONITORINFO mi;
+		memset(&mi, 0, sizeof mi);
+		mi.cbSize = sizeof mi;
+		if (GetMonitorInfoW(MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST), &mi)) {
+			c->w = mi.rcMonitor.right - mi.rcMonitor.left;
+			c->h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+		}
 		HDC sdc = GetDC(NULL);
 		if (!ensure(c, sdc, c->w, c->h)) {
 			ReleaseDC(NULL, sdc);
@@ -416,6 +486,10 @@ const uint8_t *lc_capture_grab(lc_capture *c, int *w, int *h, int *stride, int *
 	return c->bits;
 }
 
+int lc_capture_duplicates(lc_capture *c) {
+	return c->dupl != NULL;
+}
+
 void lc_capture_close(lc_capture *c) {
 	if (!c) {
 		return;
@@ -427,6 +501,7 @@ void lc_capture_close(lc_capture *c) {
 	if (c->mem) {
 		DeleteDC(c->mem);
 	}
+	lc_dupl_close(c->dupl);
 	free(c);
 }
 
@@ -461,7 +536,10 @@ static BOOL CALLBACK monitor_proc(HMONITOR m, HDC dc, LPRECT rect, LPARAM lp) {
 
 int lc_list_monitors(lc_source *out, int max) {
 	enum_state s = {out, max, 0, 0};
+	// In the screens' own pixels, as they are captured.
+	HANDLE old = lc_dpi_aware();
 	EnumDisplayMonitors(NULL, NULL, monitor_proc, (LPARAM)&s);
+	lc_dpi_restore(old);
 	return s.n;
 }
 

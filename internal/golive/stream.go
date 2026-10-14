@@ -36,6 +36,9 @@ type Stream struct {
 	done    chan struct{}
 	stopped atomic.Bool
 	preview atomic.Pointer[image.RGBA]
+	// previewW is how wide the preview is shown, in pixels, for it to be
+	// made as wide.
+	previewW atomic.Int32
 	// keyframe asks the loop for a keyframe.
 	keyframe chan struct{}
 
@@ -229,6 +232,7 @@ func Start(ctx context.Context, p Params) (*Stream, error) {
 		return nil, err
 	}
 
+	s.log.Info("stream capturing", "with", capt.method())
 	ok = true
 	go s.watch()
 	go s.loop(capt)
@@ -426,9 +430,12 @@ func (s *Stream) loop(capt *capturer) {
 			i420 = make([]byte, ow*oh*3/2)
 		}
 		pic.toI420(i420, ow, oh)
-		if now := time.Now(); now.Sub(lastThumb) > time.Second {
+		if now := time.Now(); now.Sub(lastThumb) >= previewEvery {
 			lastThumb = now
-			tw := 320
+			tw := min(int(s.previewW.Load()), pic.w)
+			if tw <= 0 {
+				tw = 320
+			}
 			s.preview.Store(pic.toRGBA(tw, max(tw*pic.h/pic.w, 1)))
 		}
 		elapsed := time.Since(start)
@@ -465,9 +472,19 @@ func (s *Stream) loop(capt *capturer) {
 	}
 }
 
+// previewEvery is how often the preview is made again: often enough to
+// look moving, as a small part of the work of the stream.
+const previewEvery = 100 * time.Millisecond
+
 // Preview is a recent picture of what is shared, or nil.
 func (s *Stream) Preview() *image.RGBA {
 	return s.preview.Load()
+}
+
+// SetPreviewWidth makes the preview w pixels wide, as wide as it is shown,
+// or as what is shared if narrower.
+func (s *Stream) SetPreviewWidth(w int) {
+	s.previewW.Store(int32(w))
 }
 
 // Viewers are who watch the stream.
