@@ -68,6 +68,7 @@ type channelSettings struct {
 	addTarget, dropTarget  widget.Clickable
 	syncBtn, privateBtn    widget.Clickable
 	perms                  map[uint]*[3]widget.Clickable
+	permSearch             widget.Editor
 	invites                fetched[[]gsInvite]
 	createInvite, pause    widget.Clickable
 	revoke                 map[string]*widget.Clickable
@@ -1076,17 +1077,33 @@ func (c *chatView) channelPermissionRows() []layout.Widget {
 	if cs.perms == nil {
 		cs.perms = map[uint]*[3]widget.Clickable{}
 	}
-	var permRows []layout.FlexChild
+	// The permissions are searched by name and what they do.
+	cs.permSearch.SingleLine = true
+	q := strings.ToLower(strings.TrimSpace(cs.permSearch.Text()))
+	permRows := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		return textField(gtx, th, &cs.permSearch, "Search permissions")
+	})}
 	voice := isVoiceKind(ch.Type) || ch.Type == discord.GuildCategory
+	found := false
 	for _, g := range channelPermGroups {
 		if g.voice && !g.text && !voice {
 			continue
 		}
+		var shown []channelPerm
+		for _, p := range g.perms {
+			if q == "" || strings.Contains(strings.ToLower(p.name+" "+p.about), q) {
+				shown = append(shown, p)
+			}
+		}
+		if len(shown) == 0 {
+			continue
+		}
+		found = true
 		g := g
 		permRows = append(permRows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(12), Bottom: unit.Dp(6)}.Layout(gtx, bold(label(th, 18, colorHeader, g.title)).Layout)
 		}))
-		for _, p := range g.perms {
+		for _, p := range shown {
 			p := p
 			clicks := c.cset.perms[p.bit]
 			if clicks == nil {
@@ -1111,6 +1128,11 @@ func (c *chatView) channelPermissionRows() []layout.Widget {
 				})
 			}), layout.Rigid(func(gtx layout.Context) layout.Dimensions { return settingsDivider(gtx, 0) }))
 		}
+	}
+	if !found {
+		permRows = append(permRows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(16)}.Layout(gtx, label(th, 14, colorMuted, "No permissions match.").Layout)
+		}))
 	}
 	rows = append(rows, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Alignment: layout.Start}.Layout(gtx,
