@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"cmp"
 	"fmt"
 	"image"
 	"log/slog"
@@ -112,15 +113,23 @@ func (c *chatView) searchSuggestions(key, partial string) []searchSuggestion {
 				rest = append(rest, sg)
 			}
 		}
+		// By name, then username, then ID, for those named alike to keep
+		// their place from frame to frame: the members come in no order.
 		byName := func(a, b searchSuggestion) int {
-			return strings.Compare(strings.ToLower(a.title), strings.ToLower(b.title))
+			if n := strings.Compare(strings.ToLower(a.title), strings.ToLower(b.title)); n != 0 {
+				return n
+			}
+			if n := strings.Compare(a.sub, b.sub); n != 0 {
+				return n
+			}
+			return cmp.Compare(a.user.ID, b.user.ID)
 		}
 		slices.SortFunc(first, byName)
 		slices.SortFunc(rest, byName)
 		out = append(first, rest...)
 	case "in":
 		channels, _ := c.st.Cabinet.Channels(c.selGuild)
-		slices.SortFunc(channels, func(a, b discord.Channel) int { return a.Position - b.Position })
+		slices.SortFunc(channels, func(a, b discord.Channel) int { return cmp.Or(a.Position-b.Position, cmp.Compare(a.ID, b.ID)) })
 		for _, ch := range channels {
 			if !isTextual(ch.Type) || ch.Type == discord.GuildPublicThread || ch.Type == discord.GuildPrivateThread || ch.Type == discord.GuildAnnouncementThread {
 				continue
