@@ -180,6 +180,10 @@ type chatView struct {
 	imgEdit *imageEditor
 	// incoming is the call ringing the user, nil when none does.
 	incoming *incomingCall
+	// dmCalls are who is in the call of each direct message and group, and
+	// joinCallBtn and joinVideoBtn join the one open.
+	dmCalls                   map[discord.ChannelID][]discord.UserID
+	joinCallBtn, joinVideoBtn widget.Clickable
 	tagClicks map[discord.GuildID]*widget.Clickable
 	// folders are the server column's folders, openFolders those open, and
 	// drag a server or folder being moved.
@@ -1084,6 +1088,7 @@ func (c *chatView) apply(ev gateway.Event) {
 		c.rebuildMentions()
 	case *gateway.VoiceStateUpdateEvent:
 		c.voiceSounds(ev)
+		c.noteCallVoice(ev.VoiceState)
 		c.rebuildRows()
 	case *gateway.ChannelCreateEvent, *gateway.ChannelUpdateEvent, *gateway.ChannelDeleteEvent:
 		c.rebuildRows()

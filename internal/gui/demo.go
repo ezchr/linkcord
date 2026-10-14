@@ -324,7 +324,11 @@ func (u *ui) startDemo() {
 	// Ana calls, to see the incoming call, with LINKCORD_DEMO_CALL.
 	if os.Getenv("LINKCORD_DEMO_CALL") != "" {
 		time.AfterFunc(2*time.Second, func() {
-			u.post(func() { u.chat.callRings(call{ChannelID: dm.ID, Ringing: []discord.UserID{me.ID}}) })
+			u.post(func() {
+				cl := call{ChannelID: dm.ID, Ringing: []discord.UserID{me.ID}, VoiceStates: []discord.VoiceState{{ChannelID: dm.ID, UserID: users[0].ID}}}
+				u.chat.noteCall(cl)
+				u.chat.callRings(cl)
+			})
 		})
 	}
 }

@@ -11,8 +11,8 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
-	"gioui.org/unit"
 	"gioui.org/text"
+	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"github.com/ayn2op/arikawa/v3/api"
@@ -32,9 +32,10 @@ func cosTurn(t float64) float64 { return math.Cos(2 * math.Pi * t) }
 // call is a call in a direct message or group, as Discord tells of them:
 // who it rings.
 type call struct {
-	ChannelID discord.ChannelID `json:"channel_id"`
-	MessageID discord.MessageID `json:"message_id"`
-	Ringing   []discord.UserID  `json:"ringing"`
+	ChannelID   discord.ChannelID    `json:"channel_id"`
+	MessageID   discord.MessageID    `json:"message_id"`
+	Ringing     []discord.UserID     `json:"ringing"`
+	VoiceStates []discord.VoiceState `json:"voice_states"`
 }
 
 type callCreateEvent struct{ call }
@@ -68,12 +69,16 @@ type incomingCall struct {
 // watchCalls follows the calls, to ring the user when one rings them.
 func (c *chatView) watchCalls() func() {
 	ringing := func(cl call) {
-		c.u.post(func() { c.callRings(cl) })
+		c.u.post(func() {
+			c.noteCall(cl)
+			c.callRings(cl)
+		})
 	}
 	stopCreate := c.st.AddHandler(func(ev *callCreateEvent) { ringing(ev.call) })
 	stopUpdate := c.st.AddHandler(func(ev *callUpdateEvent) { ringing(ev.call) })
 	stopDelete := c.st.AddHandler(func(ev *callDeleteEvent) {
 		c.u.post(func() {
+			delete(c.dmCalls, ev.ChannelID)
 			if c.incoming != nil && c.incoming.channel == ev.ChannelID {
 				c.endRinging()
 			}
@@ -246,4 +251,138 @@ func (c *chatView) callChannel(ch discord.Channel, video bool) {
 	if video {
 		c.u.voiceInfo("The camera is not supported yet")
 	}
+}
+
+// noteCall keeps who is in the call of a direct message or group, as the
+// call's events tell it.
+func (c *chatView) noteCall(cl call) {
+	if c.dmCalls == nil {
+		c.dmCalls = make(map[discord.ChannelID][]discord.UserID)
+	}
+	if cl.VoiceStates == nil {
+		if _, ok := c.dmCalls[cl.ChannelID]; !ok {
+			c.dmCalls[cl.ChannelID] = nil
+		}
+		return
+	}
+	var in []discord.UserID
+	for _, vs := range cl.VoiceStates {
+		if vs.ChannelID == cl.ChannelID {
+			in = append(in, vs.UserID)
+		}
+	}
+	c.dmCalls[cl.ChannelID] = in
+}
+
+// noteCallVoice follows people joining and leaving the calls of direct
+// messages and groups, whose voice states have no server.
+func (c *chatView) noteCallVoice(vs discord.VoiceState) {
+	if vs.GuildID.IsValid() {
+		return
+	}
+	if c.dmCalls == nil {
+		c.dmCalls = make(map[discord.ChannelID][]discord.UserID)
+	}
+	for ch, users := range c.dmCalls {
+		c.dmCalls[ch] = slices.DeleteFunc(users, func(u discord.UserID) bool { return u == vs.UserID })
+	}
+	if vs.ChannelID.IsValid() {
+		c.dmCalls[vs.ChannelID] = append(c.dmCalls[vs.ChannelID], vs.UserID)
+	}
+}
+
+// layoutCallBanner is the call going on in the direct message or group
+// open, above its messages, as Discord shows it: who is in it, and buttons
+// to join it, with video or not.
+func (c *chatView) layoutCallBanner(gtx layout.Context) layout.Dimensions {
+	ch := c.selChannel
+	if ch == nil || ch.GuildID.IsValid() {
+		return layout.Dimensions{}
+	}
+	users := slices.Clone(c.dmCalls[ch.ID])
+	// In the call, the user is in it too, and needs no button to join.
+	in := c.u.voiceChannel() == ch.ID
+	if in && !slices.Contains(users, c.me.ID) {
+		users = append(users, c.me.ID)
+	}
+	if len(users) == 0 {
+		return layout.Dimensions{}
+	}
+	if c.joinCallBtn.Clicked(gtx) {
+		c.joinVoice(*ch)
+	}
+	if c.joinVideoBtn.Clicked(gtx) {
+		c.joinVoice(*ch)
+		c.u.voiceInfo("The camera is not supported yet")
+	}
+	w := gtx.Constraints.Max.X
+	h := gtx.Dp(200)
+	paint.FillShape(gtx.Ops, rgb(0x000000), clip.Rect{Max: image.Pt(w, h)}.Op())
+	gtx.Constraints = layout.Exact(image.Pt(w, h))
+	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				var faces []layout.FlexChild
+				for _, id := range users {
+					user := c.callUser(*ch, id)
+					faces = append(faces, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							px := gtx.Dp(80)
+							d := c.u.picture(gtx, c.animatedAvatarURL(0, user), 80, colorFor(uint64(id)), user.DisplayOrUsername(), -1)
+							if c.u.voiceSpeaking(id) {
+								speakingRing(gtx, px, rgb(0x000000))
+							}
+							return d
+						})
+					}))
+				}
+				return layout.Flex{}.Layout(gtx, faces...)
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if in {
+					return layout.Dimensions{}
+				}
+				btn := func(cl *widget.Clickable, ic *widget.Icon) layout.Widget {
+					return func(gtx layout.Context) layout.Dimensions {
+						return layout.Inset{Left: unit.Dp(8), Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								pointer.CursorPointer.Add(gtx.Ops)
+								bg := colorGreenButton
+								if cl.Hovered() {
+									bg = withAlpha(bg, 0xd0)
+								}
+								sz := image.Pt(gtx.Dp(80), gtx.Dp(56))
+								paint.FillShape(gtx.Ops, bg, clip.UniformRRect(image.Rectangle{Max: sz}, gtx.Dp(12)).Op(gtx.Ops))
+								t := op.Offset(image.Pt((sz.X-gtx.Dp(26))/2, (sz.Y-gtx.Dp(26))/2)).Push(gtx.Ops)
+								icon(gtx, ic, 26, rgb(0xffffff))
+								t.Pop()
+								return layout.Dimensions{Size: sz}
+							})
+						})
+					}
+				}
+				return layout.Flex{}.Layout(gtx,
+					layout.Rigid(btn(&c.joinVideoBtn, iconCamera)),
+					layout.Rigid(btn(&c.joinCallBtn, iconCall)))
+			}),
+		)
+	})
+}
+
+// callUser is the user id of a direct message or group, from its
+// recipients, or the user.
+func (c *chatView) callUser(ch discord.Channel, id discord.UserID) discord.User {
+	if id == c.me.ID {
+		return c.me
+	}
+	for _, u := range ch.DMRecipients {
+		if u.ID == id {
+			return u
+		}
+	}
+	if u, err := c.st.Cabinet.User(id); err == nil {
+		return *u
+	}
+	return discord.User{ID: id}
 }

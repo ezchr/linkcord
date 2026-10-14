@@ -49,6 +49,7 @@ func (c *chatView) layoutMessages(gtx layout.Context) layout.Dimensions {
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.chatHeader(gtx, title) }),
+		layout.Rigid(c.layoutCallBanner),
 		layout.Flexed(1, c.layoutHistory),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16), Top: unit.Dp(4)}.Layout(gtx, c.layoutJumpBar)
