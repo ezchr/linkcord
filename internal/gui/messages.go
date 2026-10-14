@@ -225,6 +225,9 @@ func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
 	gtx.Metric.PxPerSp *= c.u.app.chatScale()
 	th := c.u.th
 	m := c.messages[i]
+	if text, ok := c.localEdits[m.ID]; ok {
+		m.Content = text
+	}
 	if !isRegular(m) {
 		return layout.Inset{Left: unit.Dp(72), Right: unit.Dp(16), Top: unit.Dp(8), Bottom: unit.Dp(4)}.Layout(gtx,
 			label(th, 14, colorMuted, c.systemText(m)).Layout)

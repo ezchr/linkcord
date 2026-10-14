@@ -131,6 +131,9 @@ type chatView struct {
 	clips clipView
 	// shownBlocked are the messages of blocked users the user asked to see.
 	shownBlocked map[discord.MessageID]bool
+	// localEdits are what the user changed others' messages to say, only
+	// on their screen.
+	localEdits map[discord.MessageID]string
 	// myStatus is the status the user chose here, kept over what the
 	// sessions say.
 	myStatus discord.Status
@@ -892,7 +895,7 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 			}
 			c.noOlder = len(msgs) < 50
 			c.messages = c.deleted.merge(id, sortedMessages(msgs), historyStart(msgs, !c.noOlder), 0)
-			c.markRead(id)
+			c.seen(id)
 			c.requestAuthors(c.messages)
 		})
 	}()
@@ -970,10 +973,18 @@ func (c *chatView) markRead(chID discord.ChannelID) {
 	}
 }
 
+// seen marks the channel read as the user sees it, unless they read without
+// marking.
+func (c *chatView) seen(chID discord.ChannelID) {
+	if !c.u.app.GhostRead {
+		c.markRead(chID)
+	}
+}
+
 func (c *chatView) windowFocused() {
 	c.refreshCurrentChat()
 	if c.u.focused && c.selChannel != nil {
-		c.markRead(c.selChannel.ID)
+		c.seen(c.selChannel.ID)
 	}
 }
 
@@ -997,7 +1008,7 @@ func (c *chatView) apply(ev gateway.Event) {
 			}
 			delete(c.typers, ev.Author.ID)
 			if c.u.focused {
-				c.markRead(sel.ID)
+				c.seen(sel.ID)
 			}
 		}
 		if ev.Author.ID != c.me.ID && (sel == nil || ev.ChannelID != sel.ID || !c.u.focused) {

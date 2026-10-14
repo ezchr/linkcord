@@ -57,6 +57,17 @@ type appSettings struct {
 	StreamClipMinutes int `json:"stream_clip_minutes,omitempty"`
 	// SoundboardMuted are those whose soundboard sounds are not played.
 	SoundboardMuted []discord.UserID `json:"soundboard_muted,omitempty"`
+	// GhostRead reads channels without telling Discord, so that they stay
+	// unread everywhere else.
+	GhostRead bool `json:"ghost_read,omitempty"`
+	// GhostTyping writes without others seeing that the user is typing.
+	GhostTyping bool `json:"ghost_typing,omitempty"`
+	// EditOthers lets the user change what others' messages say, only on
+	// their screen.
+	EditOthers bool `json:"edit_others,omitempty"`
+	// Font is the font the interface is written in, Linkcord's own when
+	// empty; see fontChoices.
+	Font string `json:"font,omitempty"`
 }
 
 func appSettingsPath() string {
@@ -164,6 +175,8 @@ type generalView struct {
 	streamClipLen                            slider
 	zoom, chatText, groupGap                 slider
 	roleColors                               widget.Clickable
+	ghostBtn, ghostTypingBtn, editOthersBtn  widget.Clickable
+	font                                     fontView
 	startup, minimized, tray                 widget.Clickable
 	startupErr                               string
 }
@@ -253,6 +266,23 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 			c.applyStreamClip()
 		}
 	}
+	if g.ghostBtn.Clicked(gtx) {
+		u.app.GhostRead = !u.app.GhostRead
+		u.saveAppSettings()
+	}
+	if g.ghostTypingBtn.Clicked(gtx) {
+		u.app.GhostTyping = !u.app.GhostTyping
+		u.saveAppSettings()
+	}
+	if g.editOthersBtn.Clicked(gtx) {
+		u.app.EditOthers = !u.app.EditOthers
+		u.saveAppSettings()
+	}
+	for _, f := range fontChoices {
+		if g.font.btn(f.name).Clicked(gtx) {
+			c.setFont(f.name)
+		}
+	}
 	if g.deletedBtn.Clicked(gtx) {
 		u.app.HideDeleted = !u.app.HideDeleted
 		u.saveAppSettings()
@@ -321,7 +351,30 @@ func (c *chatView) accessibilityRows() []layout.Widget {
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.roleColors, "Role Colors on Names", "Show names in the color of their highest colored role.", !u.app.NoRoleColors)
 		},
+		layout.Spacer{Height: unit.Dp(24)}.Layout,
+		c.fontRows,
 	}
+}
+
+// fontRows are the choice of the font Linkcord is written in.
+func (c *chatView) fontRows(gtx layout.Context) layout.Dimensions {
+	th := c.u.th
+	f := &c.settings.general.font
+	about := "The font Linkcord is written in. Code stays in its own."
+	if f.loading != "" {
+		about = "Loading " + fontLabel(f.loading) + "…"
+	}
+	rows := []layout.Widget{
+		label(th, 16, colorHeader, "Font").Layout,
+		label(th, 14, colorMuted, about).Layout,
+		layout.Spacer{Height: unit.Dp(8)}.Layout,
+	}
+	for _, ch := range installedFonts() {
+		rows = append(rows, func(gtx layout.Context) layout.Dimensions {
+			return radioRow(gtx, th, f.btn(ch.name), fontLabel(ch.name), ch.name == c.u.app.Font)
+		})
+	}
+	return stacked(rows...)(gtx)
 }
 
 // featureRows are the Linkcord Features page: what Linkcord does that
@@ -335,6 +388,21 @@ func (c *chatView) featureRows() []layout.Widget {
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.deletedBtn, "Show Deleted Messages",
 				"Messages others delete while Linkcord is open stay in their place, marked with a red bin. Only you see them.", !c.u.app.HideDeleted)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.ghostBtn, "Read Without Marking as Read",
+				"Opening a channel does not tell Discord you saw it: it stays unread in Discord's app, and in Linkcord too. Right-click Mark As Read still marks it. Sending a message there marks it, as Discord does.", c.u.app.GhostRead)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.ghostTypingBtn, "Type Without Showing Typing",
+				"Others do not see \"is typing…\" while you write; your messages still arrive as always.", c.u.app.GhostTyping)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.editOthersBtn, "Edit Others' Messages",
+				"Others' messages get the edit button too, to change what they say on your screen only. Nobody else sees it, and it goes when Linkcord closes; emptying the text brings the original back.", c.u.app.EditOthers)
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {

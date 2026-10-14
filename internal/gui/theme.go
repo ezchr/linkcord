@@ -4,14 +4,8 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"image/color"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"slices"
 
-	"gioui.org/font/gofont"
-	"gioui.org/font/opentype"
-	"gioui.org/text"
 	"gioui.org/widget/material"
 )
 
@@ -120,29 +114,12 @@ func narrowSpace(font []byte) []byte {
 
 // newTheme uses bundled and selected fonts, with full system fallback
 // for scripts not covered by the explicit collection.
-func newTheme() *material.Theme {
-	collection := gofont.Collection()
-	if faces, err := opentype.ParseCollection(narrowSpace(colorEmoji)); err == nil {
-		collection = append(collection, faces...)
-	} else {
-		slog.Warn("failed to parse the emoji font", "err", err)
-	}
-	dir := filepath.Join(os.Getenv("WINDIR"), "Fonts")
-	for _, name := range fallbackFonts {
-		data, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil {
-			continue
-		}
-		faces, err := opentype.ParseCollection(data)
-		if err != nil {
-			slog.Warn("failed to parse font", "font", name, "err", err)
-			continue
-		}
-		collection = append(collection, faces...)
-	}
+func newTheme() *material.Theme { return newThemeFont("") }
 
+// newThemeFont is newTheme writing in the font chosen, see newShaper.
+func newThemeFont(font string) *material.Theme {
 	th := material.NewTheme()
-	th.Shaper = text.NewShaper(text.WithCollection(collection))
+	th.Shaper = newShaper(font)
 	th.Palette = material.Palette{
 		Fg:         colorText,
 		Bg:         colorChat,

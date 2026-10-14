@@ -275,7 +275,7 @@ func (c *chatView) layoutToolbar(gtx layout.Context, m discord.Message, row layo
 	if c.canSendHere() {
 		kinds = append(kinds, actReply)
 	}
-	if m.Author.ID == c.me.ID {
+	if m.Author.ID == c.me.ID || c.u.app.EditOthers {
 		kinds = append(kinds, actEdit)
 	}
 	if m.Content != "" {
@@ -470,6 +470,10 @@ func (c *chatView) saveEdit(id discord.MessageID) {
 		return
 	}
 	m := c.messages[i]
+	if m.Author.ID != c.me.ID {
+		c.editLocally(m, text)
+		return
+	}
 	if text == "" {
 		// Like Discord, emptying a message offers to delete it.
 		c.askDelete(m, false)
@@ -496,6 +500,21 @@ func (c *chatView) saveEdit(id discord.MessageID) {
 			c.u.post(func() { c.sendErr = "Could not edit the message: " + err.Error() })
 		}
 	}()
+}
+
+// editLocally has others' message m say text, on this screen only; no text
+// brings back what it says.
+func (c *chatView) editLocally(m discord.Message, text string) {
+	if c.localEdits == nil {
+		c.localEdits = make(map[discord.MessageID]string)
+	}
+	if text == "" || text == m.Content {
+		delete(c.localEdits, m.ID)
+	} else {
+		c.localEdits[m.ID] = text
+	}
+	delete(c.selectables, m.ID)
+	delete(c.richStates, m.ID)
 }
 
 // layoutEditor is a message being edited: its text in a box, and how to save

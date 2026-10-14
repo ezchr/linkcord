@@ -163,7 +163,8 @@ func newUI(w *app.Window) *ui {
 	// The colors chosen are set before anything takes its own copy of them.
 	appearance := loadAppearance()
 	applyAppearance(appearance)
-	u := &ui{win: w, th: newTheme(), focused: true, appearance: appearance, app: loadAppSettings()}
+	settings := loadAppSettings()
+	u := &ui{win: w, th: newThemeFont(settings.Font), focused: true, appearance: appearance, app: settings}
 	u.images = newImages(u)
 	// How the download of FFmpeg goes shows as the voice's messages do.
 	mediaNotify = func(s string) { u.post(func() { u.voiceInfo(s) }) }

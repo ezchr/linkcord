@@ -95,7 +95,7 @@ func (c *chatView) refreshCurrentChat() {
 				}
 			}
 			c.requestAuthors(messages)
-			if c.u.focused && len(c.messages) > 0 {
+			if c.u.focused && len(c.messages) > 0 && !c.u.app.GhostRead {
 				last := c.messages[len(c.messages)-1].ID
 				go c.st.ReadState.MarkRead(id, last)
 			}

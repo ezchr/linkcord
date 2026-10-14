@@ -770,7 +770,7 @@ func (c *chatView) send() {
 // sendTyping tells the others that the user is typing, at most every 8
 // seconds as Discord expects.
 func (c *chatView) sendTyping() {
-	if c.selChannel == nil || c.composer.Text() == "" {
+	if c.selChannel == nil || c.composer.Text() == "" || c.u.app.GhostTyping {
 		return
 	}
 	now := time.Now()
