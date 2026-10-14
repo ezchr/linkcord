@@ -117,6 +117,8 @@ type chatView struct {
 	gset   guildSettings
 	cset   channelSettings
 	chmenu channelMenu
+	// shownBlocked are the messages of blocked users the user asked to see.
+	shownBlocked map[discord.MessageID]bool
 	// myStatus is the status the user chose here, kept over what the
 	// sessions say.
 	myStatus discord.Status

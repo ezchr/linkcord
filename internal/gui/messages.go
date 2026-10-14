@@ -214,6 +214,13 @@ func isRegular(m discord.Message) bool {
 }
 
 func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
+	if c.blockedHidden(i) {
+		// The first of a run of them says how many, the rest hide.
+		if i > 0 && c.blockedHidden(i-1) {
+			return layout.Dimensions{}
+		}
+		return c.layoutBlockedRun(gtx, i)
+	}
 	// The chat's text is as big as chosen.
 	gtx.Metric.PxPerSp *= c.u.app.chatScale()
 	th := c.u.th
@@ -455,6 +462,49 @@ func (c *chatView) authorAvatarURL(guildID discord.GuildID, u discord.User) stri
 		}
 	}
 	return cdnSize(u.AvatarURLWithType(discord.PNGImage))
+}
+
+// blockedHidden reports whether message i is by someone the user blocked,
+// and was not asked to show.
+func (c *chatView) blockedHidden(i int) bool {
+	m := c.messages[i]
+	return !c.shownBlocked[m.ID] && m.Author.ID != c.me.ID && c.relationship(m.Author.ID) == discord.BlockedRelationship
+}
+
+// layoutBlockedRun is the line in place of the blocked messages from i on,
+// which shows them when clicked, as Discord's.
+func (c *chatView) layoutBlockedRun(gtx layout.Context, i int) layout.Dimensions {
+	th := c.u.th
+	n := 0
+	for j := i; j < len(c.messages) && c.blockedHidden(j); j++ {
+		n++
+	}
+	click := c.msgClick(c.messages[i].ID, 10)
+	if click.Clicked(gtx) {
+		if c.shownBlocked == nil {
+			c.shownBlocked = make(map[discord.MessageID]bool)
+		}
+		for j := i; j < i+n; j++ {
+			c.shownBlocked[c.messages[j].ID] = true
+		}
+	}
+	text := "1 Blocked Message"
+	if n > 1 {
+		text = fmt.Sprintf("%d Blocked Messages", n)
+	}
+	return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16), Top: unit.Dp(8), Bottom: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconMenuPrivacy, 18, colorMuted) }),
+			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+			layout.Rigid(label(th, 14, colorMuted, text+" — ").Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					return label(th, 14, colorLink, "Show messages").Layout(gtx)
+				})
+			}),
+		)
+	})
 }
 
 func (c *chatView) selectable(id discord.MessageID) *widget.Selectable {

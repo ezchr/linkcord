@@ -138,6 +138,9 @@ type profileView struct {
 	copied           bool
 	// joinVoice joins the voice channel they are in.
 	joinVoice widget.Clickable
+	// friend adds, accepts or removes them as a friend, unblock unblocks
+	// them, and more opens the menu of the user.
+	friend, unblock, more widget.Clickable
 	// The lists of servers and friends in common, shown when clicked.
 	mutualGuildsBtn, mutualFriendsBtn widget.Clickable
 	showGuilds, showFriends           bool
@@ -262,6 +265,25 @@ func (c *chatView) updateProfile(gtx layout.Context) {
 	if p.message.Clicked(gtx) {
 		c.profile = nil
 		c.openDM(p.user.ID)
+	}
+	if p.friend.Clicked(gtx) {
+		user := p.user
+		switch c.relationship(user.ID) {
+		case discord.FriendRelationship:
+			c.prompt("Remove '"+user.DisplayOrUsername()+"'", "Remove Friend", true,
+				[]string{"Are you sure you want to remove " + user.DisplayOrUsername() + " from your friends?"}, nil,
+				func([]string) { c.setFriend(user, false) })
+		case discord.SentFriendRequest:
+			c.setFriend(user, false)
+		default:
+			c.setFriend(user, true)
+		}
+	}
+	if p.unblock.Clicked(gtx) {
+		c.setBlocked(p.user, false)
+	}
+	if p.more.Clicked(gtx) {
+		c.openUserMenu(p.user.ID, p.guildID, 0)
 	}
 	if p.joinVoice.Clicked(gtx) {
 		if ch, ok := c.userVoiceChannel(p.guildID, p.user.ID); ok {
@@ -689,21 +711,36 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 	if p.self {
 		children = append(children, section(func(gtx layout.Context) layout.Dimensions { return c.layoutSelfMenu(gtx, p) }))
 	} else {
+		rel := c.relationship(user.ID)
 		children = append(children, section(func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{}.Layout(gtx,
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					gtx.Constraints.Min.X = gtx.Constraints.Max.X
-					return button(gtx, th, &p.message, colorAccent, "Send message")
-				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					txt := "Copy ID"
-					if p.copied {
-						txt = "Copied!"
-					}
-					return button(gtx, th, &p.copyID, colorSelected, txt)
-				}),
-			)
+			main := func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min.X = gtx.Constraints.Max.X
+				if rel == discord.BlockedRelationship {
+					return button(gtx, th, &p.unblock, colorRed, "Unblock")
+				}
+				return button(gtx, th, &p.message, colorAccent, "Send message")
+			}
+			children := []layout.FlexChild{layout.Flexed(1, main)}
+			if rel != discord.BlockedRelationship && !user.Bot {
+				// Friends, as Discord's button: add, accept, pending or
+				// friends.
+				ic, col := iconMenuInvite, colorHeader
+				switch rel {
+				case discord.FriendRelationship:
+					ic, col = iconFriends, colorGreen
+				case discord.SentFriendRequest:
+					ic, col = iconPending, colorMuted
+				case discord.IncomingFriendRequest:
+					ic, col = iconCheck, colorGreen
+				}
+				children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return iconBox(gtx, &p.friend, ic, col)
+				}))
+			}
+			children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return iconBox(gtx, &p.more, iconMore, colorHeader)
+			}))
+			return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
 		}))
 	}
 	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout))
@@ -812,6 +849,27 @@ func (c *chatView) layoutVoiceCard(p *profileView, id discord.UserID) layout.Wid
 			})
 		})
 	}
+}
+
+var (
+	iconFriends = mustIcon(icons.SocialPeople)
+	iconPending = mustIcon(icons.ActionSchedule)
+)
+
+// iconBox is a square button with an icon, as the buttons beside Send
+// message.
+func iconBox(gtx layout.Context, click *widget.Clickable, ic *widget.Icon, col colorT) layout.Dimensions {
+	return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		pointer.CursorPointer.Add(gtx.Ops)
+		bg := colorSelected
+		if click.Hovered() {
+			bg = colorHover
+		}
+		size := image.Pt(gtx.Dp(38), gtx.Dp(36))
+		paint.FillShape(gtx.Ops, bg, clip.UniformRRect(image.Rectangle{Max: size}, gtx.Dp(6)).Op(gtx.Ops))
+		gtx.Constraints = layout.Exact(size)
+		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return icon(gtx, ic, 20, col) })
+	})
 }
 
 // layoutMutuals is the line of friends and servers in common, and the list
