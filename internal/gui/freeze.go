@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -43,6 +44,12 @@ func (u *ui) startFreezeWatchdog() func() {
 				}
 				dumped = since
 				dumpFreeze(now.Sub(since))
+				// Sent at once, as the window may never answer again.
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+					defer cancel()
+					sendReports(ctx)
+				}()
 			}
 		}
 	}()

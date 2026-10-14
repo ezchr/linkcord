@@ -79,8 +79,8 @@ type settingsView struct {
 	recording     string
 
 	// Advanced.
-	perfBtn widget.Clickable
-	perfErr string
+	perfBtn, helloBtn, reportsBtn widget.Clickable
+	perfErr                       string
 }
 
 // openSettings shows the settings at their first page.
@@ -341,6 +341,12 @@ func (c *chatView) updateSettings(gtx layout.Context) {
 	}
 
 	// Advanced.
+	if s.helloBtn.Clicked(gtx) {
+		updateCommunity(func(cs *communitySettings) { cs.NoHello = !cs.NoHello })
+	}
+	if s.reportsBtn.Clicked(gtx) {
+		updateCommunity(func(cs *communitySettings) { cs.NoReports = !cs.NoReports })
+	}
 	if s.perfBtn.Clicked(gtx) {
 		s.perfErr = ""
 		if err := u.setPerformanceMode(!u.images.lowPower); err != nil {
@@ -830,9 +836,20 @@ func (c *chatView) advancedRows() []layout.Widget {
 	u := c.u
 	th := u.th
 	s := &c.settings
-	rows := []layout.Widget{func(gtx layout.Context) layout.Dimensions {
-		return switchRow(gtx, th, &s.perfBtn, "Performance Mode", "Shows still pictures in place of animated GIF and APNG previews, which uses less CPU and memory.", u.images.lowPower)
-	}}
+	community := loadCommunity()
+	rows := []layout.Widget{
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &s.perfBtn, "Performance Mode", "Shows still pictures in place of animated GIF and APNG previews, which uses less CPU and memory.", u.images.lowPower)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &s.helloBtn, "Show That I Use Linkcord", "Others who use Linkcord see its logo beside your name. Only your Discord ID and Linkcord's version are sent to Linkcord's server.", !community.NoHello)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &s.reportsBtn, "Send Error Reports", "When Linkcord crashes or freezes, what it was doing is sent to Linkcord's developers to fix it. No messages, tokens or passwords are sent.", !community.NoReports)
+		},
+	}
 	if s.perfErr != "" {
 		rows = append(rows, func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, label(th, 14, colorRed, s.perfErr).Layout)

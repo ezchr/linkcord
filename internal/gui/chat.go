@@ -444,6 +444,7 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 		c.u.rpcMe.Store(&me)
 		c.u.startRPC()
 	}
+	c.startCommunity()
 
 	seen := make(map[discord.GuildID]bool)
 	var order []discord.GuildID

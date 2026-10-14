@@ -138,6 +138,10 @@ type ui struct {
 	// it says the user is.
 	rpcStarted bool
 	rpcMe      atomic.Pointer[discord.User]
+	// linkcordUsers are who use Linkcord, as its server says, marked with
+	// its logo; communityStarted reports whether it is asked.
+	linkcordUsers    map[discord.UserID]bool
+	communityStarted bool
 
 	// tray is the icon in the notification area, made when the window is
 	// first closed, and trayHinted reports whether its balloon was shown.

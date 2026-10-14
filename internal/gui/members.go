@@ -319,9 +319,12 @@ func (c *chatView) memberItem(gtx layout.Context, m *discord.Member, w func(gtx 
 // tag of the server they wear and the gem of those who boost the server.
 func (c *chatView) layoutMemberName(gtx layout.Context, m *discord.Member, guildID discord.GuildID, name material.LabelStyle) layout.Dimensions {
 	var after []layout.Widget
-	// Bots are marked as in the chat.
+	// Bots are marked as in the chat, and who uses Linkcord with its logo.
 	if m.User.Bot {
 		after = append(after, botTag(c.u.th))
+	}
+	if c.u.linkcordUsers[m.User.ID] {
+		after = append(after, func(gtx layout.Context) layout.Dimensions { return linkcordLogo(gtx, 14) })
 	}
 	if pg := m.User.PrimaryGuild; pg != nil && pg.Enabled && pg.Tag != "" {
 		after = append(after, func(gtx layout.Context) layout.Dimensions {

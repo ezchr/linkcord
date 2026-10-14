@@ -1,0 +1,18 @@
+[Unit]
+Description=Linkcord API: who uses Linkcord, and error reports
+After=network.target
+
+[Service]
+User=linkcord-api
+Group=linkcord-api
+ExecStart=/opt/linkcord-api/linkcord-api -addr 127.0.0.1:5310 -data /var/lib/linkcord-api
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/linkcord-api
+
+[Install]
+WantedBy=multi-user.target
