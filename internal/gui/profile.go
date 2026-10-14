@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"fmt"
 	"image"
 	"io"
 	"log/slog"
@@ -18,6 +19,7 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
+	"gioui.org/widget/material"
 	"github.com/ayn2op/arikawa/v3/api"
 	"github.com/ayn2op/arikawa/v3/discord"
 	"golang.org/x/exp/shiny/materialdesign/icons"
@@ -591,9 +593,12 @@ func (c *chatView) guildTag(gtx layout.Context, guildID discord.GuildID, badge, 
 // layoutActivity is the card of a game, music or stream.
 func (c *chatView) layoutActivity(gtx layout.Context, a discord.Activity) layout.Dimensions {
 	th := c.u.th
-	var start time.Time
+	var start, end time.Time
 	if a.Timestamps != nil && a.Timestamps.Start > 0 {
 		start = a.Timestamps.Start.Time()
+		if a.Timestamps.End > a.Timestamps.Start {
+			end = a.Timestamps.End.Time()
+		}
 		// Redraw every second for the time counter.
 		gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(time.Second)})
 	}
@@ -630,7 +635,14 @@ func (c *chatView) layoutActivity(gtx layout.Context, a discord.Activity) layout
 							if a.Assets != nil && a.Assets.LargeText != "" && a.Assets.LargeText != a.State {
 								lines = append(lines, layout.Rigid(oneLine(label(th, 13, colorText, a.Assets.LargeText)).Layout))
 							}
-							if !start.IsZero() {
+							switch {
+							case !end.IsZero():
+								lines = append(lines, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										return trackProgress(gtx, th, start, end, gtx.Now)
+									})
+								}))
+							case !start.IsZero():
 								lines = append(lines, layout.Rigid(label(th, 12, colorGreen, "⏱ "+elapsed(start)).Layout))
 							}
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx, lines...)
@@ -640,6 +652,36 @@ func (c *chatView) layoutActivity(gtx layout.Context, a discord.Activity) layout
 			)
 		})
 	})
+}
+
+// trackProgress is how far a song with an end is, as Discord shows it: the
+// time played, a bar, and how long it is.
+func trackProgress(gtx layout.Context, th *material.Theme, start, end, now time.Time) layout.Dimensions {
+	total := end.Sub(start)
+	played := min(max(now.Sub(start), 0), total)
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(label(th, 12, colorText, trackTime(played)).Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: unit.Dp(8), Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				w, h := gtx.Constraints.Max.X, max(gtx.Dp(4), 2)
+				bar := image.Rect(0, 0, w, h)
+				paint.FillShape(gtx.Ops, withAlpha(colorHeader, 0x40), clip.UniformRRect(bar, h/2).Op(gtx.Ops))
+				done := image.Rect(0, 0, int(float64(w)*float64(played)/float64(total)), h)
+				paint.FillShape(gtx.Ops, colorHeader, clip.UniformRRect(done, h/2).Op(gtx.Ops))
+				return layout.Dimensions{Size: image.Pt(w, h)}
+			})
+		}),
+		layout.Rigid(label(th, 12, colorText, trackTime(total)).Layout),
+	)
+}
+
+// trackTime is a length of a song as 03:41, or 1:03:41 past an hour.
+func trackTime(d time.Duration) string {
+	s := int(d / time.Second)
+	if s >= 3600 {
+		return fmt.Sprintf("%d:%02d:%02d", s/3600, s/60%60, s%60)
+	}
+	return fmt.Sprintf("%02d:%02d", s/60, s%60)
 }
 
 // layoutRoles shows the roles of a member as chips with their color.

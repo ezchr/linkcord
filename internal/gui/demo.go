@@ -45,7 +45,7 @@ func (u *ui) startDemo() {
 	}
 	cab.PresenceSet(discord.NullGuildID, &discord.Presence{User: me, Status: discord.OnlineStatus, Activities: []discord.Activity{
 		{Type: discord.CustomActivity, Name: "Custom Status", State: "Testing Linkcord"},
-		{Type: discord.ListeningActivity, Name: "YouTube Music", Details: "Sample song", State: "Sample artist", Timestamps: &discord.ActivityTimestamps{Start: discord.UnixMsTimestamp(time.Now().Add(-3 * time.Minute).UnixMilli())}},
+		{Type: discord.ListeningActivity, Name: "YouTube Music", Details: "Sample song", State: "Sample artist", Timestamps: &discord.ActivityTimestamps{Start: discord.UnixMsTimestamp(time.Now().Add(-3 * time.Minute).UnixMilli()), End: discord.UnixMsTimestamp(time.Now().Add(70 * time.Second).UnixMilli())}},
 	}}, false)
 
 	// A server with the decorated names that many servers use.
