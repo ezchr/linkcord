@@ -336,7 +336,7 @@ func (c *chatView) layoutMemberName(gtx layout.Context, m *discord.Member, guild
 	}
 	if guildID.IsValid() && m.BoostedSince.IsValid() {
 		after = append(after, func(gtx layout.Context) layout.Dimensions {
-			return icon(gtx, iconBoost, 14, colorBoost)
+			return boostGem(gtx, 14, colorBoost)
 		})
 	}
 	gap := gtx.Dp(6)

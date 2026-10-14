@@ -82,9 +82,8 @@ type channelRow struct {
 	label string
 	// user is who a voice member row stands for.
 	user discord.UserID
-	// muted reports whether a voice member is muted or deafened, and deaf
-	// whether deafened.
-	muted, deaf bool
+	// vs is a voice member's voice state, for the mute and deafen icons.
+	vs discord.VoiceState
 	// avatar is the picture of a voice member, "" when it isn't known, and
 	// live whether they share their screen.
 	avatar string
@@ -717,8 +716,7 @@ func (c *chatView) rebuildRows() {
 						ch:     ch,
 						user:   vs.UserID,
 						label:  c.memberName(c.selGuild, vs.UserID, vs.Member),
-						muted:  vs.Mute || vs.SelfMute || vs.Deaf || vs.SelfDeaf,
-						deaf:   vs.Deaf || vs.SelfDeaf,
+						vs:     vs,
 						avatar: c.voiceAvatarURL(c.selGuild, vs),
 						live:   vs.SelfStream,
 					})
@@ -1692,13 +1690,7 @@ func (c *chatView) layoutVoiceMember(gtx layout.Context, r channelRow, hovered b
 					})
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					switch {
-					case r.deaf:
-						return icon(gtx, iconDeafened, 14, colorRed)
-					case r.muted:
-						return icon(gtx, iconMicOff, 14, colorRed)
-					}
-					return layout.Dimensions{}
+					return voiceStateIcons(gtx, r.vs, 14)
 				}),
 			)
 		})

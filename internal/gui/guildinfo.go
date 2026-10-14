@@ -214,7 +214,12 @@ func (c *chatView) layoutGuildInfoRow(gtx layout.Context, r channelRow) layout.D
 		}
 		children = children[:0]
 		children = append(children,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return icon(gtx, ic, 20, col) }),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if ic == iconBoost {
+					return boostGem(gtx, 20, colorBoost)
+				}
+				return icon(gtx, ic, 20, col)
+			}),
 			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 			layout.Flexed(1, oneLine(label(th, 15, col, r.label)).Layout),
 		)

@@ -479,18 +479,11 @@ func (c *chatView) layoutCardName(gtx layout.Context, vs discord.VoiceState, nam
 		return layout.Inset{Top: unit.Dp(3), Bottom: unit.Dp(3), Left: unit.Dp(8), Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					var ic *widget.Icon
-					switch {
-					case vs.Deaf || vs.SelfDeaf:
-						ic = iconDeafened
-					case vs.Mute || vs.SelfMute:
-						ic = iconMicOff
-					default:
-						return layout.Dimensions{}
+					d := voiceStateIcons(gtx, vs, 16)
+					if d.Size.X > 0 {
+						d.Size.X += gtx.Dp(4)
 					}
-					return layout.Inset{Right: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return icon(gtx, ic, 16, colorRed)
-					})
+					return d
 				}),
 				layout.Rigid(oneLine(bold(label(th, 14, colorHeader, name))).Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
