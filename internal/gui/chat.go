@@ -140,6 +140,13 @@ type chatView struct {
 	clicks map[discord.Snowflake]*widget.Clickable
 
 	guildOrder []discord.GuildID
+	// folders are the server column's folders, openFolders those open, and
+	// drag a server or folder being moved.
+	folders      []serverFolder
+	openFolders  map[int64]bool
+	folderClicks map[int64]*widget.Clickable
+	drag         guildDrag
+	dragHead     int
 	homeClick  widget.Clickable
 	// selGuild is the server shown, or NullGuildID for direct messages.
 	selGuild    discord.GuildID
@@ -490,6 +497,13 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 		}
 	}
 	c.guildOrder = append(missing, order...)
+	c.folders = nil
+	if settings := ready.UserSettings; settings != nil {
+		for _, f := range settings.GuildFolders {
+			c.folders = append(c.folders, serverFolder{ID: int64(f.ID), Name: f.Name, Color: uint32(f.Color), Guilds: f.GuildIDs})
+		}
+	}
+	c.syncFolders()
 	if c.selChannel != nil {
 		// A fresh READY after reconnect must keep the conversation open.
 		c.rebuildRows()
@@ -993,9 +1007,11 @@ func (c *chatView) apply(ev gateway.Event) {
 	case *gateway.GuildCreateEvent:
 		if !slices.Contains(c.guildOrder, ev.ID) {
 			c.guildOrder = append([]discord.GuildID{ev.ID}, c.guildOrder...)
+			c.syncFolders()
 		}
 	case *gateway.GuildDeleteEvent:
 		c.guildOrder = slices.DeleteFunc(c.guildOrder, func(id discord.GuildID) bool { return id == ev.ID })
+		c.syncFolders()
 		if c.selGuild == ev.ID {
 			c.selectGuild(discord.NullGuildID)
 		}
@@ -1014,6 +1030,16 @@ func (c *chatView) apply(ev gateway.Event) {
 }
 
 func (c *chatView) update(gtx layout.Context) {
+	c.updateGuildDrag(gtx)
+	if c.openFolders == nil {
+		c.openFolders = make(map[int64]bool)
+		c.folderClicks = make(map[int64]*widget.Clickable)
+	}
+	for _, f := range c.folders {
+		if f.ID != 0 && clickOf(c.folderClicks, f.ID).Clicked(gtx) {
+			c.openFolders[f.ID] = !c.openFolders[f.ID]
+		}
+	}
 	if c.homeClick.Clicked(gtx) && c.selGuild.IsValid() {
 		c.selectGuild(discord.NullGuildID)
 	}
@@ -1193,7 +1219,15 @@ func (c *chatView) layoutGuilds(gtx layout.Context) layout.Dimensions {
 	// conversations with unread messages, as on Discord, then the servers.
 	dms := c.unreadDMs()
 	head := 1 + len(dms)
-	return listLayout(gtx, th, &c.guildList, len(c.guildOrder)+head, func(gtx layout.Context, i int) layout.Dimensions {
+	n := 0
+	for _, f := range c.folders {
+		n += len(f.Guilds)
+	}
+	if n != len(c.guildOrder) {
+		c.syncFolders()
+	}
+	entries := c.guildEntries()
+	dims := listLayout(gtx, th, &c.guildList, len(entries)+head, func(gtx layout.Context, i int) layout.Dimensions {
 		if i < head {
 			var dims layout.Dimensions
 			if i == 0 {
@@ -1223,21 +1257,10 @@ func (c *chatView) layoutGuilds(gtx layout.Context) layout.Dimensions {
 				}),
 			)
 		}
-		id := c.guildOrder[i-head]
-		guild, err := c.st.Cabinet.Guild(id)
-		if err != nil {
-			return layout.Dimensions{}
-		}
-		unread := c.guildUnread(id)
-		return c.guildButton(gtx, c.click(discord.Snowflake(id)), id == c.selGuild, unread, c.guildMentions(id), c.voiceBadge(id), func(gtx layout.Context, active bool) layout.Dimensions {
-			// Servers are rounded squares, as on Discord.
-			bg := colorSidebar
-			if active {
-				bg = colorAccent
-			}
-			return c.u.picture(gtx, cdnSize(guild.IconURLWithType(discord.PNGImage)), 48, bg, guild.Name, gtx.Dp(16))
-		})
+		return c.layoutGuildEntry(gtx, entries[i-head])
 	})
+	c.guildDropArea(gtx, head)
+	return dims
 }
 
 // guildButton lays out one entry of the server column, with the pill on its
