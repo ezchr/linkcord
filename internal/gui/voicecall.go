@@ -400,6 +400,20 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 			return layout.Dimensions{Size: size}
 		}
 	}
+	// Someone else's stream: shown once watched, as on Discord.
+	if vs.UserID != c.me.ID && vs.SelfStream {
+		if c.layoutWatchedCard(gtx, vs, size, radius) {
+			gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(30 * time.Millisecond)})
+			c.layoutCardName(gtx, vs, name, size, true)
+			if rightClicked(gtx, c.rightTag("card"+vs.UserID.String()), size) {
+				c.openUserMenu(vs.UserID, guildID, vs.ChannelID)
+			}
+			return layout.Dimensions{Size: size}
+		}
+	} else if c.watch.streamer == vs.UserID && !vs.SelfStream {
+		// They stopped sharing.
+		c.stopWatching()
+	}
 	px := min(size.Y*2/5, gtx.Dp(96), size.X*2/5)
 	dp := unit.Dp(float32(px) / gtx.Metric.PxPerDp)
 	center := op.Offset(image.Pt((size.X-px)/2, (size.Y-px)/2)).Push(gtx.Ops)

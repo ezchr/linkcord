@@ -472,6 +472,10 @@ func (c *chatView) joinVoice(ch discord.Channel) {
 // leaveVoice leaves the voice channel the user is in, if any.
 func (u *ui) leaveVoice() {
 	u.stopStream()
+	// A stream is watched from the voice channel it is in.
+	if u.chat != nil {
+		u.chat.stopWatching()
+	}
 	v := &u.voice
 	if v.demoChannel.IsValid() && u.chat != nil {
 		u.chat.demoVoice(discord.Channel{})

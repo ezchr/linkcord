@@ -90,6 +90,8 @@ type channelRow struct {
 }
 
 type chatView struct {
+	// watch is the stream of someone else being watched.
+	watch streamWatch
 	// friends is the friends page and the message requests of the direct
 	// messages.
 	friends friendsState
@@ -384,6 +386,7 @@ func (c *chatView) close() {
 		c.refreshCancel()
 	}
 	c.closeVideo()
+	c.stopWatching()
 	c.stopVoice()
 	c.closeSettings()
 	// A call does not outlive the session it belongs to.
