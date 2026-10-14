@@ -106,12 +106,12 @@ func (v *videoViewer) run(ctx context.Context, u *ui, volume float32) {
 			v.setStatus(u, err.Error(), true)
 		}
 	}
-	ffmpeg, err := mediaExecutable("ffmpeg")
+	ffmpeg, err := needMedia(ctx, "ffmpeg")
 	if err != nil {
 		fail(err)
 		return
 	}
-	ffprobe, err := mediaExecutable("ffprobe")
+	ffprobe, err := needMedia(ctx, "ffprobe")
 	if err != nil {
 		fail(err)
 		return

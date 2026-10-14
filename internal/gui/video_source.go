@@ -25,7 +25,9 @@ func mediaExecutable(name string) (string, error) {
 		filename += ".exe"
 	}
 	if executable, err := os.Executable(); err == nil {
-		for _, dir := range []string{filepath.Dir(executable), filepath.Join(filepath.Dir(executable), "media")} {
+		// Beside Linkcord, in its media folder, or where Linkcord downloads
+		// it.
+		for _, dir := range []string{filepath.Dir(executable), filepath.Join(filepath.Dir(executable), "media"), mediaDir()} {
 			candidate := filepath.Join(dir, filename)
 			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 				return candidate, nil

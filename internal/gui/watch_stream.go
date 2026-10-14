@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"runtime"
 	"time"
 
 	"gioui.org/io/pointer"
@@ -50,6 +51,21 @@ func (c *chatView) startWatching(vs discord.VoiceState) {
 	}
 	c.stopWatching()
 	ffmpeg, err := mediaExecutable("ffmpeg")
+	if err != nil && runtime.GOOS == "windows" {
+		// Downloaded once, then the stream opens.
+		done := fetchMedia()
+		go func() {
+			<-done
+			u.post(func() {
+				if err := mediaFetchErr(); err != nil {
+					u.voiceFailed("Could not watch the stream", err)
+					return
+				}
+				c.startWatching(vs)
+			})
+		}()
+		return
+	}
 	if err != nil {
 		u.voiceFailed("Could not watch the stream", err)
 		return

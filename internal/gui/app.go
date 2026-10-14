@@ -165,6 +165,8 @@ func newUI(w *app.Window) *ui {
 	applyAppearance(appearance)
 	u := &ui{win: w, th: newTheme(), focused: true, appearance: appearance, app: loadAppSettings()}
 	u.images = newImages(u)
+	// How the download of FFmpeg goes shows as the voice's messages do.
+	mediaNotify = func(s string) { u.post(func() { u.voiceInfo(s) }) }
 	if os.Getenv(demoEnvVar) == "1" {
 		u.startDemo()
 		return u

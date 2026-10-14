@@ -88,7 +88,7 @@ func (c *chatView) stopVoice() {
 }
 
 func (p *voicePlayer) run(ctx context.Context, u *ui, volume float32) error {
-	ffmpeg, err := mediaExecutable("ffmpeg")
+	ffmpeg, err := needMedia(ctx, "ffmpeg")
 	if err != nil {
 		return err
 	}

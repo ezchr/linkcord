@@ -32,7 +32,9 @@ func (b *limitedGIFBuffer) Write(data []byte) (int, error) {
 // GIFV embeds are silent looping animations. Convert their video rendition once
 // in an image-cache worker, then reuse the normal GIF playback and disk cache.
 func gifVideoData(data []byte, size int) ([]byte, error) {
-	ffmpeg, err := mediaExecutable("ffmpeg")
+	fetchCtx, fetched := context.WithTimeout(context.Background(), 15*time.Minute)
+	ffmpeg, err := needMedia(fetchCtx, "ffmpeg")
+	fetched()
 	if err != nil {
 		return nil, err
 	}
