@@ -571,10 +571,6 @@ func (s *Session) send(session *voice.Session) {
 				}
 			}
 
-			// The microphone goes out as mono in both ears, as Discord sends it: many microphones
-			// show up as stereo with the sound on one channel only.
-			centerMono(samples)
-
 			// With push to talk, what is said is sent while the key is held, however quiet, and not after.
 			if s.pushToTalk.Load() {
 				if s.talking.Load() {
@@ -605,35 +601,4 @@ func (s *Session) send(session *voice.Session) {
 			}
 		}
 	}
-}
-
-// centerMono makes interleaved stereo samples mono, the same on both channels. A channel
-// that is all but silent, as from a microphone wired to one side, is left out rather than
-// averaged in, which would halve the volume.
-func centerMono(samples []int16) {
-	var left, right int64
-	for i := 0; i+1 < len(samples); i += 2 {
-		left += abs64(int64(samples[i]))
-		right += abs64(int64(samples[i+1]))
-	}
-	for i := 0; i+1 < len(samples); i += 2 {
-		l, r := int32(samples[i]), int32(samples[i+1])
-		var m int32
-		switch {
-		case right*20 < left:
-			m = l
-		case left*20 < right:
-			m = r
-		default:
-			m = (l + r) / 2
-		}
-		samples[i], samples[i+1] = int16(m), int16(m)
-	}
-}
-
-func abs64(v int64) int64 {
-	if v < 0 {
-		return -v
-	}
-	return v
 }
