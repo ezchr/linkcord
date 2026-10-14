@@ -367,6 +367,10 @@ func (s *Stream) loop(capt *capturer) {
 		i420       []byte
 		start      = time.Now()
 		lastThumb  time.Time
+		// lastFrame is when a picture was last encoded, haveLast whether
+		// i420 holds one, and wantFrame whether a viewer asked for one.
+		lastFrame           time.Time
+		haveLast, wantFrame bool
 	)
 	defer func() {
 		if enc != nil {
@@ -400,6 +404,9 @@ func (s *Stream) loop(capt *capturer) {
 			if enc != nil {
 				enc.forceIDR()
 			}
+			// Sent at once, even if the screen did not change: a viewer
+			// waits for it.
+			wantFrame = true
 			continue
 		case <-tick.C:
 		}
@@ -411,33 +418,44 @@ func (s *Stream) loop(capt *capturer) {
 		}
 		if !ok {
 			empty++
-			continue
-		}
-		// A window resized gets an encoder of its new size, which starts
-		// with a keyframe.
-		if enc == nil || pic.w != srcW || pic.h != srcH {
-			srcW, srcH = pic.w, pic.h
-			ow, oh = s.p.Quality.size(srcW, srcH)
-			if enc != nil {
-				enc.close()
-				s.conn.send(context.Background(), s.video(ow, oh))
+			// Nothing changed on the screen, so the capture has nothing new.
+			// The last picture is sent again when a keyframe is asked for,
+			// and every second, so that a viewer who joins a still screen
+			// sees it at once.
+			if enc == nil || !haveLast || !wantFrame && time.Since(lastFrame) < time.Second {
+				continue
 			}
-			var err error
-			if enc, err = newEncoder(ow, oh, fps, s.p.Quality.bitrate(ow, oh), fps*4); err != nil {
-				s.end(err)
-				return
-			}
-			i420 = make([]byte, ow*oh*3/2)
+		} else {
+			haveLast = true
 		}
-		pic.toI420(i420, ow, oh)
-		if now := time.Now(); now.Sub(lastThumb) >= previewEvery {
-			lastThumb = now
-			tw := min(int(s.previewW.Load()), pic.w)
-			if tw <= 0 {
-				tw = 320
+		if ok {
+			// A window resized gets an encoder of its new size, which starts
+			// with a keyframe.
+			if enc == nil || pic.w != srcW || pic.h != srcH {
+				srcW, srcH = pic.w, pic.h
+				ow, oh = s.p.Quality.size(srcW, srcH)
+				if enc != nil {
+					enc.close()
+					s.conn.send(context.Background(), s.video(ow, oh))
+				}
+				var err error
+				if enc, err = newEncoder(ow, oh, fps, s.p.Quality.bitrate(ow, oh), fps*4); err != nil {
+					s.end(err)
+					return
+				}
+				i420 = make([]byte, ow*oh*3/2)
 			}
-			s.preview.Store(pic.toRGBA(tw, max(tw*pic.h/pic.w, 1)))
+			pic.toI420(i420, ow, oh)
+			if now := time.Now(); now.Sub(lastThumb) >= previewEvery {
+				lastThumb = now
+				tw := min(int(s.previewW.Load()), pic.w)
+				if tw <= 0 {
+					tw = 320
+				}
+				s.preview.Store(pic.toRGBA(tw, max(tw*pic.h/pic.w, 1)))
+			}
 		}
+		wantFrame, lastFrame = false, time.Now()
 		elapsed := time.Since(start)
 		t0 := time.Now()
 		frame, idr, err := enc.encode(i420, elapsed.Milliseconds())
