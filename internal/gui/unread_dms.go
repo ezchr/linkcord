@@ -6,7 +6,9 @@ import (
 	"slices"
 
 	"gioui.org/layout"
-	"gioui.org/unit"
+	"gioui.org/op"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/ningen/v3"
 )
@@ -87,10 +89,17 @@ func (c *chatView) layoutUnreadDM(gtx layout.Context, ch discord.Channel) layout
 // outlinedBadge is the count badge with a ring in the column's color, which
 // sets it apart from the picture under it.
 func outlinedBadge(gtx layout.Context, c *chatView, n int) layout.Dimensions {
+	// Drawn on a slightly larger mark of the column's color, of the same
+	// shape, so that the ring stays round.
 	gtx.Constraints.Min = image.Point{}
-	return rounded(gtx, colorServers, 11, func(gtx layout.Context) layout.Dimensions {
-		return layout.UniformInset(unit.Dp(3)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return countBadge(gtx, c.u, n)
-		})
-	})
+	ring := gtx.Dp(3)
+	macro := op.Record(gtx.Ops)
+	bd := countBadge(gtx, c.u, n)
+	call := macro.Stop()
+	size := bd.Size.Add(image.Pt(2*ring, 2*ring))
+	paint.FillShape(gtx.Ops, colorServers, clip.UniformRRect(image.Rectangle{Max: size}, size.Y/2).Op(gtx.Ops))
+	t := op.Offset(image.Pt(ring, ring)).Push(gtx.Ops)
+	call.Add(gtx.Ops)
+	t.Pop()
+	return layout.Dimensions{Size: size}
 }

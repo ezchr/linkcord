@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"gioui.org/op"
 	"image"
 	"log/slog"
 	"slices"
@@ -507,7 +508,8 @@ func (c *chatView) layoutHomeRow(gtx layout.Context, r channelRow) layout.Dimens
 	}, selected)
 }
 
-// countBadge is the red pill with a number that marks what waits.
+// countBadge is the red mark with a number that waits: a circle for one
+// digit and a pill for more, as on Discord.
 func countBadge(gtx layout.Context, u *ui, n int) layout.Dimensions {
 	if n <= 0 {
 		return layout.Dimensions{}
@@ -516,12 +518,23 @@ func countBadge(gtx layout.Context, u *ui, n int) layout.Dimensions {
 	if n > 99 {
 		txt = "99+"
 	}
-	return rounded(gtx, colorRed, 8, func(gtx layout.Context) layout.Dimensions {
-		gtx.Constraints.Min.X = gtx.Dp(16)
-		return layout.Inset{Left: unit.Dp(5), Right: unit.Dp(5), Top: unit.Dp(1), Bottom: unit.Dp(1)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Center.Layout(gtx, bold(label(u.th, 12, colorHeader, txt)).Layout)
-		})
-	})
+	// The number is measured first, so that the mark is exactly as tall
+	// as wide for one digit.
+	h := gtx.Dp(16)
+	lgtx := gtx
+	lgtx.Constraints.Min = image.Point{}
+	macro := op.Record(gtx.Ops)
+	l := bold(label(u.th, 12, colorHeader, txt))
+	l.MaxLines = 1
+	ld := l.Layout(lgtx)
+	call := macro.Stop()
+	w := max(h, ld.Size.X+gtx.Dp(8))
+	size := image.Pt(w, h)
+	paint.FillShape(gtx.Ops, colorRed, clip.UniformRRect(image.Rectangle{Max: size}, h/2).Op(gtx.Ops))
+	t := op.Offset(image.Pt((w-ld.Size.X)/2, (h-ld.Size.Y)/2)).Push(gtx.Ops)
+	call.Add(gtx.Ops)
+	t.Pop()
+	return layout.Dimensions{Size: size}
 }
 
 // layoutFriends is the friends page: tabs for the friends online, all of
