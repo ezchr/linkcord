@@ -136,8 +136,9 @@ type profileView struct {
 	statusMenu       bool
 	statusOpts       [4]widget.Clickable
 	copied           bool
-	// joinVoice joins the voice channel they are in.
-	joinVoice widget.Clickable
+	// joinVoice joins the voice channel they are in, and watchStream
+	// watches their stream.
+	joinVoice, watchStream widget.Clickable
 	// saveBanner saves the banner to the downloads.
 	saveBanner widget.Clickable
 	// friend adds, accepts or removes them as a friend, unblock unblocks
@@ -289,6 +290,15 @@ func (c *chatView) updateProfile(gtx layout.Context) {
 	}
 	if p.more.Clicked(gtx) {
 		c.openUserMenu(p.user.ID, p.guildID, 0)
+	}
+	if p.watchStream.Clicked(gtx) {
+		if ch, ok := c.userVoiceChannel(p.guildID, p.user.ID); ok {
+			if vs, err := c.st.Cabinet.VoiceState(ch.GuildID, p.user.ID); err == nil {
+				c.profile = nil
+				c.startWatching(*vs)
+				return
+			}
+		}
 	}
 	if p.joinVoice.Clicked(gtx) {
 		if ch, ok := c.userVoiceChannel(p.guildID, p.user.ID); ok {
@@ -813,6 +823,19 @@ func (c *chatView) layoutVoiceCard(p *profileView, id discord.UserID) layout.Wid
 	}
 	status := c.voiceStatuses[ch.ID]
 	joined := c.u.voiceChannel() == ch.ID
+	// Their stream, if they share their screen, as Discord shows it.
+	var stream *discord.VoiceState
+	game := ""
+	if vs, err := c.st.Cabinet.VoiceState(ch.GuildID, id); err == nil && vs.SelfStream {
+		stream = vs
+		if pr := c.presence(ch.GuildID, id); pr != nil {
+			for _, a := range pr.Activities {
+				if a.Type == discord.GameActivity {
+					game = a.Name
+				}
+			}
+		}
+	}
 	return func(gtx layout.Context) layout.Dimensions {
 		bg := colorMenu
 		if _, _, themed := p.data.themeColors(p.guildID); themed {
@@ -821,9 +844,37 @@ func (c *chatView) layoutVoiceCard(p *profileView, id discord.UserID) layout.Wid
 		return rounded(gtx, bg, 8, func(gtx layout.Context) layout.Dimensions {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
 			return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				title := "In voice channel"
+				if stream != nil {
+					title = "Streaming"
+					if game != "" {
+						title += " " + game
+					}
+				}
 				rows := []layout.FlexChild{
-					layout.Rigid(bold(label(th, 12, colorText, "In voice channel")).Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+							layout.Rigid(bold(label(th, 12, colorText, title)).Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								if stream == nil {
+									return layout.Dimensions{}
+								}
+								return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return liveBadge(gtx, th) })
+							}),
+						)
+					}),
 					layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+				}
+				if stream != nil {
+					key := c.streamKeyOf(*stream)
+					rows = append(rows,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return c.layoutPreviewPicture(gtx, key, gtx.Constraints.Max.X)
+						}),
+						layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+					)
+				}
+				rows = append(rows,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 							// Who is there, overlapping, in a box as Discord's.
@@ -861,8 +912,17 @@ func (c *chatView) layoutVoiceCard(p *profileView, id discord.UserID) layout.Wid
 							}),
 						)
 					}),
-				}
-				if !joined {
+				)
+				switch {
+				case joined && stream != nil && !c.watching(id):
+					rows = append(rows,
+						layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							gtx.Constraints.Min.X = gtx.Constraints.Max.X
+							return button(gtx, th, &p.watchStream, colorGreenButton, "Watch Stream")
+						}),
+					)
+				case !joined:
 					rows = append(rows,
 						layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {

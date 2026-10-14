@@ -121,6 +121,10 @@ type chatView struct {
 	// plays, kept for when it is watched again.
 	streamVolumes map[discord.UserID]float32
 	streamMuted   map[discord.UserID]bool
+	// previews are the pictures of streams, by their key, and live the
+	// stream whose card shows while its streamer is hovered.
+	previews map[string]*streamPreview
+	live     liveHover
 	// clips is the window that makes clips of the voice channel.
 	clips clipView
 	// shownBlocked are the messages of blocked users the user asked to see.
@@ -1275,6 +1279,7 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 	}
 	c.layoutSearchMenu(gtx)
 	c.layoutClips(gtx)
+	c.layoutLiveHover(gtx)
 	if c.u.voice.picker.open {
 		c.layoutStreamPicker(gtx)
 	}
@@ -1628,6 +1633,8 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 // their name, green while they speak, and whether they are muted.
 func (c *chatView) layoutVoiceMember(gtx layout.Context, r channelRow, hovered bool) layout.Dimensions {
 	th := c.u.th
+	// Hovering someone who streams shows their stream, as Discord.
+	c.hoverLive(r, hovered)
 	bg := colorSidebar
 	if hovered {
 		bg = colorHover

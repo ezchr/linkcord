@@ -94,7 +94,7 @@ func (u *ui) startDemo() {
 		cab.ChannelSet(&channels[i], false)
 	}
 	for _, i := range []int{3, 0, 6, 1} {
-		cab.VoiceStateSet(guild.ID, &discord.VoiceState{GuildID: guild.ID, ChannelID: channels[5].ID, UserID: users[i].ID, SelfMute: i == 6}, false)
+		cab.VoiceStateSet(guild.ID, &discord.VoiceState{GuildID: guild.ID, ChannelID: channels[5].ID, UserID: users[i].ID, SelfMute: i == 6, SelfStream: i == 0}, false)
 	}
 
 	// Direct messages: one with a person and a group.
