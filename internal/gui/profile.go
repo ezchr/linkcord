@@ -727,7 +727,7 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 			}
 			children = append(children,
 				layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
-				section(func(gtx layout.Context) layout.Dimensions { return c.layoutActivity(gtx, a) }),
+				section(func(gtx layout.Context) layout.Dimensions { return c.layoutActivity(gtx, a, user.ID) }),
 			)
 		}
 	}
@@ -1146,7 +1146,7 @@ func (c *chatView) guildTagChip(gtx layout.Context, guildID discord.GuildID, bad
 }
 
 // layoutActivity is the card of a game, music or stream.
-func (c *chatView) layoutActivity(gtx layout.Context, a discord.Activity) layout.Dimensions {
+func (c *chatView) layoutActivity(gtx layout.Context, a discord.Activity, userID discord.UserID) layout.Dimensions {
 	th := c.u.th
 	var start, end time.Time
 	if a.Timestamps != nil && a.Timestamps.Start > 0 {
@@ -1210,6 +1210,9 @@ func (c *chatView) layoutActivity(gtx layout.Context, a discord.Activity) layout
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx, lines...)
 						}),
 					)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return c.layoutActivityButtons(gtx, a, userID)
 				}),
 			)
 		})

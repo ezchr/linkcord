@@ -35,7 +35,7 @@ func (u *ui) startDemo() {
 	// Beto speaks in the demo's voice channel, for its rings to show.
 	u.voice.demoSpeaker = users[1].ID
 	presences := []discord.Presence{
-		{Status: discord.OnlineStatus, Activities: []discord.Activity{{Type: discord.ListeningActivity, Name: "YouTube Music", Details: "Sample song", State: "Sample artist", Timestamps: &discord.ActivityTimestamps{Start: discord.UnixMsTimestamp(time.Now().Add(-56 * time.Minute).UnixMilli())}}}},
+		{Status: discord.OnlineStatus, Activities: []discord.Activity{{Type: discord.ListeningActivity, Name: "YouTube Music", Details: "Sample song", State: "Sample artist", Buttons: []string{"Listen Along"}, Metadata: &discord.ActivityMetadata{ButtonURLs: []string{"https://music.youtube.com"}}, Timestamps: &discord.ActivityTimestamps{Start: discord.UnixMsTimestamp(time.Now().Add(-56 * time.Minute).UnixMilli())}}}},
 		{Status: discord.OnlineStatus, Activities: []discord.Activity{{Type: discord.GameActivity, Name: "Counter-Strike"}}},
 		{Status: discord.IdleStatus},
 		{Status: discord.OnlineStatus, Activities: []discord.Activity{{Type: discord.CustomActivity, Name: "Custom Status", State: "Studying 📚"}}},

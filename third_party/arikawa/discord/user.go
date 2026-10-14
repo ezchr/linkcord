@@ -258,6 +258,16 @@ type Activity struct {
 	// Undocumented fields
 	SyncID    string `json:"sync_id,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
+	// Buttons are the labels of the activity's buttons, whose links are in
+	// Metadata.
+	Buttons  []string          `json:"buttons,omitempty"`
+	Metadata *ActivityMetadata `json:"metadata,omitempty"`
+}
+
+// ActivityMetadata is more about an activity, such as where its buttons
+// lead.
+type ActivityMetadata struct {
+	ButtonURLs []string `json:"button_urls,omitempty"`
 }
 
 type ActivityType uint8
