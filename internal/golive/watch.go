@@ -70,6 +70,7 @@ type Watch struct {
 	videoSSRC uint32
 	frame   *image.RGBA
 	frames  atomic.Int64
+	created bool
 	once    sync.Once
 	decoder *exec.Cmd
 	decIn   io.WriteCloser
@@ -125,9 +126,14 @@ func StartWatching(ctx context.Context, p WatchParams) (*Watch, error) {
 
 	created := make(chan *StreamCreateEvent, 1)
 	server := make(chan *StreamServerUpdateEvent, 1)
+	notFound := make(chan string, 1)
 	w.rm = append(w.rm,
 		p.Subscribe(func(ev *StreamCreateEvent) {
 			if ev.StreamKey == w.key {
+				w.log.Info("stream create", "rtc_server", ev.RTCServerID, "rtc_channel", ev.RTCChannelID, "paused", ev.Paused, "viewers", len(ev.ViewerIDs))
+				w.mu.Lock()
+				w.created = true
+				w.mu.Unlock()
 				select {
 				case created <- ev:
 				default:
@@ -144,6 +150,20 @@ func StartWatching(ctx context.Context, p WatchParams) (*Watch, error) {
 		}),
 		p.Subscribe(func(ev *StreamDeleteEvent) {
 			if ev.StreamKey == w.key {
+				w.log.Info("stream delete", "reason", ev.Reason, "unavailable", ev.Unavailable)
+				// While joining, Discord's answer to an earlier try of the
+				// same stream can still come; it is the answer that counts
+				// only once this one has its stream.
+				w.mu.Lock()
+				created := w.created
+				w.mu.Unlock()
+				if !created {
+					select {
+					case notFound <- ev.Reason:
+					default:
+					}
+					return
+				}
 				reason := ev.Reason
 				if reason == "" {
 					reason = "the stream ended"
@@ -160,11 +180,18 @@ func StartWatching(ctx context.Context, p WatchParams) (*Watch, error) {
 	defer cancel()
 	var ce *StreamCreateEvent
 	var se *StreamServerUpdateEvent
+	var reason string
 	for ce == nil || se == nil {
 		select {
 		case ce = <-created:
 		case se = <-server:
+		case reason = <-notFound:
+			// Perhaps an earlier try's answer: wait on, but keep it for the
+			// error if nothing better comes.
 		case <-wait.Done():
+			if reason != "" {
+				return nil, fmt.Errorf("golive: Discord says %s", reason)
+			}
 			return nil, errors.New("golive: Discord did not give the stream's server")
 		}
 	}
@@ -187,7 +214,7 @@ func StartWatching(ctx context.Context, p WatchParams) (*Watch, error) {
 	}, daveChannel.Uint64(), w.log)
 	// The streamer's SSRCs come in an Op 12, perhaps before the ready.
 	early := make(chan ws.Op, 64)
-	ready, err := waitOp(wait, w.ops, early, func(ev ws.Event) bool { _, ok := ev.(*readyEvent); return ok })
+	ready, err := waitOp(wait, w.log, w.ops, early, func(ev ws.Event) bool { _, ok := ev.(*readyEvent); return ok })
 	if err != nil {
 		return nil, fmt.Errorf("golive: the stream server did not answer: %w", err)
 	}
@@ -202,6 +229,16 @@ func StartWatching(ctx context.Context, p WatchParams) (*Watch, error) {
 		return nil, err
 	}
 	w.conn.send(wait, &versionCommand{})
+	// As Discord's clients do, viewers too: the video slots the server gave,
+	// not sending.
+	if len(r.Streams) > 0 {
+		st := r.Streams[0]
+		w.conn.send(wait, &videoCommand{
+			AudioSSRC: r.SSRC, VideoSSRC: st.SSRC, RTXSSRC: st.RTXSSRC,
+			Streams: []videoStream{{Type: "video", RID: "100", SSRC: st.SSRC, Quality: 100, RTXSSRC: st.RTXSSRC,
+				MaxResolution: maxResolution{Type: "fixed"}}},
+		})
+	}
 	if err := w.conn.send(wait, &selectProtocolCommand{
 		Protocol: "udp",
 		Codecs: []codecInfo{
@@ -216,7 +253,7 @@ func StartWatching(ctx context.Context, p WatchParams) (*Watch, error) {
 	}); err != nil {
 		return nil, err
 	}
-	desc, err := waitOp(wait, w.ops, early, func(ev ws.Event) bool { _, ok := ev.(*sessionDescriptionEvent); return ok })
+	desc, err := waitOp(wait, w.log, w.ops, early, func(ev ws.Event) bool { _, ok := ev.(*sessionDescriptionEvent); return ok })
 	if err != nil {
 		return nil, fmt.Errorf("golive: the stream server did not give a key: %w", err)
 	}
@@ -238,7 +275,7 @@ func StartWatching(ctx context.Context, p WatchParams) (*Watch, error) {
 }
 
 // waitOp waits for the op that match accepts, keeping the others in keep.
-func waitOp(ctx context.Context, ops <-chan ws.Op, keep chan ws.Op, match func(ws.Event) bool) (ws.Event, error) {
+func waitOp(ctx context.Context, log *slog.Logger, ops <-chan ws.Op, keep chan ws.Op, match func(ws.Event) bool) (ws.Event, error) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -246,6 +283,15 @@ func waitOp(ctx context.Context, ops <-chan ws.Op, keep chan ws.Op, match func(w
 		case op, ok := <-ops:
 			if !ok {
 				return nil, errors.New("connection closed")
+			}
+			// What the server says while joining, for when it refuses.
+			log.Info("stream server op", "op", op.Code, "type", fmt.Sprintf("%T", op.Data))
+			switch ev := op.Data.(type) {
+			case *ws.CloseEvent:
+				return nil, fmt.Errorf("the stream server closed the connection (code %d): %w", ev.Code, ev.Err)
+			case *ws.BackgroundErrorEvent:
+				log.Warn("stream server error", "err", ev.Err)
+				continue
 			}
 			if match(op.Data) {
 				return op.Data, nil
