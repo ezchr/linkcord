@@ -4,29 +4,50 @@ package voice
 
 import "testing"
 
+// frame is 20 ms of sound, at amp on the left and amp*rightPct/100 on the right.
+func frame(amp, rightPct int) []int16 {
+	pcm := make([]int16, 2*960)
+	for i := 0; i < len(pcm); i += 2 {
+		v := amp
+		if i%4 == 0 {
+			v = -amp
+		}
+		pcm[i], pcm[i+1] = int16(v), int16(v*rightPct/100)
+	}
+	return pcm
+}
+
 func TestFillSilentSide(t *testing.T) {
-	// Sound on the left only: copied to the right.
-	pcm := []int16{3000, 0, -2500, 0, 2000, 1, -1500, 0}
-	fillSilentSide(pcm)
-	if pcm[1] != 3000 || pcm[3] != -2500 || pcm[5] != 2000 {
-		t.Fatalf("left only = %v; want it on both sides", pcm)
+	var st sideState
+	// A microphone on the left only: after a moment, the left plays on both sides.
+	var pcm []int16
+	for range 100 {
+		pcm = frame(3000, 0)
+		st.fillSilentSide(pcm)
 	}
-	// Stereo stays as it is, with nothing averaged.
-	pcm = []int16{3000, 1000, -2500, -800}
-	fillSilentSide(pcm)
-	if pcm[0] != 3000 || pcm[1] != 1000 || pcm[2] != -2500 || pcm[3] != -800 {
-		t.Fatalf("stereo changed: %v", pcm)
+	if pcm[1] != pcm[0] {
+		t.Fatalf("left only: right = %d, left = %d", pcm[1], pcm[0])
 	}
-	// Near silence on both sides is left alone.
-	pcm = []int16{3, 0, -2, 0}
-	fillSilentSide(pcm)
-	if pcm[1] != 0 || pcm[3] != 0 {
-		t.Fatalf("silence changed: %v", pcm)
+	// A little leak into the right at the 1% edge does not flip it back and forth.
+	flips, prev := 0, st.copyFrom
+	for i := range 200 {
+		pcm = frame(3000, 1+i%2)
+		st.fillSilentSide(pcm)
+		if st.copyFrom != prev {
+			flips++
+			prev = st.copyFrom
+		}
 	}
-	// The right only.
-	pcm = []int16{0, 1200, 0, -1200}
-	fillSilentSide(pcm)
-	if pcm[0] != 1200 || pcm[2] != -1200 {
-		t.Fatalf("right only = %v", pcm)
+	if flips > 0 {
+		t.Fatalf("flipped %d times at the edge", flips)
+	}
+	// Stereo stays as it is.
+	var stereo sideState
+	for range 100 {
+		pcm = frame(3000, 60)
+		stereo.fillSilentSide(pcm)
+	}
+	if pcm[1] == pcm[0] {
+		t.Fatal("stereo was changed")
 	}
 }
