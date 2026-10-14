@@ -39,7 +39,7 @@ func TestSpeakerVolume(t *testing.T) {
 		}
 
 		output := make([]byte, frameBytes)
-		s.mix(output, tt.volume)
+		s.mix(output, tt.volume, false)
 		if got := int16(binary.LittleEndian.Uint16(output)); got != tt.want {
 			t.Errorf("volume %v: got %d, want %d", tt.volume, got, tt.want)
 		}

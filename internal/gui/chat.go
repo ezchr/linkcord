@@ -117,6 +117,8 @@ type chatView struct {
 	gset   guildSettings
 	cset   channelSettings
 	chmenu channelMenu
+	// clips is the window that makes clips of the voice channel.
+	clips clipView
 	// shownBlocked are the messages of blocked users the user asked to see.
 	shownBlocked map[discord.MessageID]bool
 	// myStatus is the status the user chose here, kept over what the
@@ -1268,6 +1270,7 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 		c.layoutCreateChannel(gtx)
 	}
 	c.layoutSearchMenu(gtx)
+	c.layoutClips(gtx)
 	if c.u.voice.picker.open {
 		c.layoutStreamPicker(gtx)
 	}

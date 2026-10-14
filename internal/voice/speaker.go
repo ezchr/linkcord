@@ -40,6 +40,8 @@ type speaker struct {
 	// seq is the sequence number of the last packet, and last when it arrived.
 	seq  uint16
 	last time.Time
+	// guard lowers the voice when it comes in saturated.
+	guard levelGuard
 }
 
 // newSpeaker returns a speaker whose first packet has the sequence number seq.
@@ -104,8 +106,9 @@ func (s *speaker) write(seq uint16, packet []byte) error {
 	return nil
 }
 
-// mix adds what is buffered to output, volume times as loud, once the cushion is.
-func (s *speaker) mix(output []byte, volume float32) {
+// mix adds what is buffered to output, volume times as loud, once the
+// cushion is, lowered when it comes in saturated if guard.
+func (s *speaker) mix(output []byte, volume float32, guard bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -114,6 +117,14 @@ func (s *speaker) mix(output []byte, volume float32) {
 	}
 
 	n := min(len(output), len(s.buf))
+	if guard {
+		var peak float32
+		for i := 0; i+1 < n; i += 2 {
+			v := float32(int16(binary.LittleEndian.Uint16(s.buf[i:])))
+			peak = max(peak, v, -v)
+		}
+		volume *= s.guard.apply(peak, volume)
+	}
 	for i := 0; i+1 < n; i += 2 {
 		sample := int32(int16(binary.LittleEndian.Uint16(s.buf[i:])))
 		if volume != 1 {

@@ -45,6 +45,13 @@ type appSettings struct {
 	// HideDeleted leaves out the messages others delete, which otherwise
 	// stay in their place, marked.
 	HideDeleted bool `json:"hide_deleted,omitempty"`
+	// NoAutoLevel stops lowering voices that come in saturated, and
+	// NoBannerDownload hides the button that saves profiles' banners.
+	NoAutoLevel      bool `json:"no_auto_level,omitempty"`
+	NoBannerDownload bool `json:"no_banner_download,omitempty"`
+	// ClipMinutes is how much of the voice channel is kept for clips, none
+	// when zero; an hour at most.
+	ClipMinutes int `json:"clip_minutes,omitempty"`
 }
 
 func appSettingsPath() string {
@@ -146,11 +153,12 @@ func (u *ui) applyZoom(gtx *layout.Context) {
 // generalView is the state of the General, Accessibility and Linkcord
 // Features pages.
 type generalView struct {
-	deletedBtn               widget.Clickable
-	zoom, chatText, groupGap slider
-	roleColors               widget.Clickable
-	startup, minimized, tray widget.Clickable
-	startupErr               string
+	deletedBtn, levelBtn, bannerBtn, clipBtn widget.Clickable
+	clipLen                                  slider
+	zoom, chatText, groupGap                 slider
+	roleColors                               widget.Clickable
+	startup, minimized, tray                 widget.Clickable
+	startupErr                               string
 }
 
 func (c *chatView) updateGeneral(gtx layout.Context) {
@@ -196,6 +204,31 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 	if g.tray.Clicked(gtx) {
 		u.app.QuitOnClose = !u.app.QuitOnClose
 		u.saveAppSettings()
+	}
+	if g.levelBtn.Clicked(gtx) {
+		u.app.NoAutoLevel = !u.app.NoAutoLevel
+		u.saveAppSettings()
+		u.applyLinkcordVoice()
+	}
+	if g.bannerBtn.Clicked(gtx) {
+		u.app.NoBannerDownload = !u.app.NoBannerDownload
+		u.saveAppSettings()
+	}
+	if g.clipBtn.Clicked(gtx) {
+		if u.app.ClipMinutes > 0 {
+			u.app.ClipMinutes = 0
+		} else {
+			u.app.ClipMinutes = 10
+		}
+		u.saveAppSettings()
+		u.applyLinkcordVoice()
+	}
+	if r := g.clipLen.update(gtx); r.changed || r.released {
+		u.app.ClipMinutes = max(1, int(1+r.value*59+0.5))
+		if r.released {
+			u.saveAppSettings()
+			u.applyLinkcordVoice()
+		}
 	}
 	if g.deletedBtn.Clicked(gtx) {
 		u.app.HideDeleted = !u.app.HideDeleted
@@ -279,6 +312,30 @@ func (c *chatView) featureRows() []layout.Widget {
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.deletedBtn, "Show Deleted Messages",
 				"Messages others delete while Linkcord is open stay in their place, marked with a red bin. Only you see them.", !c.u.app.HideDeleted)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.levelBtn, "Lower Saturated Voices",
+				"When someone's microphone comes in saturated, too loud, they are lowered for you until it is not, and come back up slowly.", !c.u.app.NoAutoLevel)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.bannerBtn, "Download Banners",
+				"Profiles' banners have a button that saves them to your downloads.", !c.u.app.NoBannerDownload)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.clipBtn, "Voice Clips",
+				"Keeps what is said in the voice channel you are in, for a clip of the last minutes: the clip button by the voice buttons makes it, of everyone or whom you choose, together and by person, to hear and save.", c.u.app.ClipMinutes > 0)
+		},
+		func(gtx layout.Context) layout.Dimensions {
+			if c.u.app.ClipMinutes == 0 {
+				return layout.Dimensions{}
+			}
+			mins := c.u.app.ClipMinutes
+			return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, sliderRow(th, "Longest Clip",
+				"How much is kept, an hour at most. An hour of one person talking takes about 30 MB of memory.",
+				&g.clipLen, float32(mins-1)/59, fmt.Sprintf("%d min", mins)))
 		},
 	}
 }

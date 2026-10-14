@@ -50,7 +50,11 @@ type Watcher struct {
 	// else; recorded is what of it was pressed so far.
 	record   func(Combo)
 	recorded Combo
-	stop     chan struct{}
+	// stuck are the keys held when recording started, left out until let
+	// go: some keyboards and programs have Windows say a key is held for
+	// good, which never let the recording end.
+	stuck map[Key]bool
+	stop  chan struct{}
 }
 
 // Start starts watching keys, for no binds yet.
@@ -78,6 +82,14 @@ func (w *Watcher) Record(done func(Combo)) {
 	defer w.mu.Unlock()
 	w.release()
 	w.record, w.recorded = done, nil
+	w.stuck = make(map[Key]bool)
+	if done != nil {
+		for k := Key(1); k < 0xff; k++ {
+			if recordable(k) && held(k) {
+				w.stuck[k] = true
+			}
+		}
+	}
 }
 
 // Close stops watching.
@@ -148,7 +160,14 @@ func (w *Watcher) check() {
 func (w *Watcher) checkRecord() {
 	pressed := false
 	for k := Key(1); k < 0xff; k++ {
-		if !recordable(k) || !held(k) {
+		if !recordable(k) {
+			continue
+		}
+		if !held(k) {
+			delete(w.stuck, k)
+			continue
+		}
+		if w.stuck[k] {
 			continue
 		}
 		pressed = true

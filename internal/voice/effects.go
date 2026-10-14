@@ -69,6 +69,20 @@ func (e *Effects) Play(pcm []int16, output string, volume float32) {
 	}
 }
 
+// Stop stops the sounds playing.
+func (e *Effects) Stop() {
+	e.mu.Lock()
+	e.playing = nil
+	e.mu.Unlock()
+}
+
+// Playing reports whether a sound is playing.
+func (e *Effects) Playing() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.playing) > 0
+}
+
 // mix fills output with what is left of the sounds. It is what the playback
 // device calls.
 func (e *Effects) mix(output, _ []byte) {

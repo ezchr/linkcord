@@ -38,6 +38,18 @@ type Effects struct{}
 
 func NewEffects() *Effects                     { return new(Effects) }
 func (*Effects) Play([]int16, string, float32) {}
+func (*Effects) Stop()                         {}
+func (*Effects) Playing() bool                 { return false }
+
+func (*Session) SetAutoLevel(bool)           {}
+func (*Session) SetClipLength(time.Duration) {}
+func (*Session) ClipLength() time.Duration   { return 0 }
+func (*Session) Clip([]discord.UserID, time.Duration) (map[discord.UserID][]int16, error) {
+	return nil, errNoVoice
+}
+
+// Mix adds the samples of each clip together.
+func Mix(map[discord.UserID][]int16) []int16 { return nil }
 
 // SilentLevel is the level of silence, in dB.
 const SilentLevel = -100
@@ -74,3 +86,5 @@ func (*Player) Status() PlayerStatus                      { return PlayerStatus{
 func (*Player) Toggle(discord.AttachmentID) (bool, error) { return false, nil }
 func (*Player) Play(discord.AttachmentID, []byte) error   { return errNoVoice }
 func (*Player) Seek(time.Duration) error                  { return nil }
+
+func (*Session) SetMuteDeafen(bool, bool) error { return nil }

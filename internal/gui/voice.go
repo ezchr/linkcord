@@ -42,6 +42,9 @@ const voiceSensitivity = -40
 
 // voiceState is the voice call of the window.
 type voiceState struct {
+	// mutedBefore is whether the user was muted when they deafened, as
+	// undeafening leaves them.
+	mutedBefore bool
 	// session talks to the voice channel joined. It is made on the first
 	// join, for the state it was made with.
 	session *voice.Session
@@ -95,6 +98,8 @@ type voiceState struct {
 
 	muteBtn, deafBtn, leaveBtn, settingsBtn              widget.Clickable
 	channelBtn, camBtn, screenBtn, activityBtn, soundBtn widget.Clickable
+	// clipBtn makes a clip of the voice channel, when clips are kept.
+	clipBtn widget.Clickable
 }
 
 // voiceSettings are what the user chose for voice channels, saved in
@@ -450,6 +455,7 @@ func (u *ui) voiceSession(st *ningen.State) *voice.Session {
 	v.session, v.st = voice.New(st.State, settings.sensitivity()), st
 	v.talker.Store(v.session)
 	u.applyVoiceSettings()
+	u.applyLinkcordVoice()
 	if err := v.session.SetDevices(settings.Input, settings.Output); err != nil {
 		slog.Warn("could not choose the audio devices", "err", err)
 	}
@@ -564,7 +570,13 @@ func (u *ui) toggleVoice(deafen bool) {
 	v := &u.voice
 	if deafen {
 		v.deafened = !v.deafened
-		v.muted = v.muted || v.deafened
+		if v.deafened {
+			// Undeafening unmutes who was not muted before, as Discord.
+			v.mutedBefore = v.muted
+			v.muted = true
+		} else {
+			v.muted = v.mutedBefore
+		}
 	} else {
 		v.muted = !v.muted
 		if !v.muted {
@@ -582,8 +594,9 @@ func (u *ui) toggleVoice(deafen bool) {
 		u.playSound(dcsound.Unmute)
 	}
 	if s := v.session; s != nil && s.Status().Joined {
+		muted, deafened := v.muted, v.deafened
 		go func() {
-			if err := s.Toggle(deafen); err != nil {
+			if err := s.SetMuteDeafen(muted, deafened); err != nil {
 				u.post(func() { u.voiceFailed("Could not change the microphone or audio settings", err) })
 			}
 		}()
@@ -644,6 +657,9 @@ func (u *ui) updateVoice(gtx layout.Context) {
 	}
 	if v.soundBtn.Clicked(gtx) {
 		c.openSoundboard()
+	}
+	if v.clipBtn.Clicked(gtx) {
+		c.openClips()
 	}
 	if v.settingsBtn.Clicked(gtx) {
 		c.openSettings()
@@ -742,6 +758,17 @@ func (u *ui) layoutVoicePanel(gtx layout.Context) layout.Dimensions {
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return panelButton(gtx, &v.activityBtn, iconActivity) }),
 						gap,
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return panelButton(gtx, &v.soundBtn, iconSoundboard) }),
+						// The clip of the voice channel, when clips are kept.
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if u.app.ClipMinutes == 0 {
+								return layout.Dimensions{}
+							}
+							return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								gtx.Constraints.Max.X = gtx.Dp(44)
+								gtx.Constraints.Min.X = gtx.Constraints.Max.X
+								return panelButton(gtx, &v.clipBtn, iconClip)
+							})
+						}),
 					)
 				})
 			}))

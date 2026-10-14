@@ -138,6 +138,8 @@ type profileView struct {
 	copied           bool
 	// joinVoice joins the voice channel they are in.
 	joinVoice widget.Clickable
+	// saveBanner saves the banner to the downloads.
+	saveBanner widget.Clickable
 	// friend adds, accepts or removes them as a friend, unblock unblocks
 	// them, and more opens the menu of the user.
 	friend, unblock, more widget.Clickable
@@ -229,8 +231,11 @@ func (c *chatView) updateProfile(gtx layout.Context) {
 	}
 	if p.bannerBtn.Clicked(gtx) && p.bannerURL != "" {
 		// Discord's banners are 680×240 at their smallest.
-		big := p.bannerURL + "?size=2048"
+		big := bannerBig(p.bannerURL)
 		c.openViewer("", big, 2048, 723, big, p.bannerURL, p.bannerW)
+	}
+	if p.saveBanner.Clicked(gtx) && p.bannerURL != "" {
+		c.saveFile(bannerBig(p.bannerURL), "")
 	}
 	if p.copyID.Clicked(gtx) {
 		gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(p.user.ID.String()))})
@@ -511,6 +516,27 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 					pointer.CursorPointer.Add(gtx.Ops)
 					return layout.Dimensions{Size: image.Pt(width, bannerH)}
 				})
+				// And a button saves it, a Linkcord feature.
+				if !c.u.app.NoBannerDownload {
+					s := gtx.Dp(28)
+					left := gtx.Dp(8)
+					if !p.self {
+						left = gtx.Dp(44)
+					}
+					t := op.Offset(image.Pt(width-s-left, gtx.Dp(8))).Push(gtx.Ops)
+					bgtx := gtx
+					bgtx.Constraints = layout.Exact(image.Pt(s, s))
+					p.saveBanner.Layout(bgtx, func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						a := uint8(0x80)
+						if p.saveBanner.Hovered() {
+							a = 0xc0
+						}
+						paint.FillShape(gtx.Ops, withAlpha(rgb(0x000000), a), clip.Ellipse(image.Rect(0, 0, s, s)).Op(gtx.Ops))
+						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconDownload, 18, colorHeader) })
+					})
+					t.Pop()
+				}
 			}
 			// The avatar sits on the edge of the banner, in a ring of the
 			// card's color.
@@ -855,6 +881,13 @@ var (
 	iconFriends = mustIcon(icons.SocialPeople)
 	iconPending = mustIcon(icons.ActionSchedule)
 )
+
+// bannerBig is a banner's URL at its biggest: its URL already says a size,
+// which a second would not replace.
+func bannerBig(url string) string {
+	base, _, _ := strings.Cut(url, "?")
+	return base + "?size=2048"
+}
 
 // iconBox is a square button with an icon, as the buttons beside Send
 // message.

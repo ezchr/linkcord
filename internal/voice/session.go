@@ -166,6 +166,10 @@ type Session struct {
 	speakers map[uint32]*speaker
 	// volumes are how loud the users not played as they are sent are played, 1 being as they are sent.
 	volumes map[discord.UserID]float32
+	// clips keeps what is said for clips, and autoLevel lowers voices that
+	// come in saturated.
+	clips     clipBuffer
+	autoLevel atomic.Bool
 
 	// e2ee encrypts end to end in the voice channel joined, made anew by
 	// each voice server; it is kept for the log.
@@ -497,6 +501,35 @@ func (s *Session) Toggle(deafen bool) error {
 	})
 }
 
+// SetMuteDeafen mutes and deafens the user, or not, as given, in the voice
+// channel joined.
+func (s *Session) SetMuteDeafen(mute, deafen bool) error {
+	if !s.mu.TryLock() {
+		return nil
+	}
+	defer s.mu.Unlock()
+
+	status := s.Status()
+	channel, err := s.state.Cabinet.Channel(status.ChannelID)
+	if err != nil || !status.Joined {
+		return nil
+	}
+	mute = mute || deafen
+	if err := s.setDevices(mute, deafen); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	return s.state.SendGateway(ctx, &gateway.UpdateVoiceStateCommand{
+		GuildID:   channel.GuildID,
+		ChannelID: channel.ID,
+		SelfMute:  mute,
+		SelfDeaf:  deafen,
+	})
+}
+
 // captured queues what the microphone captured. It is what the capture device calls.
 func (s *Session) captured(_, input []byte) {
 	s.queue(bytes.Clone(input))
@@ -530,9 +563,13 @@ func (s *Session) mix(output, _ []byte) {
 			volume = 1
 		}
 
-		speaker.mix(output, volume*master)
+		speaker.mix(output, volume*master, s.autoLevel.Load())
 	}
 }
+
+// SetAutoLevel lowers voices that come in saturated, as some microphones
+// make them, until they are not, or stops.
+func (s *Session) SetAutoLevel(on bool) { s.autoLevel.Store(on) }
 
 // receive buffers what each user says in the voice channels that session joins.
 func (s *Session) receive(session *voice.Session) {
@@ -581,6 +618,7 @@ func (s *Session) receive(session *voice.Session) {
 		speaker.user = user
 		s.stateMu.Unlock()
 		heard, failed = time.Now(), 0
+		s.clips.record(user, packet.Opus)
 
 		if err := speaker.write(packet.Sequence(), packet.Opus); err != nil {
 			slog.Debug("failed to decode voice packet", "err", err, "ssrc", packet.SSRC())
@@ -685,6 +723,9 @@ func (s *Session) send(session *voice.Session) {
 				var n int
 				if n, err = encoder.Encode(samples, packet); err == nil {
 					_, err = session.Write(packet[:n])
+					if me != nil {
+						s.clips.record(me.ID, packet[:n])
+					}
 				}
 			case quiet < hangover+5:
 				// A few frames of silence are for what was said not to be interpolated with what is said next.
