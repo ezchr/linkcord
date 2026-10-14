@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"fmt"
 	"image"
 	"time"
 
@@ -124,6 +125,25 @@ func (c *chatView) watchedFrame(id discord.UserID) *paint.ImageOp {
 	return &c.watch.op
 }
 
+// layoutStreamInfo is the size and pictures a second of the watched stream,
+// small in the top left corner.
+func (c *chatView) layoutStreamInfo(gtx layout.Context) {
+	w, h, fps := c.watch.w.Info()
+	if w == 0 {
+		return
+	}
+	text := fmt.Sprintf("%d×%d · %d FPS", w, h, fps)
+	pad := gtx.Dp(8)
+	t := op.Offset(image.Pt(pad, pad)).Push(gtx.Ops)
+	defer t.Pop()
+	igtx := gtx
+	igtx.Constraints.Min = image.Point{}
+	rounded(igtx, withAlpha(rgb(0x000000), 0xb0), 4, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Left: unit.Dp(6), Right: unit.Dp(6), Top: unit.Dp(2), Bottom: unit.Dp(2)}.Layout(gtx,
+			label(c.u.th, 11, colorHeader, text).Layout)
+	})
+}
+
 // layoutWatchedCard fills a card with the watched stream, or offers to
 // watch it: as on Discord, a stream is only received once asked for.
 func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, size image.Point, radius int) bool {
@@ -135,6 +155,7 @@ func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, 
 		b := frame.Size()
 		scale := min(float32(size.X)/float32(b.X), float32(size.Y)/float32(b.Y)) / gtx.Metric.PxPerDp
 		widget.Image{Src: *frame, Fit: widget.Contain, Scale: scale}.Layout(igtx)
+		c.layoutStreamInfo(gtx)
 		return true
 	}
 	if c.watch.buttons == nil {

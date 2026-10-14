@@ -51,6 +51,7 @@ type Watch struct{}
 // StartWatching fails.
 func StartWatching(ctx context.Context, p WatchParams) (*Watch, error) { return nil, errUnsupported }
 
+func (*Watch) Info() (int, int, int)    { return 0, 0, 0 }
 func (*Watch) Frame() *image.RGBA       { return nil }
 func (*Watch) Streamer() discord.UserID { return 0 }
 func (*Watch) Stop()                    {}

@@ -17,6 +17,7 @@ import (
 	"net"
 	"os/exec"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -48,10 +49,6 @@ type WatchParams struct {
 	OnEnd func(err error)
 }
 
-// The size pictures of a watched stream are decoded at, letterboxed: the
-// biggest a card or the full window shows.
-const watchW, watchH = 1280, 720
-
 // Watch is someone's stream being watched.
 type Watch struct {
 	p      WatchParams
@@ -68,13 +65,17 @@ type Watch struct {
 	nonce [24]byte // our counter, for the RTCP we send
 	ourSSRC,
 	videoSSRC uint32
-	frame   *image.RGBA
-	frames  atomic.Int64
-	created bool
-	once    sync.Once
-	decoder *exec.Cmd
-	decIn   io.WriteCloser
-	done    chan struct{}
+	frame  *image.RGBA
+	frames atomic.Int64
+	// The counts of how the stream goes, which are logged.
+	packets, assembled, lost, daveFailed atomic.Int64
+	lastPLI                              atomic.Int64
+	srcW, srcH, fps                      int
+	created                              bool
+	once                                 sync.Once
+	decoder                              *exec.Cmd
+	decIn                                io.WriteCloser
+	done                                 chan struct{}
 }
 
 // streamWatchCommand is Op 20: it asks to watch a stream.
@@ -319,8 +320,8 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 	w.sendWants(wait, video)
 	w.log.Info("watching", "mode", d.Mode, "video_codec", d.VideoCodec, "dave", d.DAVEProtocolVersion)
 
-	if err := w.startDecoder(); err != nil {
-		return nil, err
+	if w.p.FFmpeg == "" {
+		return nil, errors.New("golive: FFmpeg is needed to watch streams")
 	}
 	ok = true
 	go w.follow(early)
@@ -534,16 +535,24 @@ func (w *Watch) receive() {
 		if err != nil || len(payload) == 0 {
 			continue
 		}
+		w.packets.Add(1)
 		seq := binary.BigEndian.Uint16(hdr[2:])
 		ts := binary.BigEndian.Uint32(hdr[4:])
 		marker := hdr[1]&0x80 != 0
-		if haveSeq && seq != lastSeq+1 {
-			lost = true
-		}
+		gap := haveSeq && seq != lastSeq+1
 		lastSeq, haveSeq = seq, true
 		if ts != auTS {
 			// A new picture: the last one was cut short.
+			if len(au) > 0 {
+				w.lost.Add(1)
+				w.requestKeyframe()
+			}
 			au, auTS, lost, fuActive = au[:0], ts, false, false
+		}
+		// After the reset: a gap before a picture's first packet loses that
+		// picture too.
+		if gap {
+			lost = true
 		}
 		switch typ := payload[0] & 0x1F; {
 		case typ >= 1 && typ <= 23:
@@ -578,38 +587,76 @@ func (w *Watch) receive() {
 		}
 		if !lost && len(au) > 0 {
 			w.decode(au)
+		} else if lost {
+			// A picture with a packet missing cannot be shown, nor those
+			// after it, until a keyframe.
+			w.lost.Add(1)
+			w.requestKeyframe()
 		}
 		au, lost, fuActive = au[:0], false, false
 	}
 }
 
 // decode removes the end-to-end encryption of a picture and hands it to the
-// decoder.
+// decoder, started, or started again, at the size its SPS gives.
 func (w *Watch) decode(au []byte) {
+	w.assembled.Add(1)
 	out := make([]byte, w.conn.dave.MaxDecryptedFrameSize(godave.UserID(w.p.StreamerID.String()), len(au)))
 	n, err := w.conn.dave.Decrypt(godave.UserID(w.p.StreamerID.String()), au, out)
 	if err != nil {
+		w.daveFailed.Add(1)
+		w.requestKeyframe()
 		return
+	}
+	pic := out[:n]
+	for _, nal := range splitNALs(pic) {
+		if len(nal) > 1 && nal[0]&0x1F == 7 {
+			if sw, sh, err := spsSize(nal[1:]); err == nil {
+				w.mu.Lock()
+				changed := sw != w.srcW || sh != w.srcH
+				w.srcW, w.srcH = sw, sh
+				w.mu.Unlock()
+				if changed && w.p.FFmpeg != "" {
+					w.log.Info("stream size", "width", sw, "height", sh)
+					if err := w.startDecoder(sw, sh); err != nil {
+						w.log.Warn("could not start the decoder", "err", err)
+					}
+				}
+			}
+		}
 	}
 	w.mu.Lock()
 	in := w.decIn
 	w.mu.Unlock()
-	if in != nil {
-		in.Write(out[:n])
+	if in == nil {
+		// Nothing decodes before a keyframe, which carries the SPS.
+		w.requestKeyframe()
+		return
 	}
+	in.Write(pic)
 }
 
+// maxWatchW and maxWatchH bound the pictures decoded: bigger streams are
+// scaled down to them.
+const maxWatchW, maxWatchH = 1920, 1080
+
 // startDecoder runs FFmpeg, which takes the pictures as H264 and gives them
-// as RGBA, letterboxed to watchW by watchH, as fast as they come.
-func (w *Watch) startDecoder() error {
-	if w.p.FFmpeg == "" {
-		return errors.New("golive: FFmpeg is needed to watch streams")
+// as RGBA as fast as they come, at the stream's size up to the bound. One
+// already running is stopped.
+func (w *Watch) startDecoder(sw, sh int) error {
+	ow, oh := sw, sh
+	if ow > maxWatchW || oh > maxWatchH {
+		k := min(float64(maxWatchW)/float64(ow), float64(maxWatchH)/float64(oh))
+		ow, oh = int(float64(ow)*k)&^1, int(float64(oh)*k)&^1
 	}
-	cmd := exec.Command(w.p.FFmpeg, "-hide_banner", "-loglevel", "error",
+	args := []string{"-hide_banner", "-loglevel", "error",
 		"-fflags", "nobuffer", "-flags", "low_delay", "-probesize", "32", "-analyzeduration", "0",
-		"-f", "h264", "-i", "pipe:0",
-		"-vf", fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2", watchW, watchH, watchW, watchH),
-		"-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1")
+		"-f", "h264", "-i", "pipe:0"}
+	if ow != sw || oh != sh {
+		args = append(args, "-vf", fmt.Sprintf("scale=%d:%d:flags=bicubic", ow, oh))
+	}
+	args = append(args, "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1")
+	cmd := exec.Command(w.p.FFmpeg, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -619,21 +666,40 @@ func (w *Watch) startDecoder() error {
 	if err != nil {
 		return err
 	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("golive: could not start FFmpeg: %w", err)
 	}
 	w.mu.Lock()
+	old, oldIn := w.decoder, w.decIn
 	w.decoder, w.decIn = cmd, in
 	w.mu.Unlock()
+	if oldIn != nil {
+		oldIn.Close()
+	}
+	if old != nil && old.Process != nil {
+		old.Process.Kill()
+		go old.Wait()
+	}
 	go func() {
 		for {
-			img := image.NewRGBA(image.Rect(0, 0, watchW, watchH))
+			img := image.NewRGBA(image.Rect(0, 0, ow, oh))
 			if _, err := io.ReadFull(out, img.Pix); err != nil {
+				if msg := strings.TrimSpace(stderr.String()); msg != "" {
+					w.log.Info("decoder stopped", "ffmpeg", msg)
+				}
 				return
 			}
 			w.mu.Lock()
-			w.frame = img
+			current := w.decoder == cmd
+			if current {
+				w.frame = img
+			}
 			w.mu.Unlock()
+			if !current {
+				return
+			}
 			w.frames.Add(1)
 			if w.p.OnFrame != nil {
 				w.p.OnFrame()
@@ -643,14 +709,36 @@ func (w *Watch) startDecoder() error {
 	return nil
 }
 
-// askKeyframes asks the streamer for a whole picture until one decodes:
-// pictures only decode from one.
+// requestKeyframe asks the streamer for a whole picture, at most twice a
+// second: after a loss, nothing decodes until one comes.
+func (w *Watch) requestKeyframe() {
+	now := time.Now().UnixNano()
+	last := w.lastPLI.Load()
+	if now-last < int64(500*time.Millisecond) || !w.lastPLI.CompareAndSwap(last, now) {
+		return
+	}
+	w.sendPLI()
+}
+
+// askKeyframes asks for a whole picture until one decodes, and logs how
+// the stream goes every 5 seconds, which the FPS shown comes from.
 func (w *Watch) askKeyframes() {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
+	var lastFrames int64
+	tick := 0
 	for {
-		if w.frames.Load() == 0 {
-			w.sendPLI()
+		frames := w.frames.Load()
+		if frames == 0 {
+			w.requestKeyframe()
+		}
+		w.mu.Lock()
+		w.fps = int(frames - lastFrames)
+		w.mu.Unlock()
+		lastFrames = frames
+		if tick++; tick%5 == 0 {
+			w.log.Info("watching", "packets", w.packets.Load(), "pictures", w.assembled.Load(), "lost", w.lost.Load(),
+				"dave_failed", w.daveFailed.Load(), "shown", frames)
 		}
 		select {
 		case <-t.C:
@@ -658,6 +746,14 @@ func (w *Watch) askKeyframes() {
 			return
 		}
 	}
+}
+
+// Info is the stream's size and how many pictures a second show, 0 before
+// they are known.
+func (w *Watch) Info() (width, height, fps int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.srcW, w.srcH, w.fps
 }
 
 // sendPLI sends an RTCP picture loss indication for the streamer's video.
