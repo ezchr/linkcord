@@ -344,6 +344,7 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 		c.deleted = newDeletedLog("")
 	} else {
 		c.deleted = newDeletedLog(deletedLogPath())
+		c.deleted.setOff(u.app.HideDeleted)
 	}
 	// Deleted messages are copied before the state forgets them.
 	st.PreHandler = handler.New()

@@ -40,6 +40,7 @@ const (
 	pageAppearance
 	pageAccessibility
 	pageGeneral
+	pageFeatures
 	pageAdvanced
 	settingsPages
 )
@@ -48,7 +49,7 @@ var settingsPageNames = [settingsPages]string{
 	"My Account", "Profiles", "Content & Social", "Data & Privacy",
 	"Ignore & Block", "Nitro & Subscriptions", "Server Boost",
 	"Voice & Video", "Keybinds", "Sounds", "Appearance", "Accessibility",
-	"Windows Settings", "Advanced",
+	"Windows Settings", "Linkcord Features", "Advanced",
 }
 
 // settingsView is the screen of the user's settings, over the whole window,
@@ -61,6 +62,8 @@ type settingsView struct {
 	page    settingsPage
 	pages   [settingsPages]widget.Clickable
 	list    widget.List
+	// sideList scrolls the pages' list.
+	sideList widget.List
 
 	closeBtn, logout widget.Clickable
 
@@ -497,8 +500,13 @@ func (c *chatView) layoutSettingsSidebar(gtx layout.Context) layout.Dimensions {
 	children = append(children,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return settingsDivider(gtx, 8) }),
 		row(&s.logout, "Log Out", colorRed, false, iconLogout),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(40)}.Layout),
 	)
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	// It scrolls, when the window is too short for all the pages.
+	s.sideList.Axis = layout.Vertical
+	return listLayout(gtx, th, &s.sideList, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	})
 }
 
 // layoutSettingsClose is the round button that closes the settings, with
@@ -562,6 +570,8 @@ func (c *chatView) layoutSettingsPage(gtx layout.Context) layout.Dimensions {
 		rows = c.accessibilityRows()
 	case pageGeneral:
 		rows = c.generalRows()
+	case pageFeatures:
+		rows = c.featureRows()
 	case pageAdvanced:
 		rows = c.advancedRows()
 	}

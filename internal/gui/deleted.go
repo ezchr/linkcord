@@ -29,6 +29,19 @@ type deletedLog struct {
 	msgs map[discord.MessageID]deletedEntry
 	// mine are the messages deleted from here, which just go.
 	mine map[discord.MessageID]bool
+	// off is set when the user chose not to see deleted messages: none
+	// are kept, and those kept do not show.
+	off bool
+}
+
+// setOff turns the keeping of deleted messages off, or back on.
+func (d *deletedLog) setOff(off bool) {
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	d.off = off
+	d.mu.Unlock()
 }
 
 type deletedEntry struct {
@@ -68,7 +81,7 @@ func (d *deletedLog) record(m discord.Message) {
 		return
 	}
 	d.mu.Lock()
-	if _, ok := d.msgs[m.ID]; ok || d.mine[m.ID] {
+	if _, ok := d.msgs[m.ID]; ok || d.mine[m.ID] || d.off {
 		d.mu.Unlock()
 		return
 	}
@@ -145,7 +158,7 @@ func (d *deletedLog) has(id discord.MessageID) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	_, ok := d.msgs[id]
-	return ok
+	return ok && !d.off
 }
 
 // merge puts the deleted messages of a channel from from up to, but not
@@ -161,6 +174,10 @@ func (d *deletedLog) merge(ch discord.ChannelID, msgs []discord.Message, from, t
 	}
 	d.mu.Lock()
 	added := false
+	if d.off {
+		d.mu.Unlock()
+		return msgs
+	}
 	for _, e := range d.msgs {
 		m := e.Message
 		if m.ChannelID == ch && m.ID >= from && (to == 0 || m.ID < to) && !have[m.ID] {

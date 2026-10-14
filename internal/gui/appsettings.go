@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"gioui.org/io/key"
 	"gioui.org/layout"
@@ -41,6 +42,9 @@ type appSettings struct {
 	// channels of HiddenVoiceNames show who is in them without names.
 	PinnedChannels   []discord.ChannelID `json:"pinned_channels,omitempty"`
 	HiddenVoiceNames []discord.ChannelID `json:"hidden_voice_names,omitempty"`
+	// HideDeleted leaves out the messages others delete, which otherwise
+	// stay in their place, marked.
+	HideDeleted bool `json:"hide_deleted,omitempty"`
 }
 
 func appSettingsPath() string {
@@ -139,8 +143,10 @@ func (u *ui) applyZoom(gtx *layout.Context) {
 	gtx.Metric.PxPerSp *= z
 }
 
-// generalView is the state of the General and Accessibility pages.
+// generalView is the state of the General, Accessibility and Linkcord
+// Features pages.
 type generalView struct {
+	deletedBtn               widget.Clickable
 	zoom, chatText, groupGap slider
 	roleColors               widget.Clickable
 	startup, minimized, tray widget.Clickable
@@ -190,6 +196,15 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 	if g.tray.Clicked(gtx) {
 		u.app.QuitOnClose = !u.app.QuitOnClose
 		u.saveAppSettings()
+	}
+	if g.deletedBtn.Clicked(gtx) {
+		u.app.HideDeleted = !u.app.HideDeleted
+		u.saveAppSettings()
+		if u.app.HideDeleted {
+			// Those shown go at once.
+			c.messages = slices.DeleteFunc(c.messages, func(m discord.Message) bool { return c.deleted.has(m.ID) })
+		}
+		c.deleted.setOff(u.app.HideDeleted)
 	}
 }
 
@@ -249,6 +264,21 @@ func (c *chatView) accessibilityRows() []layout.Widget {
 		sliderRow(th, "Space Between Message Groups", "The space above each group of messages by one author.", &g.groupGap, gap/24, fmt.Sprintf("%.0fpx", gap)),
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.roleColors, "Role Colors on Names", "Show names in the color of their highest colored role.", !u.app.NoRoleColors)
+		},
+	}
+}
+
+// featureRows are the Linkcord Features page: what Linkcord does that
+// Discord's app does not.
+func (c *chatView) featureRows() []layout.Widget {
+	th := c.u.th
+	g := &c.settings.general
+	return []layout.Widget{
+		settingsText(th, "What Linkcord does that Discord's own app does not."),
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.deletedBtn, "Show Deleted Messages",
+				"Messages others delete while Linkcord is open stay in their place, marked with a red bin. Only you see them.", !c.u.app.HideDeleted)
 		},
 	}
 }
