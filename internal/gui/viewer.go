@@ -14,6 +14,7 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"golang.org/x/exp/shiny/materialdesign/icons"
@@ -279,7 +280,16 @@ func (c *chatView) layoutVisualViewer(gtx layout.Context, v *imageViewer, frame 
 	call.Add(gtx.Ops)
 	t.Pop()
 
-	hint := label(th, 12, colorMuted, "Mouse wheel: zoom · Drag: pan · Double-click: zoom in · Esc: close")
+	hintText := "Mouse wheel: zoom · Drag: pan · Double-click: zoom in · Esc: close"
+	if img != nil {
+		s := img.Size()
+		hintText = c.mediaSpecs(s.X, s.Y, v.openURL) + "\n" + hintText
+	}
+	hint := layout.Widget(func(gtx layout.Context) layout.Dimensions {
+		l := label(th, 12, colorMuted, hintText)
+		l.Alignment = text.Middle
+		return l.Layout(gtx)
+	})
 	macro = op.Record(gtx.Ops)
 	var hd layout.Dimensions
 	if footer != nil {
@@ -288,7 +298,7 @@ func (c *chatView) layoutVisualViewer(gtx layout.Context, v *imageViewer, frame 
 		bgtx.Constraints.Max.X = max(min(v.imgRect.Dx(), size.X-gtx.Dp(32)), gtx.Dp(320))
 		hd = footer(bgtx)
 	} else {
-		hd = hint.Layout(bgtx)
+		hd = hint(bgtx)
 	}
 	call = macro.Stop()
 	footerY := size.Y - hd.Size.Y - gtx.Dp(16)

@@ -546,6 +546,9 @@ func (c *chatView) layoutVideoViewer(gtx layout.Context) layout.Dimensions {
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					text := v.title
+					if frame != nil {
+						text += fmt.Sprintf(" · %d×%d · %s", v.view.w, v.view.h, mediaKind(v.source))
+					}
 					if status != "" {
 						text += " · " + status
 					}

@@ -93,6 +93,9 @@ type channelRow struct {
 type chatView struct {
 	// watch is the stream of someone else being watched.
 	watch streamWatch
+	// mediaBytes is the file size of the attachments drawn, by URL, which
+	// the fullscreen viewer tells.
+	mediaBytes map[string]uint64
 	// friends is the friends page and the message requests of the direct
 	// messages.
 	friends friendsState
