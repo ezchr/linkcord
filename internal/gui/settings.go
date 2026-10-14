@@ -31,6 +31,9 @@ const (
 	pageProfiles
 	pageSocial
 	pagePrivacy
+	pageBlocked
+	pageNitro
+	pageBoosts
 	pageVoice
 	pageKeybinds
 	pageSounds
@@ -43,6 +46,7 @@ const (
 
 var settingsPageNames = [settingsPages]string{
 	"My Account", "Profiles", "Content & Social", "Data & Privacy",
+	"Ignore & Block", "Nitro & Subscriptions", "Server Boost",
 	"Voice & Video", "Keybinds", "Sounds", "Appearance", "Accessibility",
 	"Windows Settings", "Advanced",
 }
@@ -85,7 +89,9 @@ type settingsView struct {
 	// The account's pages.
 	acct accountView
 	// General and Accessibility.
-	general      generalView
+	general generalView
+	// Ignore & Block, Nitro and Server Boost.
+	billing      billingView
 	keybindsLink widget.Clickable
 
 	// Keybinds: recording is the action whose keys are being recorded.
@@ -131,6 +137,7 @@ func (c *chatView) showSettingsPage(p settingsPage) {
 	c.stopRecording()
 	s.page = p
 	s.list.Position = layout.Position{}
+	c.loadBillingPage(p)
 	if p == pageVoice {
 		c.startMicTest()
 	} else {
@@ -329,6 +336,7 @@ func (c *chatView) updateSettings(gtx layout.Context) {
 	c.updateAppearance(gtx)
 	c.updateAccount(gtx)
 	c.updateGeneral(gtx)
+	c.updateBilling(gtx)
 	if s.agcBtn.Clicked(gtx) {
 		settings.NoAutoGain = !settings.NoAutoGain
 		u.applyVoiceSettings()
@@ -544,6 +552,12 @@ func (c *chatView) layoutSettingsPage(gtx layout.Context) layout.Dimensions {
 		rows = c.soundRows()
 	case pageAppearance:
 		rows = c.appearanceRows()
+	case pageBlocked:
+		rows = c.blockedRows()
+	case pageNitro:
+		rows = c.nitroRows()
+	case pageBoosts:
+		rows = c.boostRows()
 	case pageAccessibility:
 		rows = c.accessibilityRows()
 	case pageGeneral:
