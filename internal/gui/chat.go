@@ -860,6 +860,7 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	c.selChannel = &ch
 	c.lastChannel[c.selGuild] = ch.ID
 	c.saveLastPlace()
+	c.askCall(ch)
 	c.messages, c.loadErr, c.sendErr = nil, "", ""
 	c.loading, c.loadingOlder, c.noOlder = true, false, false
 	c.detached = false

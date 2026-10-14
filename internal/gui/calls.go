@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"context"
 	"image"
 	"log/slog"
 	"math"
@@ -388,4 +389,26 @@ func (c *chatView) callUser(ch discord.Channel, id discord.UserID) discord.User 
 		return *u
 	}
 	return discord.User{ID: id}
+}
+
+// callConnectCommand asks Discord about the call of a direct message or
+// group, as Discord's app does when it opens one: Discord answers with the
+// call, if any, and then tells of it as it changes.
+type callConnectCommand struct {
+	ChannelID discord.ChannelID `json:"channel_id"`
+}
+
+func (*callConnectCommand) Op() ws.OpCode           { return 13 }
+func (*callConnectCommand) EventType() ws.EventType { return "" }
+
+// askCall asks Discord about the call of the direct message or group ch.
+func (c *chatView) askCall(ch discord.Channel) {
+	if c.demo || ch.GuildID.IsValid() {
+		return
+	}
+	go func() {
+		if err := c.st.SendGateway(context.Background(), &callConnectCommand{ChannelID: ch.ID}); err != nil {
+			slog.Warn("could not ask about the call", "channel", ch.ID, "err", err)
+		}
+	}()
 }
