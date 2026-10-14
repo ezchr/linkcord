@@ -2,6 +2,8 @@ package gui
 
 import (
 	"fmt"
+	discordhttp "github.com/ezchr/linkcord/internal/http"
+	"github.com/ezchr/linkcord/internal/version"
 	"image"
 	"time"
 
@@ -500,6 +502,23 @@ func (c *chatView) layoutSettingsSidebar(gtx layout.Context) layout.Dimensions {
 	children = append(children,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return settingsDivider(gtx, 8) }),
 		row(&s.logout, "Log Out", colorRed, false, iconLogout),
+		// The versions, small, as Discord lists its build under Log Out.
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			lines := []string{
+				fmt.Sprintf("Discord %d", discordhttp.CurrentClientBuildNumber()),
+				"Linkcord " + version.Version,
+			}
+			if w := windowsVersion(); w != "" {
+				lines = append(lines, "Windows "+w)
+			}
+			var rows []layout.FlexChild
+			for _, l := range lines {
+				rows = append(rows, layout.Rigid(oneLine(label(th, 12, colorMuted, l)).Layout))
+			}
+			return layout.Inset{Left: unit.Dp(10), Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
+			})
+		}),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(40)}.Layout),
 	)
 	// It scrolls, when the window is too short for all the pages.
