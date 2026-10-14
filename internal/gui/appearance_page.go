@@ -1,7 +1,6 @@
 package gui
 
 import (
-	"fmt"
 	"image"
 
 	"gioui.org/io/pointer"
@@ -17,10 +16,10 @@ import (
 // appearanceView is the state of the Appearance page of the settings.
 type appearanceView struct {
 	presets, colors map[string]*widget.Clickable
-	// editing is the color whose editor is open, with its red, green and
-	// blue and its hexadecimal code.
+	// editing is the color whose editor is open, with its picker and its
+	// hexadecimal code.
 	editing  string
-	rgb      [3]slider
+	picker   colorPicker
 	hex      widget.Editor
 	resetOne widget.Clickable
 	resetAll widget.Clickable
@@ -82,6 +81,7 @@ func (c *chatView) updateAppearance(gtx layout.Context) {
 			c.themeChanged(true)
 			if tc := themeColorOf(av.editing); tc != nil {
 				av.hex.SetText(hexOf(*tc.v))
+				av.picker.set(*tc.v)
 			}
 		}
 	}
@@ -95,6 +95,7 @@ func (c *chatView) updateAppearance(gtx layout.Context) {
 			} else {
 				av.editing = tc.key
 				av.hex.SetText(hexOf(*tc.v))
+				av.picker.set(*tc.v)
 			}
 		}
 	}
@@ -104,6 +105,7 @@ func (c *chatView) updateAppearance(gtx layout.Context) {
 		c.themeChanged(true)
 		if tc := themeColorOf(av.editing); tc != nil {
 			av.hex.SetText(hexOf(*tc.v))
+			av.picker.set(*tc.v)
 		}
 	}
 	tc := themeColorOf(av.editing)
@@ -113,23 +115,11 @@ func (c *chatView) updateAppearance(gtx layout.Context) {
 	if av.resetOne.Clicked(gtx) {
 		c.setThemeColor(tc.key, presetColor(u.appearance.Preset, tc.key), true)
 		av.hex.SetText(hexOf(*tc.v))
+		av.picker.set(*tc.v)
 	}
-	for i := range av.rgb {
-		r := av.rgb[i].update(gtx)
-		if !r.changed && !r.released {
-			continue
-		}
-		v := *tc.v
-		n := uint8(min(max(r.value, 0), 1)*255 + 0.5)
-		switch i {
-		case 0:
-			v.R = n
-		case 1:
-			v.G = n
-		case 2:
-			v.B = n
-		}
-		c.setThemeColor(tc.key, v, r.released)
+	if changed, done := av.picker.update(gtx); changed {
+		v := av.picker.color()
+		c.setThemeColor(tc.key, v, done)
 		av.hex.SetText(hexOf(v))
 	}
 	for {
@@ -141,6 +131,7 @@ func (c *chatView) updateAppearance(gtx layout.Context) {
 		case widget.ChangeEvent, widget.SubmitEvent:
 			if v, ok := parseHex(av.hex.Text()); ok && v != *tc.v {
 				c.setThemeColor(tc.key, v, true)
+				av.picker.set(v)
 			}
 		}
 	}
@@ -299,61 +290,33 @@ func (c *chatView) layoutThemeColor(gtx layout.Context, tc themeColor) layout.Di
 	)
 }
 
-// layoutColorEditor is the red, green and blue of the color being edited,
-// its code to type, and its reset.
+// layoutColorEditor is the picker of the color being edited, its code to
+// type, and its reset.
 func (c *chatView) layoutColorEditor(gtx layout.Context, tc themeColor) layout.Dimensions {
 	th := c.u.th
 	av := &c.settings.look
-	v := *tc.v
-	parts := []struct {
-		name string
-		n    uint8
-		col  colorT
-	}{{"Red", v.R, rgb(0xed4245)}, {"Green", v.G, rgb(0x3ba55c)}, {"Blue", v.B, rgb(0x5865f2)}}
-	children := []layout.FlexChild{}
-	for i, p := range parts {
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				n := p.n
-				if av.rgb[i].dragging {
-					n = uint8(min(max(av.rgb[i].value, 0), 1)*255 + 0.5)
-				}
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(av.picker.layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						gtx.Constraints.Min.X = gtx.Dp(56)
-						return label(th, 14, p.col, p.name).Layout(gtx)
-					}),
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						return av.rgb[i].layout(gtx, 0, float32(n)/255)
+						return label(th, 14, colorMuted, "Code").Layout(gtx)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						gtx.Constraints.Min.X = gtx.Dp(40)
-						return layout.E.Layout(gtx, label(th, 14, colorText, fmt.Sprint(n)).Layout)
+						gtx.Constraints.Max.X = gtx.Dp(140)
+						gtx.Constraints.Min.X = gtx.Constraints.Max.X
+						return textField(gtx, th, &av.hex, "#rrggbb")
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return button(gtx, th, &av.resetOne, colorSecondaryButton, "Reset")
 					}),
 				)
 			})
-		}))
-	}
-	children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					gtx.Constraints.Min.X = gtx.Dp(56)
-					return label(th, 14, colorMuted, "Code").Layout(gtx)
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					gtx.Constraints.Max.X = gtx.Dp(140)
-					gtx.Constraints.Min.X = gtx.Constraints.Max.X
-					return textField(gtx, th, &av.hex, "#rrggbb")
-				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return button(gtx, th, &av.resetOne, colorSecondaryButton, "Reset")
-				}),
-			)
-		})
-	}))
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+		}),
+	)
 }
 
 // swatch is a square of color c, size wide, outlined so that it shows on
