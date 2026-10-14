@@ -148,8 +148,6 @@ type ui struct {
 	// tray is the icon in the notification area, made when the window is
 	// first closed, and trayHinted reports whether its balloon was shown.
 	tray       *tray.Tray
-	// second is the second voice channel the user is in, if any.
-	second *secondCall
 	trayHinted bool
 	// quitting is set to close Linkcord rather than hide it.
 	quitting atomic.Bool

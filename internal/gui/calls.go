@@ -305,7 +305,7 @@ func (c *chatView) layoutCallBanner(gtx layout.Context) layout.Dimensions {
 	}
 	users := slices.Clone(c.dmCalls[ch.ID])
 	// In the call, the user is in it too, and needs no button to join.
-	in := c.u.voiceChannel() == ch.ID || c.u.inSecondCall(ch.ID)
+	in := c.u.voiceChannel() == ch.ID
 	if in && !slices.Contains(users, c.me.ID) {
 		users = append(users, c.me.ID)
 	}
