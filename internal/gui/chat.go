@@ -140,6 +140,9 @@ type chatView struct {
 	clicks map[discord.Snowflake]*widget.Clickable
 
 	guildOrder []discord.GuildID
+	// tagCard is the card of a server tag clicked, tagClicks the tags.
+	tagCard   *tagCard
+	tagClicks map[discord.GuildID]*widget.Clickable
 	// folders are the server column's folders, openFolders those open, and
 	// drag a server or folder being moved.
 	folders      []serverFolder
@@ -1187,6 +1190,9 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 func (c *chatView) layoutOverlays(gtx layout.Context) {
 	if c.profile != nil {
 		c.layoutProfile(gtx)
+	}
+	if c.tagCard != nil {
+		c.layoutTagCard(gtx)
 	}
 	if c.viewer != nil {
 		c.layoutViewer(gtx)

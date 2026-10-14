@@ -87,6 +87,8 @@ type profileView struct {
 	backdrop widget.Clickable
 	// avatarBtn opens the avatar big in the viewer.
 	avatarBtn        widget.Clickable
+	// opened is when the card opened.
+	opened time.Time
 	// bannerBtn shows the banner, bannerURL, big, as the avatar.
 	bannerBtn widget.Clickable
 	bannerURL string
@@ -108,7 +110,7 @@ type profileView struct {
 
 // openProfile shows the card of user, as a member of guildID if valid.
 func (c *chatView) openProfile(user discord.User, guildID discord.GuildID) {
-	p := &profileView{user: user, guildID: guildID, self: user.ID == c.me.ID, loading: true}
+	p := &profileView{user: user, guildID: guildID, self: user.ID == c.me.ID, loading: true, opened: time.Now()}
 	p.scroll.Axis = layout.Vertical
 	c.profile = p
 
@@ -586,8 +588,24 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
-// guildTag is the tag of a server that the user wears next to their name.
+// guildTag is the tag of a server that the user wears next to their name,
+// which opens the server's card when clicked, as on Discord.
 func (c *chatView) guildTag(gtx layout.Context, guildID discord.GuildID, badge, tag string) layout.Dimensions {
+	if c.tagClicks == nil {
+		c.tagClicks = make(map[discord.GuildID]*widget.Clickable)
+	}
+	cl := clickOf(c.tagClicks, guildID)
+	if cl.Clicked(gtx) {
+		c.u.post(func() { c.openTagCard(guildID, badge, tag) })
+	}
+	return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		pointer.CursorPointer.Add(gtx.Ops)
+		return c.guildTagChip(gtx, guildID, badge, tag)
+	})
+}
+
+// guildTagChip is the look of a server tag.
+func (c *chatView) guildTagChip(gtx layout.Context, guildID discord.GuildID, badge, tag string) layout.Dimensions {
 	th := c.u.th
 	return rounded(gtx, colorMenu, 4, func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Left: unit.Dp(4), Right: unit.Dp(6), Top: unit.Dp(2), Bottom: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {

@@ -332,6 +332,15 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 								}
 								return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, botTag(th))
 							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								pg := m.Author.PrimaryGuild
+								if pg == nil || !pg.Enabled || pg.Tag == "" {
+									return layout.Dimensions{}
+								}
+								return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return c.guildTag(gtx, pg.GuildID, pg.Badge, pg.Tag)
+								})
+							}),
 							layout.Rigid(c.linkcordBadge(m.Author.ID, 16)),
 							layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 							layout.Rigid(label(th, 12, colorMuted, formatTime(m.Timestamp.Time())).Layout),
