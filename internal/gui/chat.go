@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"sync"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -143,6 +144,8 @@ type chatView struct {
 	// selGuild is the server shown, or NullGuildID for direct messages.
 	selGuild    discord.GuildID
 	lastChannel map[discord.GuildID]discord.ChannelID
+	// placeMu keeps the writes of lastplace.json in order.
+	placeMu sync.Mutex
 	collapsed   map[discord.ChannelID]bool
 
 	rows       []channelRow
@@ -494,7 +497,12 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 		c.requestMembers(0)
 		c.refreshCurrentChat()
 	} else {
-		c.selectGuild(discord.NullGuildID)
+		// Linkcord opens where it was left: the server, and its channel.
+		start := c.loadLastPlace()
+		if !slices.Contains(c.guildOrder, start) {
+			start = discord.NullGuildID
+		}
+		c.selectGuild(start)
 		// The message requests are known only from the list of direct
 		// messages, which the gateway does not send with them marked.
 		c.loadMessageRequests()
@@ -512,6 +520,7 @@ func (c *chatView) click(id discord.Snowflake) *widget.Clickable {
 
 func (c *chatView) selectGuild(id discord.GuildID) {
 	c.selGuild = id
+	c.saveLastPlace()
 	c.channelList.Position = layout.Position{}
 	if id.IsValid() && !c.demo {
 		go c.st.MemberState.Subscribe(id)
@@ -775,6 +784,7 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	c.lastRefresh, c.refreshLive = time.Time{}, nil
 	c.selChannel = &ch
 	c.lastChannel[c.selGuild] = ch.ID
+	c.saveLastPlace()
 	c.messages, c.loadErr, c.sendErr = nil, "", ""
 	c.loading, c.loadingOlder, c.noOlder = true, false, false
 	c.detached = false
