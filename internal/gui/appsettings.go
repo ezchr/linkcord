@@ -34,6 +34,8 @@ type appSettings struct {
 	// keep running there.
 	StartMinimized bool `json:"start_minimized,omitempty"`
 	QuitOnClose    bool `json:"quit_on_close,omitempty"`
+	// Language is the interface's language: "" English, "es" Spanish.
+	Language string `json:"language,omitempty"`
 	// HideMuted are the servers whose muted channels are hidden.
 	HideMuted []discord.GuildID `json:"hide_muted,omitempty"`
 	// SearchHistory are the last searches, the newest first.
@@ -178,6 +180,7 @@ type generalView struct {
 	ghostBtn, ghostTypingBtn, editOthersBtn  widget.Clickable
 	font                                     fontView
 	startup, minimized, tray                 widget.Clickable
+	langs                                    [2]widget.Clickable
 	startupErr                               string
 }
 
@@ -219,6 +222,12 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 		u.saveAppSettings()
 		if startsWithWindows() && !c.demo {
 			setStartWithWindows(true, u.app.StartMinimized)
+		}
+	}
+	for i, lang := range []string{"", "es"} {
+		if g.langs[i].Clicked(gtx) && u.app.Language != lang {
+			u.app.Language, uiLang = lang, lang
+			u.saveAppSettings()
 		}
 	}
 	if g.tray.Clicked(gtx) {
@@ -451,6 +460,16 @@ func (c *chatView) generalRows() []layout.Widget {
 	th := u.th
 	g := &c.settings.general
 	rows := []layout.Widget{
+		// The language is named in itself, as Discord lists them.
+		bold(label(th, 12, colorMuted, "LANGUAGE · IDIOMA")).Layout,
+		layout.Spacer{Height: unit.Dp(6)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return radioRow(gtx, th, &g.langs[0], "English", u.app.Language == "")
+		},
+		func(gtx layout.Context) layout.Dimensions {
+			return radioRow(gtx, th, &g.langs[1], "Español", u.app.Language == "es")
+		},
+		layout.Spacer{Height: unit.Dp(20)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.startup, "Open Linkcord When Windows Starts", "", startsWithWindows())
 		},

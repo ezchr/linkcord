@@ -254,7 +254,7 @@ func (c *chatView) layoutSearchBox(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Left: unit.Dp(8), Right: unit.Dp(6), Top: unit.Dp(5), Bottom: unit.Dp(5)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						e := material.Editor(th, &s.ed, hint)
+						e := material.Editor(th, &s.ed, tr(hint))
 						e.TextSize, e.Color, e.HintColor = 14, colorText, colorMuted
 						return e.Layout(gtx)
 					}),

@@ -533,7 +533,7 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 											if !c.selChannel.GuildID.IsValid() {
 												hint = "Message @" + c.dmName(*c.selChannel)
 											}
-											e := material.Editor(th, &c.composer, hint)
+											e := material.Editor(th, &c.composer, tr(hint))
 											e.HintColor = colorMuted
 											e.Color = colorText
 											e.TextSize = 15

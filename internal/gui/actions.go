@@ -904,7 +904,7 @@ func emojiOfCell(cl *emojiCell) discord.Emoji {
 
 // materialEditor is an editor styled like the box to write.
 func materialEditor(th *material.Theme, ed *widget.Editor, hint string) material.EditorStyle {
-	e := material.Editor(th, ed, hint)
+	e := material.Editor(th, ed, tr(hint))
 	e.HintColor = colorMuted
 	e.Color = colorText
 	e.TextSize = 15

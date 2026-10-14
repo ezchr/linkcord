@@ -164,6 +164,7 @@ func newUI(w *app.Window) *ui {
 	appearance := loadAppearance()
 	applyAppearance(appearance)
 	settings := loadAppSettings()
+	uiLang = settings.Language
 	u := &ui{win: w, th: newThemeFont(settings.Font), focused: true, appearance: appearance, app: settings}
 	u.images = newImages(u)
 	// How the download of FFmpeg goes shows as the voice's messages do.

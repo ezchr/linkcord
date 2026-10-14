@@ -55,7 +55,7 @@ func rounded(gtx layout.Context, bg color.NRGBA, radius unit.Dp, w layout.Widget
 
 // label returns a text label of the given size and color.
 func label(th *material.Theme, size unit.Sp, c color.NRGBA, txt string) material.LabelStyle {
-	l := material.Label(th, size, txt)
+	l := material.Label(th, size, tr(txt))
 	l.Color = c
 	return l
 }
@@ -161,7 +161,7 @@ func textFieldBody(gtx layout.Context, th *material.Theme, ed *widget.Editor, hi
 	return rounded(gtx, colorServers, 4, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			e := material.Editor(th, ed, hint)
+			e := material.Editor(th, ed, tr(hint))
 			e.HintColor = colorMuted
 			e.Color = colorText
 			e.SelectionColor = withAlpha(colorAccent, 0x80)
