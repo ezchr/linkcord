@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"gioui.org/f32"
 	"gioui.org/io/clipboard"
 	"gioui.org/io/event"
 	"gioui.org/io/pointer"
@@ -49,6 +50,9 @@ type profileData struct {
 		Pronouns    string `json:"pronouns"`
 		AccentColor *int   `json:"accent_color"`
 		Banner      string `json:"banner"`
+		// ThemeColors are the profile's two colors, top and bottom, which
+		// its card fades between.
+		ThemeColors []int `json:"theme_colors"`
 	} `json:"user_profile"`
 	Badges []struct {
 		ID          string `json:"id"`
@@ -59,10 +63,38 @@ type profileData struct {
 		JoinedAt discord.Timestamp `json:"joined_at"`
 	} `json:"guild_member"`
 	GuildMemberProfile *struct {
-		Bio      string `json:"bio"`
-		Pronouns string `json:"pronouns"`
-		Banner   string `json:"banner"`
+		Bio         string `json:"bio"`
+		Pronouns    string `json:"pronouns"`
+		Banner      string `json:"banner"`
+		ThemeColors []int  `json:"theme_colors"`
 	} `json:"guild_member_profile"`
+	// The servers and friends the user and the one shown have in common.
+	MutualGuilds []struct {
+		ID discord.GuildID `json:"id"`
+	} `json:"mutual_guilds"`
+	MutualFriends      []discord.User `json:"mutual_friends"`
+	MutualFriendsCount int            `json:"mutual_friends_count"`
+}
+
+// themeColors are the two colors of the profile, top and bottom, darkened as
+// Discord shows them behind the text, or false if it has none.
+func (d *profileData) themeColors(guildID discord.GuildID) (top, bottom colorT, ok bool) {
+	if d == nil {
+		return
+	}
+	colors := d.UserProfile.ThemeColors
+	if gm := d.GuildMemberProfile; gm != nil && len(gm.ThemeColors) == 2 && guildID.IsValid() {
+		colors = gm.ThemeColors
+	}
+	if len(colors) != 2 {
+		return
+	}
+	dark := func(v int) colorT {
+		c := rgb(uint32(v))
+		mix := func(x uint8) uint8 { return uint8(float32(x) * 0.45) }
+		return colorT{R: mix(c.R), G: mix(c.G), B: mix(c.B), A: 0xff}
+	}
+	return dark(colors[0]), dark(colors[1]), true
 }
 
 // statusChoices are the statuses the user can pick, as Discord offers them.
@@ -86,13 +118,13 @@ type profileView struct {
 
 	backdrop widget.Clickable
 	// avatarBtn opens the avatar big in the viewer.
-	avatarBtn        widget.Clickable
+	avatarBtn widget.Clickable
 	// opened is when the card opened.
 	opened time.Time
 	// bannerBtn shows the banner, bannerURL, big, as the avatar.
-	bannerBtn widget.Clickable
-	bannerURL string
-	bannerW   int
+	bannerBtn        widget.Clickable
+	bannerURL        string
+	bannerW          int
 	closeBtn         widget.Clickable
 	message          widget.Clickable
 	copyID           widget.Clickable
@@ -104,8 +136,12 @@ type profileView struct {
 	statusMenu       bool
 	statusOpts       [4]widget.Clickable
 	copied           bool
-	scroll           widget.List
-	bio              widget.Selectable
+	// The lists of servers and friends in common, shown when clicked.
+	mutualGuildsBtn, mutualFriendsBtn widget.Clickable
+	showGuilds, showFriends           bool
+	mutualClicks                      map[discord.Snowflake]*widget.Clickable
+	scroll                            widget.List
+	bio                               widget.Selectable
 }
 
 // openProfile shows the card of user, as a member of guildID if valid.
@@ -117,6 +153,9 @@ func (c *chatView) openProfile(user discord.User, guildID discord.GuildID) {
 	key := profileKey{user.ID, guildID}
 	if c.demo {
 		p.loading = false
+		if !p.self {
+			p.data = c.demoProfile(user)
+		}
 		return
 	}
 	if data, ok := c.profiles[key]; ok {
@@ -124,10 +163,11 @@ func (c *chatView) openProfile(user discord.User, guildID discord.GuildID) {
 		return
 	}
 	go func() {
+		mutual := strconv.FormatBool(user.ID != c.me.ID)
 		q := url.Values{
-			"with_mutual_guilds":        {"false"},
-			"with_mutual_friends":       {"false"},
-			"with_mutual_friends_count": {"false"},
+			"with_mutual_guilds":        {mutual},
+			"with_mutual_friends":       {mutual},
+			"with_mutual_friends_count": {mutual},
 		}
 		if guildID.IsValid() {
 			q.Set("guild_id", guildID.String())
@@ -143,6 +183,29 @@ func (c *chatView) openProfile(user discord.User, guildID discord.GuildID) {
 			p.data = data
 		})
 	}()
+}
+
+// demoProfile is a profile for the demo, with theme colors and what is in
+// common, to show them.
+func (c *chatView) demoProfile(user discord.User) *profileData {
+	d := &profileData{}
+	d.User.User = user
+	d.UserProfile.Bio = "Just a demo profile."
+	d.UserProfile.ThemeColors = []int{0xc4163d, 0x3b3b3b}
+	if guilds, _ := c.st.Cabinet.Guilds(); len(guilds) > 0 {
+		for _, g := range guilds[:min(len(guilds), 3)] {
+			d.MutualGuilds = append(d.MutualGuilds, struct {
+				ID discord.GuildID `json:"id"`
+			}{g.ID})
+		}
+	}
+	for _, r := range c.relationships() {
+		if r.Type == discord.FriendRelationship && r.UserID != user.ID && len(d.MutualFriends) < 4 {
+			d.MutualFriends = append(d.MutualFriends, r.User)
+		}
+	}
+	d.MutualFriendsCount = len(d.MutualFriends)
+	return d
 }
 
 type profileKey struct {
@@ -197,6 +260,27 @@ func (c *chatView) updateProfile(gtx layout.Context) {
 	if p.message.Clicked(gtx) {
 		c.profile = nil
 		c.openDM(p.user.ID)
+	}
+	if p.mutualGuildsBtn.Clicked(gtx) {
+		p.showGuilds, p.showFriends = !p.showGuilds, false
+	}
+	if p.mutualFriendsBtn.Clicked(gtx) {
+		p.showFriends, p.showGuilds = !p.showFriends, false
+	}
+	if d := p.data; d != nil {
+		for _, g := range d.MutualGuilds {
+			if click := p.mutualClicks[discord.Snowflake(g.ID)]; click != nil && click.Clicked(gtx) {
+				c.profile = nil
+				c.selectGuild(g.ID)
+				return
+			}
+		}
+		for _, f := range d.MutualFriends {
+			if click := p.mutualClicks[discord.Snowflake(f.ID)]; click != nil && click.Clicked(gtx) {
+				c.openProfile(f, discord.NullGuildID)
+				return
+			}
+		}
 	}
 }
 
@@ -310,7 +394,14 @@ func (c *chatView) layoutCard(gtx layout.Context, p *profileView) layout.Dimensi
 	}()
 	call := macro.Stop()
 	r := image.Rectangle{Max: dims.Size}
-	paint.FillShape(gtx.Ops, colorPopup, clip.UniformRRect(r, gtx.Dp(8)).Op(gtx.Ops))
+	if top, bottom, ok := p.data.themeColors(p.guildID); ok {
+		st := clip.UniformRRect(r, gtx.Dp(8)).Push(gtx.Ops)
+		paint.LinearGradientOp{Stop1: f32.Pt(0, 0), Color1: top, Stop2: f32.Pt(0, float32(r.Max.Y)), Color2: bottom}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		st.Pop()
+	} else {
+		paint.FillShape(gtx.Ops, colorPopup, clip.UniformRRect(r, gtx.Dp(8)).Op(gtx.Ops))
+	}
 	solid(gtx, p, dims)
 	call.Add(gtx.Ops)
 	return dims
@@ -334,6 +425,9 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 	if d := p.data; d != nil {
 		if d.UserProfile.AccentColor != nil {
 			bannerColor = rgb(uint32(*d.UserProfile.AccentColor))
+		} else if len(d.UserProfile.ThemeColors) == 2 {
+			// A themed profile's banner is its first color.
+			bannerColor = rgb(uint32(d.UserProfile.ThemeColors[0]))
 		}
 		hash := d.UserProfile.Banner
 		if hash == "" {
@@ -357,6 +451,10 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 		bannerH = width * 10 / 28
 	}
 
+	ringColor := colorPopup
+	if top, _, ok := p.data.themeColors(p.guildID); ok {
+		ringColor = top
+	}
 	avatarSize := unit.Dp(80)
 	avatarPx := gtx.Dp(avatarSize)
 	ringPx := gtx.Dp(6)
@@ -385,9 +483,9 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 			// card's color.
 			x, y := gtx.Dp(16), bannerH-avatarPx/2-ringPx
 			ring := image.Rect(x, y, x+avatarPx+2*ringPx, y+avatarPx+2*ringPx)
-			paint.FillShape(gtx.Ops, colorPopup, clip.Ellipse(ring).Op(gtx.Ops))
+			paint.FillShape(gtx.Ops, ringColor, clip.Ellipse(ring).Op(gtx.Ops))
 			t := op.Offset(image.Pt(x+ringPx, y+ringPx)).Push(gtx.Ops)
-			c.avatarStatus(gtx, user, p.guildID, avatarSize, colorPopup)
+			c.avatarStatus(gtx, user, p.guildID, avatarSize, ringColor)
 			// A click on the avatar shows it big, to look at or save.
 			p.avatarBtn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				defer clip.Ellipse(image.Rect(0, 0, avatarPx, avatarPx)).Push(gtx.Ops).Pop()
@@ -489,6 +587,13 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 		}),
 	)
 
+	// Friends and servers in common, which open their lists.
+	if d := p.data; d != nil && !p.self {
+		if mutual := c.layoutMutuals(p, d); mutual != nil {
+			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout), section(mutual))
+		}
+	}
+
 	// About me.
 	if d := p.data; d != nil {
 		bio := d.UserProfile.Bio
@@ -588,6 +693,105 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
+// layoutMutuals is the line of friends and servers in common, and the list
+// of either when clicked, or nil when there are none.
+func (c *chatView) layoutMutuals(p *profileView, d *profileData) layout.Widget {
+	th := c.u.th
+	friends := max(d.MutualFriendsCount, len(d.MutualFriends))
+	guilds := len(d.MutualGuilds)
+	if friends == 0 && guilds == 0 {
+		return nil
+	}
+	if p.mutualClicks == nil {
+		p.mutualClicks = map[discord.Snowflake]*widget.Clickable{}
+	}
+	link := func(click *widget.Clickable, txt string, lead layout.Widget) layout.FlexChild {
+		return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				pointer.CursorPointer.Add(gtx.Ops)
+				col := colorMuted
+				if click.Hovered() {
+					col = colorHeader
+				}
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx, layout.Rigid(lead), layout.Rigid(label(th, 13, col, txt).Layout))
+			})
+		})
+	}
+	row := func(key discord.Snowflake, pic layout.Widget, name string) layout.FlexChild {
+		click := p.mutualClicks[key]
+		if click == nil {
+			click = new(widget.Clickable)
+			p.mutualClicks[key] = click
+		}
+		return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return rowItem(gtx, click, func(gtx layout.Context, hovered bool) layout.Dimensions {
+				return layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+						layout.Rigid(pic),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+						layout.Flexed(1, oneLine(label(th, 14, colorText, name)).Layout),
+					)
+				})
+			}, false)
+		})
+	}
+	return func(gtx layout.Context) layout.Dimensions {
+		var line []layout.FlexChild
+		if friends > 0 {
+			// The first friends' avatars, overlapping, as in Discord.
+			faces := func(gtx layout.Context) layout.Dimensions {
+				n := min(len(d.MutualFriends), 3)
+				if n == 0 {
+					return layout.Dimensions{}
+				}
+				s, step := gtx.Dp(18), gtx.Dp(12)
+				for i := n - 1; i >= 0; i-- {
+					u := d.MutualFriends[i]
+					t := op.Offset(image.Pt(i*step, 0)).Push(gtx.Ops)
+					c.u.picture(gtx, cdnSize(u.AvatarURLWithType(discord.PNGImage)), 18, colorFor(uint64(u.ID)), u.DisplayOrUsername(), -1)
+					t.Pop()
+				}
+				return layout.Dimensions{Size: image.Pt((n-1)*step+s+gtx.Dp(6), s)}
+			}
+			line = append(line, link(&p.mutualFriendsBtn, fmt.Sprintf("%d Mutual Friend%s", friends, plural(friends)), faces))
+		}
+		if friends > 0 && guilds > 0 {
+			line = append(line, layout.Rigid(label(th, 13, colorMuted, " • ").Layout))
+		}
+		if guilds > 0 {
+			line = append(line, link(&p.mutualGuildsBtn, fmt.Sprintf("%d Mutual Server%s", guilds, plural(guilds)), func(gtx layout.Context) layout.Dimensions {
+				return layout.Dimensions{}
+			}))
+		}
+		rows := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Alignment: layout.Middle}.Layout(gtx, line...)
+		})}
+		if p.showFriends {
+			rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout))
+			for _, u := range d.MutualFriends {
+				u := u
+				rows = append(rows, row(discord.Snowflake(u.ID), func(gtx layout.Context) layout.Dimensions {
+					return c.u.picture(gtx, cdnSize(u.AvatarURLWithType(discord.PNGImage)), 28, colorFor(uint64(u.ID)), u.DisplayOrUsername(), -1)
+				}, u.DisplayOrUsername()))
+			}
+		}
+		if p.showGuilds {
+			rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout))
+			for _, mg := range d.MutualGuilds {
+				g, err := c.st.Cabinet.Guild(mg.ID)
+				if err != nil {
+					continue
+				}
+				name, icon := g.Name, cdnSize(g.IconURLWithType(discord.PNGImage))
+				rows = append(rows, row(discord.Snowflake(mg.ID), func(gtx layout.Context) layout.Dimensions {
+					return c.u.picture(gtx, icon, 28, colorSidebar, name, gtx.Dp(8))
+				}, name))
+			}
+		}
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
+	}
+}
+
 // guildTag is the tag of a server that the user wears next to their name,
 // which opens the server's card when clicked, as on Discord.
 func (c *chatView) guildTag(gtx layout.Context, guildID discord.GuildID, badge, tag string) layout.Dimensions {
@@ -641,7 +845,14 @@ func (c *chatView) layoutActivity(gtx layout.Context, a discord.Activity) layout
 	if a.Assets != nil {
 		img = activityImageURL(a, a.Assets.LargeImage)
 	}
-	return rounded(gtx, colorMenu, 8, func(gtx layout.Context) layout.Dimensions {
+	// On a profile's colors the box lets them through.
+	bg := colorMenu
+	if p := c.profile; p != nil {
+		if _, _, ok := p.data.themeColors(p.guildID); ok {
+			bg = withAlpha(rgb(0x000000), 0x66)
+		}
+	}
+	return rounded(gtx, bg, 8, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
