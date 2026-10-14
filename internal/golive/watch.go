@@ -300,13 +300,16 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 		Protocol: "udp",
 		Codecs: []codecInfo{
 			{Name: "opus", Type: "audio", Priority: 1000, PayloadType: payloadOpus},
-			{Name: "H264", Type: "video", Priority: 2000, PayloadType: payloadH264, RTXPayloadType: payloadH264RTX, Decode: true},
+			{Name: "H264", Type: "video", Priority: 2000, PayloadType: payloadH264, RTXPayloadType: payloadH264RTX, Encode: true, Decode: true},
 		},
 		Data:            voicegateway.SelectProtocolData{Address: ip, Port: port, Mode: modes[mode]},
 		Address:         ip,
 		Port:            port,
 		Mode:            modes[mode],
 		RTCConnectionID: newUUID(),
+		// The same as a stream's own: a server ends the session (4006) on
+		// what it does not take, and experiments left out went as null.
+		Experiments: []string{"fixed_keyframe_interval"},
 	}); err != nil {
 		return nil, err
 	}
