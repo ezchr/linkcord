@@ -287,6 +287,7 @@ func (c *chatView) updateProfile(gtx layout.Context) {
 // setStatus changes the status of the user, keeping their custom status.
 func (c *chatView) setStatus(s discord.Status) {
 	// Shown at once: Discord does not tell the user their own presence.
+	c.myStatus = s
 	c.setMyPresence(s, nil)
 	go func() {
 		if err := c.st.SetStatus(s, nil); err != nil {

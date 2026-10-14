@@ -226,7 +226,7 @@ func (c *chatView) layoutWithActions(gtx layout.Context, m discord.Message, w la
 		paint.FillShape(gtx.Ops, colorAccent, clip.Rect{Max: image.Pt(gtx.Dp(2), dims.Size.Y)}.Op())
 	case c.mentionsMe(m):
 		// So do those that mention the user, in gold, as in Discord.
-		paint.FillShape(gtx.Ops, withAlpha(colorMentioned, 0x10), clip.Rect{Max: dims.Size}.Op())
+		paint.FillShape(gtx.Ops, withAlpha(colorMentioned, 0x0a), clip.Rect{Max: dims.Size}.Op())
 		paint.FillShape(gtx.Ops, colorMentioned, clip.Rect{Max: image.Pt(gtx.Dp(2), dims.Size.Y)}.Op())
 	}
 	if over || a.editing == m.ID {

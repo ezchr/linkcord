@@ -117,6 +117,9 @@ type chatView struct {
 	gset   guildSettings
 	cset   channelSettings
 	chmenu channelMenu
+	// myStatus is the status the user chose here, kept over what the
+	// sessions say.
+	myStatus discord.Status
 	// chDrag is what is dragged in the channel list, whose rows were last
 	// drawn rowHeights tall.
 	chDrag     channelDrag

@@ -68,10 +68,11 @@ func (c *chatView) watchMyPresence() func() {
 		status, activities := mine.Status, mine.Activities
 		c.u.post(func() {
 			// The status is the one the user chose here, which the sessions
-			// may not say yet, or say as another device has it: idle or do
-			// not disturb went back to online.
-			if old, _ := c.st.PresenceStore.Presence(0, c.me.ID); old != nil && old.Status != "" {
-				status = ""
+			// may not say yet, or say as another device has it: ningen's
+			// own handler, which runs first, takes the first session's, and
+			// idle or do not disturb went back to online.
+			if c.myStatus != "" {
+				status = c.myStatus
 			}
 			c.setMyPresence(status, activities)
 		})

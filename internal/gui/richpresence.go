@@ -97,6 +97,10 @@ func (c *chatView) setRPCActivity(conn, clientID string, activity json.RawMessag
 		if p.Status != "" {
 			status = p.Status
 		}
+		// What the user chose here, over what the sessions say.
+		if c.myStatus != "" {
+			status = c.myStatus
+		}
 		// The custom status stays.
 		for _, a := range p.Activities {
 			if a.Type == discord.CustomActivity {

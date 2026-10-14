@@ -280,7 +280,12 @@ func (c *chatView) doubleClicked(gtx layout.Context, tag event.Tag, size image.P
 func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grouped bool, name string, nameColor colorT) layout.Dimensions {
 	th := c.u.th
 	guildID := c.selChannel.GuildID
-	return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16), Top: 2, Bottom: 2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	bottom := unit.Dp(2)
+	if c.mentionsMe(m) {
+		// Its gold reaches a little under the text, as on Discord.
+		bottom = 6
+	}
+	return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16), Top: 2, Bottom: bottom}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Alignment: layout.Start}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				if grouped {

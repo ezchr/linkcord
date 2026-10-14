@@ -3,13 +3,18 @@ package gui
 import (
 	"cmp"
 	"fmt"
+	"image"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"gioui.org/io/event"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"github.com/ayn2op/arikawa/v3/api"
@@ -25,10 +30,15 @@ type gsLists struct {
 	prevPage, next widget.Clickable
 	memberMenu     map[discord.UserID]*widget.Clickable
 
-	// Roles.
+	// Roles: role is the one being edited, and roleDrag the one being
+	// dragged, in the order of roleOrder.
 	roleSearch           widget.Editor
-	createRole           widget.Clickable
+	createRole, everyone widget.Clickable
 	roleEdit, roleDelete map[discord.RoleID]*widget.Clickable
+	role                 roleEditor
+	roleOrder            []discord.Role
+	roleDrag             roleDrag
+	roleDragTags         map[discord.RoleID]*widget.Clickable
 
 	// Invites.
 	invites             fetched[[]gsInvite]
@@ -52,6 +62,14 @@ type gsLists struct {
 	automod    fetched[[]gsRule]
 	ruleToggle map[int]*widget.Clickable
 	ruleDelete map[int]*widget.Clickable
+}
+
+// roleDrag is a role being dragged in the list of roles.
+type roleDrag struct {
+	pressed, dragging bool
+	from, target      int
+	startY            float32
+	rowH              int
 }
 
 type gsInvite struct {
@@ -205,25 +223,35 @@ func (c *chatView) updateGuildLists(gtx layout.Context) {
 	}
 
 	// Roles.
+	c.updateRoleEditor(gtx)
 	if l.createRole.Clicked(gtx) {
-		c.promptRole(nil)
+		c.createRole()
+	}
+	if l.everyone.Clicked(gtx) {
+		c.openRoleEditor(discord.RoleID(gs.guildID), rolePermissions)
 	}
 	for rid, click := range l.roleEdit {
 		if click.Clicked(gtx) {
-			if r, err := c.st.Cabinet.Role(gs.guildID, rid); err == nil {
-				c.promptRole(r)
-			}
+			c.openRoleEditor(rid, roleDisplay)
 		}
 	}
+	// The role's menu.
 	for rid, click := range l.roleDelete {
 		if click.Clicked(gtx) {
 			rid := rid
-			name := "the role"
-			if r, err := c.st.Cabinet.Role(gs.guildID, rid); err == nil {
-				name = r.Name
+			r, err := c.st.Cabinet.Role(gs.guildID, rid)
+			if err != nil {
+				continue
 			}
-			c.prompt("Delete Role", "Delete", true, []string{"Are you sure you want to delete " + name + "? This cannot be undone."}, nil, func([]string) {
-				c.guildRequest("DELETE", api.EndpointGuilds+id+"/roles/"+rid.String(), nil, nil)
+			editable := c.canEditRole(gs.guildID, *r)
+			managed := r.Managed
+			c.openMenu(c.pointerAt, 200, func() []menuItem {
+				items := []menuItem{{text: map[bool]string{true: "Edit Role", false: "View Role"}[editable], act: func() { c.openRoleEditor(rid, roleDisplay) }},
+					{text: "Copy Role ID", act: func() { c.copyText = rid.String() }}}
+				if editable && !managed {
+					items = append(items, menuItem{sep: true}, menuItem{text: "Delete Role", col: colorRed, act: func() { c.askDeleteRole(rid) }})
+				}
+				return items
 			})
 		}
 	}
@@ -342,34 +370,6 @@ func (c *chatView) loadGuildListLater(p gsPage) {
 				c.loadGuildList(p)
 			}
 		})
-	})
-}
-
-// promptRole asks for a role's name and color, to make it or change it.
-func (c *chatView) promptRole(r *discord.Role) {
-	gs := &c.gset
-	name, col, title, submit := "new role", "", "Create Role", "Create"
-	if r != nil {
-		name, title, submit = r.Name, "Edit Role", "Save"
-		if r.Color != 0 {
-			col = fmt.Sprintf("#%06x", uint32(r.Color))
-		}
-	}
-	fields := []*modalField{promptField("Role Name", name, "", 100, false), promptField("Color", col, "#5865f2", 7, false)}
-	c.prompt(title, submit, false, nil, fields, func(values []string) {
-		body := map[string]any{"name": strings.TrimSpace(values[0])}
-		if v := strings.TrimPrefix(strings.TrimSpace(values[1]), "#"); v != "" {
-			if n, err := strconv.ParseUint(v, 16, 32); err == nil {
-				body["color"] = n
-			}
-		} else {
-			body["color"] = 0
-		}
-		endpoint, method := api.EndpointGuilds+gs.guildID.String()+"/roles", "POST"
-		if r != nil {
-			endpoint, method = endpoint+"/"+r.ID.String(), "PATCH"
-		}
-		c.guildRequest(method, endpoint, body, nil)
 	})
 }
 
@@ -587,6 +587,9 @@ func (c *chatView) roleRows() []layout.Widget {
 	th := c.u.th
 	gs := &c.gset
 	l := &gs.lists
+	if l.role.id != 0 {
+		return c.roleEditorRows()
+	}
 	roles, _ := c.st.Cabinet.Roles(gs.guildID)
 	members, _ := c.st.Cabinet.Members(gs.guildID)
 	count := map[discord.RoleID]int{}
@@ -595,18 +598,43 @@ func (c *chatView) roleRows() []layout.Widget {
 			count[id]++
 		}
 	}
-	q := strings.ToLower(strings.TrimSpace(l.roleSearch.Text()))
-	var list []discord.Role
+	var all []discord.Role
 	for _, r := range roles {
-		if r.ID == discord.RoleID(gs.guildID) || q != "" && !strings.Contains(strings.ToLower(r.Name), q) {
-			continue
+		if r.ID != discord.RoleID(gs.guildID) {
+			all = append(all, r)
 		}
-		list = append(list, r)
 	}
-	slices.SortFunc(list, func(a, b discord.Role) int { return cmp.Compare(b.Position, a.Position) })
+	slices.SortFunc(all, func(a, b discord.Role) int {
+		return cmp.Or(cmp.Compare(b.Position, a.Position), cmp.Compare(a.ID, b.ID))
+	})
+	l.roleOrder = all
+	q := strings.ToLower(strings.TrimSpace(l.roleSearch.Text()))
 	rows := []layout.Widget{
 		settingsText(th, "Use roles to group your server members and assign permissions."),
 		layout.Spacer{Height: unit.Dp(12)}.Layout,
+		// @everyone's permissions, as Discord's card.
+		func(gtx layout.Context) layout.Dimensions {
+			return l.everyone.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				pointer.CursorPointer.Add(gtx.Ops)
+				bg := colorSidebar
+				if l.everyone.Hovered() {
+					bg = colorHover
+				}
+				return rounded(gtx, bg, 8, func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = gtx.Constraints.Max.X
+					return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconMembers, 24, colorText) }),
+							layout.Rigid(layout.Spacer{Width: unit.Dp(14)}.Layout),
+							layout.Flexed(1, stacked(bold(label(th, 15, colorHeader, "Default Permissions")).Layout,
+								label(th, 13, colorMuted, "@everyone · applies to all server members").Layout)),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconChevron, 20, colorMuted) }),
+						)
+					})
+				})
+			})
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return textField(gtx, th, &l.roleSearch, "Search Roles") }),
@@ -617,51 +645,189 @@ func (c *chatView) roleRows() []layout.Widget {
 			)
 		},
 		layout.Spacer{Height: unit.Dp(8)}.Layout,
-		settingsText(th, "Members use the color of the highest role they have on this list."),
+		settingsText(th, "Members use the color of the highest role they have on this list. Drag roles to reorder them."),
 		layout.Spacer{Height: unit.Dp(12)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
 			h := func(t string) layout.Widget { return bold(label(th, 12, colorMuted, t)).Layout }
-			return tableRow(gtx, []float32{3, 1, 1}, h(fmt.Sprintf("ROLES — %d", len(list))), h("MEMBERS"), h(""))
+			return tableRow(gtx, []float32{3, 1, 1}, h(fmt.Sprintf("ROLES — %d", len(all))), h("MEMBERS"), h(""))
 		},
 		gap(6),
 	}
-	for _, r := range list {
-		r := r
-		edit, del := clickFor(&l.roleEdit, r.ID), clickFor(&l.roleDelete, r.ID)
-		col := colorOffline
+	for i, r := range all {
+		if q != "" && !strings.Contains(strings.ToLower(r.Name), q) {
+			continue
+		}
+		i, r := i, r
+		editable := c.canEditRole(gs.guildID, r)
+		edit, more := clickFor(&l.roleEdit, r.ID), clickFor(&l.roleDelete, r.ID)
+		col := rgb(0x99aab5)
 		if r.Color != 0 {
 			col = rgb(uint32(r.Color))
 		}
 		rows = append(rows, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			dims := layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return tableRow(gtx, []float32{3, 1, 1},
 					func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return dot(gtx, col, 14) }),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconMenuPrivacy, 22, col) }),
 							layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								if editable {
+									return layout.Dimensions{}
+								}
+								return label(th, 13, colorMuted, "🔒").Layout(gtx)
+							}),
 							layout.Flexed(1, oneLine(bold(label(th, 14, colorHeader, r.Name))).Layout),
 						)
 					},
 					label(th, 14, colorText, fmt.Sprintf("%d 👤", count[r.ID])).Layout,
 					func(gtx layout.Context) layout.Dimensions {
-						if r.Managed {
-							return label(th, 12, colorMuted, "Managed by an app").Layout(gtx)
+						ic := iconMenuEdit
+						if !editable {
+							ic = iconEye
 						}
 						return layout.Flex{}.Layout(gtx,
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return iconButton(gtx, edit, iconMenuEdit, colorMuted, colorHeader)
-							}),
-							layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return iconButton(gtx, del, iconDelete, colorMuted, colorRed)
-							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return squareButton(gtx, edit, ic) }),
+							layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return squareButton(gtx, more, iconMore) }),
 						)
 					},
 				)
 			})
+			c.roleDragRow(gtx, i, r, editable, dims)
+			return dims
 		})
 	}
 	return rows
+}
+
+// squareButton is a round-cornered button with an icon, as the roles'.
+func squareButton(gtx layout.Context, click *widget.Clickable, ic *widget.Icon) layout.Dimensions {
+	return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		pointer.CursorPointer.Add(gtx.Ops)
+		bg := colorSidebar
+		if click.Hovered() {
+			bg = colorHover
+		}
+		size := image.Pt(gtx.Dp(38), gtx.Dp(36))
+		paint.FillShape(gtx.Ops, bg, clip.UniformRRect(image.Rectangle{Max: size}, gtx.Dp(8)).Op(gtx.Ops))
+		gtx.Constraints = layout.Exact(size)
+		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return icon(gtx, ic, 18, colorHeader) })
+	})
+}
+
+// roleDragRow lets the row of role i be dragged to another place, if it
+// may be moved, and shows where it would land.
+func (c *chatView) roleDragRow(gtx layout.Context, i int, r discord.Role, editable bool, dims layout.Dimensions) {
+	l := &c.gset.lists
+	d := &l.roleDrag
+	tag := clickFor(&l.roleDragTags, r.ID)
+	if editable {
+		for {
+			ev, ok := gtx.Event(pointer.Filter{Target: tag, Kinds: pointer.Press | pointer.Drag | pointer.Release | pointer.Cancel})
+			if !ok {
+				break
+			}
+			e, ok := ev.(pointer.Event)
+			if !ok {
+				continue
+			}
+			switch e.Kind {
+			case pointer.Press:
+				if e.Buttons == pointer.ButtonPrimary {
+					*d = roleDrag{pressed: true, from: i, startY: e.Position.Y, rowH: dims.Size.Y, target: i}
+				}
+			case pointer.Drag:
+				if !d.pressed || d.from != i {
+					continue
+				}
+				dy := e.Position.Y - d.startY
+				if !d.dragging && abs32(dy) > float32(gtx.Dp(6)) {
+					d.dragging = true
+				}
+				if d.dragging {
+					d.target = min(max(i+int(roundHalf(dy/float32(max(d.rowH, 1)))), 0), len(l.roleOrder)-1)
+					gtx.Execute(op.InvalidateCmd{})
+				}
+			case pointer.Release:
+				if d.dragging && d.from == i && d.target != i {
+					c.moveRole(i, d.target)
+				}
+				*d = roleDrag{}
+			case pointer.Cancel:
+				*d = roleDrag{}
+			}
+		}
+		area := clip.Rect{Max: dims.Size}.Push(gtx.Ops)
+		pass := pointer.PassOp{}.Push(gtx.Ops)
+		event.Op(gtx.Ops, tag)
+		pass.Pop()
+		area.Pop()
+	}
+	if !d.dragging {
+		return
+	}
+	switch {
+	case i == d.from:
+		paint.FillShape(gtx.Ops, withAlpha(colorHeader, 0x10), clip.Rect{Max: dims.Size}.Op())
+	case i == d.target:
+		y := 0
+		if d.target > d.from {
+			y = dims.Size.Y - gtx.Dp(2)
+		}
+		col := colorGreen
+		if !c.roleMayGo(d.target) {
+			col = colorRed
+		}
+		paint.FillShape(gtx.Ops, col, clip.Rect{Min: image.Pt(0, y), Max: image.Pt(dims.Size.X, y+gtx.Dp(2))}.Op())
+	}
+}
+
+func roundHalf(v float32) float32 {
+	if v < 0 {
+		return v - 0.5
+	}
+	return v + 0.5
+}
+
+// roleMayGo reports whether a role may land at index to of the list: not
+// above the user's highest role, unless they own the server.
+func (c *chatView) roleMayGo(to int) bool {
+	gs := &c.gset
+	l := &gs.lists
+	if c.demo || gs.guild.OwnerID == c.me.ID {
+		return true
+	}
+	if to < 0 || to >= len(l.roleOrder) {
+		return false
+	}
+	return l.roleOrder[to].Position < c.myTopRole(gs.guildID)
+}
+
+// moveRole puts role from of the list at to, and sends Discord the new
+// positions.
+func (c *chatView) moveRole(from, to int) {
+	gs := &c.gset
+	l := &gs.lists
+	if !c.roleMayGo(to) {
+		gs.err = "A role cannot go above your highest role."
+		return
+	}
+	order := slices.Clone(l.roleOrder)
+	r := order[from]
+	order = slices.Delete(order, from, from+1)
+	order = slices.Insert(order, to, r)
+	type pos struct {
+		ID       string `json:"id"`
+		Position int    `json:"position"`
+	}
+	var body []pos
+	for i, role := range order {
+		role.Position = len(order) - i
+		c.st.Cabinet.RoleSet(gs.guildID, &role, true)
+		body = append(body, pos{role.ID.String(), role.Position})
+	}
+	c.guildRequest("PATCH", api.EndpointGuilds+gs.guildID.String()+"/roles", body, nil)
 }
 
 func (c *chatView) inviteRows() []layout.Widget {
