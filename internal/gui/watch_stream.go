@@ -153,6 +153,9 @@ func (c *chatView) layoutStreamInfo(gtx layout.Context) {
 // asked for. The button to watch it is returned to be drawn over the
 // avatar's card, at y, under the avatar.
 func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, size image.Point, radius, y int) (bool, func()) {
+	if c.watch.streamer == vs.UserID && c.watch.w != nil {
+		c.watch.w.SetView(size.X, size.Y)
+	}
 	if frame := c.watchedFrame(vs.UserID); frame != nil {
 		defer clip.UniformRRect(image.Rectangle{Max: size}, radius).Push(gtx.Ops).Pop()
 		paint.FillShape(gtx.Ops, rgb(0x000000), clip.Rect{Max: size}.Op())

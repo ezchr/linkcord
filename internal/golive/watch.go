@@ -80,6 +80,9 @@ type Watch struct {
 	// taken is the picture last handed to the GUI, which is not written
 	// over while it may still be drawn. Guarded by mu.
 	taken *image.RGBA
+	// view is the size the picture is shown at, width<<32|height, set by
+	// SetView; 0 is unknown.
+	view atomic.Uint64
 	videoBytes                                    atomic.Int64
 	reception                                     watchReception // guarded by mu
 	needIDR                                       atomic.Bool
@@ -937,6 +940,7 @@ func (w *Watch) startDecoder(sw, sh int) error {
 		// A few pictures are used in turn instead of a new one each time,
 		// which at 1080p60 is 500 MB a second for the collector.
 		var ring [4]*image.RGBA
+		var raw *image.RGBA
 		for i := 0; ; i = (i + 1) % len(ring) {
 			// Never the picture shown nor the one the GUI holds: with four,
 			// one of the next two is always free.
@@ -945,12 +949,25 @@ func (w *Watch) startDecoder(sw, sh int) error {
 				i = (i + 1) % len(ring)
 			}
 			w.mu.Unlock()
-			if ring[i] == nil {
-				ring[i] = image.NewRGBA(image.Rect(0, 0, ow, oh))
+			// A picture shown much smaller than decoded is averaged down here:
+			// the GUI's scaling only samples a few pixels and looks blurry.
+			vw, vh := w.viewSize(ow, oh)
+			if ring[i] == nil || ring[i].Rect.Dx() != vw || ring[i].Rect.Dy() != vh {
+				ring[i] = image.NewRGBA(image.Rect(0, 0, vw, vh))
 			}
 			img := ring[i]
-			if _, err := io.ReadFull(out, img.Pix); err != nil {
-				return
+			if vw == ow && vh == oh {
+				if _, err := io.ReadFull(out, img.Pix); err != nil {
+					return
+				}
+			} else {
+				if raw == nil {
+					raw = image.NewRGBA(image.Rect(0, 0, ow, oh))
+				}
+				if _, err := io.ReadFull(out, raw.Pix); err != nil {
+					return
+				}
+				shrink(img, raw)
 			}
 			w.mu.Lock()
 			current := w.decoder == cmd
@@ -1125,6 +1142,26 @@ func (w *Watch) sendReport() {
 		sealed := w.aead.Seal(append([]byte(nil), header...), w.nonce[:w.aead.NonceSize()], pkt[8:], header)
 		w.udp.Write(append(sealed, w.nonce[:4]...))
 	}
+}
+
+// SetView tells the size, in pixels, the stream is shown at.
+func (w *Watch) SetView(width, height int) {
+	w.view.Store(uint64(max(width, 0))<<32 | uint64(max(height, 0)))
+}
+
+// viewSize is the size to give pictures of ow×oh: shrunk to fit the view if
+// it is under three quarters of them, otherwise as decoded.
+func (w *Watch) viewSize(ow, oh int) (int, int) {
+	v := w.view.Load()
+	vw, vh := int(v>>32), int(v&0xFFFFFFFF)
+	if vw <= 0 || vh <= 0 {
+		return ow, oh
+	}
+	k := min(float64(vw)/float64(ow), float64(vh)/float64(oh))
+	if k >= 0.75 {
+		return ow, oh
+	}
+	return max(int(float64(ow)*k), 1), max(int(float64(oh)*k), 1)
 }
 
 // Info is the stream's size and how many pictures a second show, 0 before
