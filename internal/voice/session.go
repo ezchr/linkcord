@@ -210,6 +210,11 @@ func (s *Session) SetNoiseSuppression(on bool) {
 	s.proc.denoise.Store(on)
 }
 
+// SetNoiseStrength removes strength of the noise, from 0 to 1, when the noise suppression is on.
+func (s *Session) SetNoiseStrength(strength float32) {
+	s.proc.strength.Store(math.Float32bits(strength))
+}
+
 // SetAutoGain evens out how loud what is said is sent, if on. Whether on or not, it is kept from clipping.
 func (s *Session) SetAutoGain(on bool) {
 	s.proc.autoGain.Store(on)

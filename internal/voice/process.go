@@ -33,8 +33,9 @@ const (
 // gain control if asked, and kept from clipping. It is used from one
 // goroutine at a time.
 type processor struct {
-	// gain is the input volume, as the bits of a float32.
-	gain              atomic.Uint32
+	// gain is the input volume, and strength how much of the noise is
+	// removed, from 0 to 1, as the bits of a float32.
+	gain, strength    atomic.Uint32
 	denoise, autoGain atomic.Bool
 
 	mu sync.Mutex
@@ -44,11 +45,15 @@ type processor struct {
 	// limiter, which change smoothly from block to block.
 	agc, lim float32
 	buf      [channels][rnnoise.FrameSize]float32
+	// prev is the block before, as captured, which the noise suppression
+	// gives back a block late, and is mixed with as late.
+	prev [channels][rnnoise.FrameSize]float32
 }
 
 func newProcessor() *processor {
 	p := &processor{agc: 1, lim: 1}
 	p.gain.Store(math.Float32bits(1))
+	p.strength.Store(math.Float32bits(1))
 	p.denoise.Store(true)
 	p.autoGain.Store(true)
 	return p
@@ -80,11 +85,21 @@ func (p *processor) block(pcm []int16, gain float32, denoise, autoGain bool) {
 		p.buf[i%channels][i/channels] = float32(v) * gain
 	}
 	if denoise {
+		strength := math.Float32frombits(p.strength.Load())
 		for c := range channels {
 			if p.ns[c] == nil {
 				p.ns[c] = rnnoise.New()
 			}
+			captured := p.buf[c]
 			p.ns[c].Process(p.buf[c][:])
+			// Less than all the noise removed leaves some of what was
+			// captured, a block late as what RNNoise gives.
+			if strength < 1 {
+				for i, v := range p.buf[c] {
+					p.buf[c][i] = v*strength + p.prev[c][i]*(1-strength)
+				}
+			}
+			p.prev[c] = captured
 		}
 	}
 

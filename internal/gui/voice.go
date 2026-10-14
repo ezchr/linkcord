@@ -129,8 +129,15 @@ type voiceSettings struct {
 	// Discord.
 	NoNoiseSuppression bool `json:"no_noise_suppression,omitempty"`
 	NoAutoGain         bool `json:"no_auto_gain,omitempty"`
-	// NoSounds turns off Discord's sounds, such as of muting.
-	NoSounds bool `json:"no_sounds,omitempty"`
+	// NoiseStrength is how much of the noise is removed, from 0 to 1; nil
+	// is 1.
+	NoiseStrength *float32 `json:"noise_strength,omitempty"`
+	// NoSounds turns off Discord's sounds, such as of muting; SoundOff turns
+	// off each, by name, and SoundVolume is how loud each plays, from 0 to 1,
+	// defaultSoundVolume if not set.
+	NoSounds    bool               `json:"no_sounds,omitempty"`
+	SoundOff    map[string]bool    `json:"sound_off,omitempty"`
+	SoundVolume map[string]float32 `json:"sound_volume,omitempty"`
 	// Keybinds are the keys of each action of keybindActions, which act in
 	// any window.
 	Keybinds map[string]hotkey.Combo `json:"keybinds,omitempty"`
@@ -153,6 +160,26 @@ func (s *voiceSettings) outputVolume() float32 {
 }
 
 // sensitivity is how loud, in dB, the microphone must be to be sent.
+// noiseStrength is how much of the noise is removed, from 0 to 1.
+func (s *voiceSettings) noiseStrength() float32 {
+	if s.NoiseStrength == nil {
+		return 1
+	}
+	return *s.NoiseStrength
+}
+
+// defaultSoundVolume is how loud Discord's sounds play unless chosen: a
+// little softer than their files, which sound harsh at full volume.
+const defaultSoundVolume = 0.7
+
+// soundVolume is how loud the sound named plays, from 0 to 1.
+func (s *voiceSettings) soundVolume(name string) float32 {
+	if v, ok := s.SoundVolume[name]; ok {
+		return v
+	}
+	return defaultSoundVolume
+}
+
 func (s *voiceSettings) sensitivity() float64 {
 	if s.Sensitivity == nil {
 		return voiceSensitivity
@@ -170,12 +197,14 @@ func (u *ui) applyVoiceSettings() {
 		vs.SetSensitivity(s.sensitivity())
 		vs.SetPushToTalk(s.PushToTalk)
 		vs.SetNoiseSuppression(!s.NoNoiseSuppression)
+		vs.SetNoiseStrength(s.noiseStrength())
 		vs.SetAutoGain(!s.NoAutoGain)
 	}
 	if c := u.chat; c != nil && c.settings.test != nil {
 		c.settings.test.SetInputVolume(s.inputVolume())
 		c.settings.test.SetOutputVolume(s.outputVolume())
 		c.settings.test.SetNoiseSuppression(!s.NoNoiseSuppression)
+		c.settings.test.SetNoiseStrength(s.noiseStrength())
 		c.settings.test.SetAutoGain(!s.NoAutoGain)
 	}
 }

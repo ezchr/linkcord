@@ -35,11 +35,38 @@ func (u *ui) soundLibrary() *dcsound.Library {
 // and reports whether it does.
 func (u *ui) playSound(name string) bool {
 	settings := u.voiceSettings()
-	if settings.NoSounds {
+	if settings.NoSounds || settings.SoundOff[name] {
 		return false
 	}
+	u.hearSound(name)
+	return true
+}
+
+// soundChoices are the sounds the settings list, in their order, by the
+// names Discord gives them.
+var soundChoices = []struct{ name, label string }{
+	{dcsound.Message, "Message"},
+	{dcsound.Mute, "Mute"},
+	{dcsound.Unmute, "Unmute"},
+	{dcsound.Deafen, "Deafen"},
+	{dcsound.Undeafen, "Undeafen"},
+	{dcsound.UserJoin, "User Join"},
+	{dcsound.UserLeave, "User Leave"},
+	{dcsound.Disconnect, "Disconnect"},
+	{dcsound.PTTStart, "Push to Talk Activate"},
+	{dcsound.PTTStop, "Push to Talk Deactivate"},
+	{dcsound.StreamStarted, "Stream Started"},
+	{dcsound.StreamEnded, "Stream Ended"},
+	{dcsound.StreamUserJoined, "Viewer Join"},
+	{dcsound.StreamUserLeft, "Viewer Leave"},
+}
+
+// hearSound plays the sound named as loud as chosen, even if turned off, as
+// the settings let it be heard.
+func (u *ui) hearSound(name string) {
+	settings := u.voiceSettings()
 	sounds := u.soundLibrary()
-	effects, output, volume := u.voice.effects, settings.Output, settings.outputVolume()
+	effects, output, volume := u.voice.effects, settings.Output, settings.soundVolume(name)*settings.outputVolume()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -50,7 +77,6 @@ func (u *ui) playSound(name string) bool {
 		}
 		effects.Play(pcm, output, volume)
 	}()
-	return true
 }
 
 // trackCallers notes who is in the voice channel the user joined, for

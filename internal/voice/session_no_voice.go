@@ -31,6 +31,7 @@ func (*Session) SetPushToTalk(bool)                {}
 func (*Session) SetTalking(bool)                   {}
 func (*Session) SetNoiseSuppression(bool)          {}
 func (*Session) SetAutoGain(bool)                  {}
+func (*Session) SetNoiseStrength(float32)          {}
 
 // Effects plays nothing.
 type Effects struct{}
@@ -54,6 +55,7 @@ func (*MicTest) Echoing() bool            { return false }
 func (*MicTest) Stop()                    {}
 func (*MicTest) SetNoiseSuppression(bool) {}
 func (*MicTest) SetAutoGain(bool)         {}
+func (*MicTest) SetNoiseStrength(float32) {}
 
 // Devices finds no device.
 func Devices() (inputs, outputs []Device, err error) { return nil, nil, errNoVoice }

@@ -65,3 +65,20 @@ func TestProcessorDenoise(t *testing.T) {
 	p.process(pcm)
 	t.Logf("tone of 8000 peaks at %d after the noise suppression", peakOf(pcm))
 }
+
+// TestProcessorStrength has a noise suppression of no strength leave what is
+// captured as it is, a block late as RNNoise gives it.
+func TestProcessorStrength(t *testing.T) {
+	p := newProcessor()
+	defer p.close()
+	p.autoGain.Store(false)
+	p.strength.Store(math.Float32bits(0))
+	in := tone(8000)
+	out := append([]int16(nil), in...)
+	p.process(out)
+	for i := blockSamples; i < len(in); i++ {
+		if d := int(out[i]) - int(in[i-blockSamples]); d > 1 || d < -1 {
+			t.Fatalf("sample %d is %d, not %d as captured a block before", i, out[i], in[i-blockSamples])
+		}
+	}
+}

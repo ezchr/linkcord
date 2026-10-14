@@ -59,6 +59,11 @@ func (t *MicTest) SetNoiseSuppression(on bool) {
 	t.proc.denoise.Store(on)
 }
 
+// SetNoiseStrength removes strength of the noise, from 0 to 1, as it would be sent.
+func (t *MicTest) SetNoiseStrength(strength float32) {
+	t.proc.strength.Store(math.Float32bits(strength))
+}
+
 // SetAutoGain evens out how loud what is captured is, as it would be sent, if on.
 func (t *MicTest) SetAutoGain(on bool) {
 	t.proc.autoGain.Store(on)

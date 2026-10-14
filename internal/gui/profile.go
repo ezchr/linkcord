@@ -324,10 +324,17 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 		if hash == "" {
 			hash = string(d.User.Banner)
 		}
+		// An animated banner, whose hash starts with a_, is a GIF, which moves.
+		ext := func(hash string) string {
+			if strings.HasPrefix(hash, "a_") {
+				return ".gif?size=600"
+			}
+			return ".png?size=600"
+		}
 		if gm := d.GuildMemberProfile; gm != nil && gm.Banner != "" && p.guildID.IsValid() {
-			bannerURL = "https://cdn.discordapp.com/guilds/" + p.guildID.String() + "/users/" + user.ID.String() + "/banners/" + gm.Banner + ".png?size=600"
+			bannerURL = "https://cdn.discordapp.com/guilds/" + p.guildID.String() + "/users/" + user.ID.String() + "/banners/" + gm.Banner + ext(gm.Banner)
 		} else if hash != "" {
-			bannerURL = "https://cdn.discordapp.com/banners/" + user.ID.String() + "/" + hash + ".png?size=600"
+			bannerURL = "https://cdn.discordapp.com/banners/" + user.ID.String() + "/" + hash + ext(hash)
 		}
 	}
 	bannerH := gtx.Dp(64)
@@ -344,7 +351,7 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			size := image.Pt(width, headerH)
 			paint.FillShape(gtx.Ops, bannerColor, clip.Rect{Max: image.Pt(width, bannerH)}.Op())
-			if img := c.u.images.get(bannerURL, width); img != nil {
+			if img := c.u.images.frame(gtx, bannerURL, width); img != nil {
 				bgtx := gtx
 				bgtx.Constraints = layout.Exact(image.Pt(width, bannerH))
 				st := clip.Rect{Max: image.Pt(width, bannerH)}.Push(gtx.Ops)

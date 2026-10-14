@@ -29,11 +29,12 @@ type settingsPage int
 const (
 	pageVoice settingsPage = iota
 	pageKeybinds
+	pageSounds
 	pageAdvanced
 	settingsPages
 )
 
-var settingsPageNames = [settingsPages]string{"Voice & Video", "Keybinds", "Advanced"}
+var settingsPageNames = [settingsPages]string{"Voice & Video", "Keybinds", "Sounds", "Advanced"}
 
 // settingsView is the screen of the user's settings, over the whole window,
 // as Discord's, opened by the gear beside the voice buttons.
@@ -61,7 +62,13 @@ type settingsView struct {
 	vadBtn, pttBtn widget.Clickable
 	nsBtn, agcBtn  widget.Clickable
 	soundsBtn      widget.Clickable
-	keybindsLink   widget.Clickable
+	// nsStrength is how much of the noise is removed.
+	nsStrength slider
+
+	// Sounds: each one's switch, volume, and button to hear it.
+	soundSwitch, soundHear map[string]*widget.Clickable
+	soundVolume            map[string]*slider
+	keybindsLink           widget.Clickable
 
 	// Keybinds: recording is the action whose keys are being recorded.
 	record, clear map[string]*widget.Clickable
@@ -286,11 +293,20 @@ func (c *chatView) updateSettings(gtx layout.Context) {
 		u.applyVoiceSettings()
 		u.saveVoiceSettings()
 	}
+	if r := s.nsStrength.update(gtx); r.changed || r.released {
+		v := min(max(r.value, 0), 1)
+		settings.NoiseStrength = &v
+		u.applyVoiceSettings()
+		if r.released {
+			u.saveVoiceSettings()
+		}
+	}
 	if s.soundsBtn.Clicked(gtx) {
 		settings.NoSounds = !settings.NoSounds
 		u.saveVoiceSettings()
 		u.playSound(dcsound.Unmute)
 	}
+	c.updateSoundSettings(gtx)
 	if s.agcBtn.Clicked(gtx) {
 		settings.NoAutoGain = !settings.NoAutoGain
 		u.applyVoiceSettings()
@@ -482,6 +498,8 @@ func (c *chatView) layoutSettingsPage(gtx layout.Context) layout.Dimensions {
 		rows = c.voiceSettingsRows()
 	case pageKeybinds:
 		rows = c.keybindRows()
+	case pageSounds:
+		rows = c.soundRows()
 	case pageAdvanced:
 		rows = c.advancedRows()
 	}
@@ -607,14 +625,32 @@ func (c *chatView) voiceSettingsRows() []layout.Widget {
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &s.nsBtn, "Noise Suppression", "Removes the noise around what you say, such as fans, keyboards and traffic.", !settings.NoNoiseSuppression)
 		},
+		func(gtx layout.Context) layout.Dimensions {
+			// How much is removed, while on.
+			if settings.NoNoiseSuppression {
+				return layout.Dimensions{}
+			}
+			strength := settings.noiseStrength()
+			if s.nsStrength.dragging {
+				strength = s.nsStrength.value
+			}
+			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						gtx.Constraints.Min.X = gtx.Dp(110)
+						return label(th, 14, colorText, "Strength").Layout(gtx)
+					}),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return s.nsStrength.layout(gtx, 0, strength) }),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						gtx.Constraints.Min.X = gtx.Dp(52)
+						return layout.E.Layout(gtx, label(th, 14, colorText, fmt.Sprintf("%.0f%%", strength*100)).Layout)
+					}),
+				)
+			})
+		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &s.agcBtn, "Automatic Gain Control", "Evens out how loud you are, raising a quiet microphone and lowering a loud one.", !settings.NoAutoGain)
-		},
-		func(gtx layout.Context) layout.Dimensions { return settingsDivider(gtx, 24) },
-		settingsHeading(th, "SOUNDS"),
-		func(gtx layout.Context) layout.Dimensions {
-			return switchRow(gtx, th, &s.soundsBtn, "Play Discord's Sounds", "Of muting and deafening, of people joining and leaving your voice channel and your stream, and of new messages.", !settings.NoSounds)
 		},
 		func(gtx layout.Context) layout.Dimensions { return settingsDivider(gtx, 24) },
 		settingsHeading(th, "INPUT MODE"),
@@ -890,4 +926,105 @@ func switchToggle(gtx layout.Context, on bool) layout.Dimensions {
 	}
 	paint.FillShape(gtx.Ops, colorHeader, clip.Ellipse(image.Rect(x, pad, x+knob, pad+knob)).Op(gtx.Ops))
 	return layout.Dimensions{Size: image.Pt(w, h)}
+}
+
+// updateSoundSettings handles each sound's switch, volume and button.
+func (c *chatView) updateSoundSettings(gtx layout.Context) {
+	u, s := c.u, &c.settings
+	settings := u.voiceSettings()
+	if s.soundSwitch == nil {
+		s.soundSwitch = make(map[string]*widget.Clickable)
+		s.soundHear = make(map[string]*widget.Clickable)
+		s.soundVolume = make(map[string]*slider)
+	}
+	for _, sc := range soundChoices {
+		if clickOf(s.soundHear, sc.name).Clicked(gtx) {
+			u.hearSound(sc.name)
+		}
+		if clickOf(s.soundSwitch, sc.name).Clicked(gtx) {
+			if settings.SoundOff == nil {
+				settings.SoundOff = make(map[string]bool)
+			}
+			if settings.SoundOff[sc.name] {
+				delete(settings.SoundOff, sc.name)
+			} else {
+				settings.SoundOff[sc.name] = true
+			}
+			u.saveVoiceSettings()
+		}
+		sl := s.soundVolume[sc.name]
+		if sl == nil {
+			sl = new(slider)
+			s.soundVolume[sc.name] = sl
+		}
+		if r := sl.update(gtx); r.changed || r.released {
+			if settings.SoundVolume == nil {
+				settings.SoundVolume = make(map[string]float32)
+			}
+			settings.SoundVolume[sc.name] = min(max(r.value, 0), 1)
+			// Let go, it plays at its new volume.
+			if r.released {
+				u.saveVoiceSettings()
+				u.hearSound(sc.name)
+			}
+		}
+	}
+}
+
+// soundRows are the page of Discord's sounds: all of them on or off, and
+// each on or off, with its volume and a button to hear it.
+func (c *chatView) soundRows() []layout.Widget {
+	u := c.u
+	th := u.th
+	s := &c.settings
+	settings := u.voiceSettings()
+	rows := []layout.Widget{
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &s.soundsBtn, "Play Discord's Sounds", "Of muting and deafening, of people joining and leaving your voice channel and your stream, and of new messages.", !settings.NoSounds)
+		},
+		func(gtx layout.Context) layout.Dimensions { return settingsDivider(gtx, 24) },
+		settingsText(th, "Turn each sound on or off, and choose how loud it plays. The play button lets you hear it."),
+		layout.Spacer{Height: unit.Dp(8)}.Layout,
+	}
+	if s.soundSwitch == nil {
+		return rows
+	}
+	for _, sc := range soundChoices {
+		rows = append(rows, func(gtx layout.Context) layout.Dimensions {
+			on := !settings.NoSounds && !settings.SoundOff[sc.name]
+			vol := settings.soundVolume(sc.name)
+			sl := s.soundVolume[sc.name]
+			if sl.dragging {
+				vol = sl.value
+			}
+			col := colorText
+			if !on {
+				col = colorMuted
+			}
+			return layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return iconButton(gtx, clickOf(s.soundHear, sc.name), iconPlay, colorMuted, colorHeader)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+					layout.Flexed(1, oneLine(label(th, 15, col, sc.label)).Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return sl.layout(gtx, 180, vol)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						gtx.Constraints.Min.X = gtx.Dp(52)
+						return layout.E.Layout(gtx, label(th, 14, col, fmt.Sprintf("%.0f%%", vol*100)).Layout)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return clickOf(s.soundSwitch, sc.name).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							pointer.CursorPointer.Add(gtx.Ops)
+							return switchToggle(gtx, on)
+						})
+					}),
+				)
+			})
+		})
+	}
+	return rows
 }
