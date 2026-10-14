@@ -6,40 +6,23 @@ Linkcord was created for people on Windows 7 who can no longer run the official 
 
 > **Unofficial client:** using an unofficial client carries a risk of account suspension under Discord's terms of service.
 
-## Features
+## Missing features
 
-| Available | Remaining work |
+Linkcord does most of what Discord's app does. What it still lacks:
+
+| Missing | Notes |
 |---|---|
-| QR-code, email/password with 2FA, and token sign-in | Captcha rendering |
-| Windows Credential Manager session storage and refreshed-token persistence | |
-| Servers in the user's order, server folders (drag to move, drop one server on another to make a folder), direct messages, collapsible categories, and channel permissions | |
-| Unread markers, mention counts on servers and folders, unread direct messages in the server column, and jumping to the next unread (Alt+Shift+Up/Down) | Notification previews |
-| Linkcord opens on the server and channel it was left on; each server opens on the channel last read in it | |
-| Discord formatting, mentions, quotes, code, spoilers, links that wrap like Discord's, and BOT badges | Threads and forums |
-| Emoji drawn with Twemoji, Discord's own set; server emoji as images, large emoji-only messages, and animated GIFs | |
-| PNG, APNG and GIF stickers, sent from the picker too | Lottie sticker rendering |
-| Picker with GIFs (Discord's own GIF search), stickers and emoji, a rail of servers and categories, and Discord's GIF, sticker and emoji buttons | |
-| Images, GIFs and videos in one viewer with zoom and pan, their resolution, size and type, a download button and a copy button; pictures and videos can be dragged out to other windows | |
-| Videos play inside Linkcord with seeking, volume and full screen; voice messages play with their waveform and can be recorded and sent | |
-| Pasted and attached pictures show a preview that opens an editor: crop, draw, rotate, flip, undo | |
-| Profiles with banners, server profiles, moving avatars, avatar decorations, profile effects, clickable badges, server tags that open the server's card, activities with their buttons, and roles in the server's order | |
-| Member lists with avatar decorations and nameplates that move under the pointer, server tags, boost gems, and who is in voice | |
-| Friends (online, all, pending, blocked), sending, accepting and cancelling friend requests, and message requests | |
-| Attachments, mention autocomplete with picked mentions shown in their box, and typing indicators | |
-| Voice channels with mute and deafen (gray when the person did it, red when the server did), speaking rings, a call view with a card for everyone, soundboard, invite links, and a history of who joined and left | Camera and activities |
-| Calls in direct messages and groups: call and video call buttons, an incoming call card with Discord's ring, and the call going on shown above the messages with buttons to join | |
-| Screen sharing (Go Live) of a screen or window, with its sound, end-to-end encrypted; watching other people's streams, with their sound, and clipping them | |
-| Settings: devices and volumes, microphone test, noise suppression, gain control, voice activity or push to talk, keybinds that work in any window, Discord's sounds each on or off, appearance with presets and every color, fonts, account and privacy pages, and Performance Mode | |
-| English and Spanish interface, chosen in Windows Settings; a first start follows the language of Windows | Other languages |
-| Polls: voting, results as they come, taking a vote back, ending one's own | Creating polls |
-| Rich Presence: games and programs show what the user does through Discord's local RPC | RPC commands beyond activities |
-| Linkcord's logo beside who else uses Linkcord, and crash and freeze reports, through Linkcord's server | |
-| Right-click menus on members, channels, servers and messages, with moderation as permissions allow | |
-| React, reply, edit, copy, delete, forward, and a log of messages others delete while Linkcord is open | |
-| Bot buttons, select menus and forms; components V2 layouts; embeds with formatting, fields, authors and footers | Multi-value select menus |
-| Server boost goal, boost levels and perks, scheduled events, and online and member counts under the server name | |
-| Closing the window keeps Linkcord running, voice included, with an icon in the notification area, which is there while the window is open too | |
-| Under Log Out: Discord's build, Linkcord's version and Windows' | Testing on a physical Windows 7 machine |
+| Captcha | Discord's captcha cannot be shown; QR-code or token sign-in work instead. |
+| Camera | Video in voice channels and calls; the video call button joins without it. |
+| Activities | Games and apps played together in voice channels. |
+| Notification previews | Unread markers and mention counts are there; desktop pop-ups with the message are not. |
+| Threads and forums | |
+| Lottie stickers | PNG, APNG and GIF stickers work. |
+| Creating polls | Voting in polls works. |
+| Multi-value select menus | Bot menus with one choice work. |
+| RPC commands beyond activities | Rich Presence from games works. |
+| Other languages | English and Spanish only; some text built from several parts is still English in Spanish. |
+| Testing on a physical Windows 7 machine | Built and run for Windows 7, but only tested on newer Windows. |
 
 Discord keeps one voice connection for an account, across all its devices, so Linkcord, as Discord's app, is in one voice channel or call at a time: joining a call while in a server's channel moves you to it.
 
