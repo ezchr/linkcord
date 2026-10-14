@@ -23,8 +23,10 @@ import (
 // createChannel is the form that makes a channel or a category, opened from
 // the server's menu, as Discord's.
 type createChannel struct {
-	open     bool
-	guildID  discord.GuildID
+	open    bool
+	guildID discord.GuildID
+	// parent is the category it goes in, if any.
+	parent   discord.ChannelID
 	category bool
 	kind     discord.ChannelType
 	name     widget.Editor
@@ -69,6 +71,9 @@ func (c *chatView) submitCreateChannel() {
 		name = strings.ToLower(strings.Join(strings.Fields(name), "-"))
 	}
 	body := map[string]any{"name": name, "type": cc.kind}
+	if cc.parent.IsValid() {
+		body["parent_id"] = cc.parent.String()
+	}
 	if cc.private {
 		// Only the user sees it, until others are let in.
 		view := strconv.FormatUint(uint64(discord.PermissionViewChannel), 10)
@@ -79,7 +84,7 @@ func (c *chatView) submitCreateChannel() {
 	}
 	guildID := cc.guildID
 	if c.demo {
-		ch := discord.Channel{ID: discord.ChannelID(discord.NewSnowflake(time.Now())), GuildID: guildID, Name: name, Type: cc.kind, Position: 999}
+		ch := discord.Channel{ID: discord.ChannelID(discord.NewSnowflake(time.Now())), GuildID: guildID, Name: name, Type: cc.kind, Position: 999, ParentID: cc.parent}
 		c.st.Cabinet.ChannelSet(&ch, false)
 		cc.open = false
 		c.rebuildRows()

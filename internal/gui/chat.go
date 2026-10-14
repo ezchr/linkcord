@@ -112,8 +112,11 @@ type chatView struct {
 	newChannel createChannel
 	// search finds messages of the server or conversation open.
 	search searchView
-	// gset is the settings of a server, open over everything.
-	gset guildSettings
+	// gset is the settings of a server, open over everything, and cset a
+	// channel's; chmenu is a channel's menu.
+	gset   guildSettings
+	cset   channelSettings
+	chmenu channelMenu
 
 	// detached is set while older messages show in place of the newest,
 	// after a jump; flashID is lit until flashUntil.
@@ -638,7 +641,7 @@ func (c *chatView) rebuildRows() {
 		return
 	}
 	hideMuted := c.u.app.hidesMuted(c.selGuild)
-	var top, categories []discord.Channel
+	var top, categories, pinned []discord.Channel
 	children := make(map[discord.ChannelID][]discord.Channel)
 	for _, ch := range channels {
 		switch {
@@ -649,6 +652,8 @@ func (c *chatView) rebuildRows() {
 		case ch.Type == discord.GuildPublicThread || ch.Type == discord.GuildPrivateThread || ch.Type == discord.GuildAnnouncementThread:
 		case !c.can(ch.ID, discord.PermissionViewChannel):
 		case hideMuted && c.st.ChannelIsMuted(ch.ID, ningen.UnreadOpts{}):
+		case slices.Contains(c.u.app.PinnedChannels, ch.ID):
+			pinned = append(pinned, ch)
 		case ch.ParentID.IsValid():
 			children[ch.ParentID] = append(children[ch.ParentID], ch)
 		default:
@@ -705,6 +710,11 @@ func (c *chatView) rebuildRows() {
 		c.rows = append(c.rows, channelRow{kind: rowText, ch: ch, label: ch.Name})
 	}
 
+	// Pinned channels first, out of their categories.
+	sortChannels(pinned)
+	for _, ch := range pinned {
+		add(ch)
+	}
 	sortChannels(top)
 	for _, ch := range top {
 		add(ch)
@@ -1091,9 +1101,15 @@ func (c *chatView) update(gtx layout.Context) {
 	}
 	for id, cl := range c.voiceGearBtns {
 		if cl.Clicked(gtx) {
-			c.openVoiceChannelMenu(id)
+			// Its settings, for who may change it, as in Discord.
+			if ch, err := c.st.Cabinet.Channel(id); err == nil && c.canEditChannel(*ch) {
+				c.openChannelSettings(id)
+			} else {
+				c.openVoiceChannelMenu(id)
+			}
 		}
 	}
+	c.updateChannelButtons(gtx)
 	for id, cl := range c.voiceClicks {
 		if cl.Clicked(gtx) {
 			for _, r := range c.rows {
@@ -1145,6 +1161,13 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 	if c.copyText != "" {
 		gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(c.copyText))})
 		c.copyText = ""
+	}
+	if c.cset.open {
+		dims := c.layoutChannelSettings(gtx)
+		if c.u.chat == c {
+			c.layoutOverlays(gtx)
+		}
+		return dims
 	}
 	if c.gset.open {
 		dims := c.layoutGuildSettings(gtx)
@@ -1414,7 +1437,7 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 		if first {
 			top = 6
 		}
-		return layout.Inset{Top: top}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		dims := layout.Inset{Top: top}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			cl := c.click(discord.Snowflake(r.ch.ID))
 			return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				pointer.CursorPointer.Add(gtx.Ops)
@@ -1433,6 +1456,10 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 				)
 			})
 		})
+		if rightClicked(gtx, c.rightTag("ch"+r.ch.ID.String()), dims.Size) {
+			c.openChannelMenu(r.ch)
+		}
+		return dims
 	case rowVoiceMember:
 		cl := clickOf(c.voiceClicks, r.user)
 		dims := layout.Inset{Left: unit.Dp(20)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -1451,7 +1478,7 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 		unread = c.channelUnread(r.ch.ID)
 	}
 	inVoice := r.kind == rowVoice && c.u.voiceChannel() == r.ch.ID
-	return rowItem(gtx, c.click(discord.Snowflake(r.ch.ID)), func(gtx layout.Context, hovered bool) layout.Dimensions {
+	dims := rowItem(gtx, c.click(discord.Snowflake(r.ch.ID)), func(gtx layout.Context, hovered bool) layout.Dimensions {
 		col := colorMuted
 		if selected || hovered || unread != ningen.ChannelRead || inVoice {
 			col = colorHeader
@@ -1506,8 +1533,10 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 				return c.layoutVoiceTime(gtx, r.ch.ID)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				// A voice channel's chat and menu, as Discord shows them.
-				if r.kind != rowVoice || !hovered {
+				// A channel's buttons, as Discord shows them: a voice
+				// channel's chat and settings, a text channel's invite
+				// and settings.
+				if r.kind != rowVoice && r.kind != rowText || !hovered || !r.ch.GuildID.IsValid() {
 					return layout.Dimensions{}
 				}
 				small := func(cl *widget.Clickable, ic *widget.Icon) layout.FlexChild {
@@ -1528,6 +1557,21 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 					c.voiceChatBtns = make(map[discord.ChannelID]*widget.Clickable)
 					c.voiceGearBtns = make(map[discord.ChannelID]*widget.Clickable)
 				}
+				if r.kind == rowText {
+					m := &c.chmenu
+					if m.invite == nil {
+						m.invite = make(map[discord.ChannelID]*widget.Clickable)
+						m.gear = make(map[discord.ChannelID]*widget.Clickable)
+					}
+					var btns []layout.FlexChild
+					if c.can(r.ch.ID, discord.PermissionCreateInstantInvite) {
+						btns = append(btns, small(clickOf(m.invite, r.ch.ID), iconMenuInvite))
+					}
+					if c.canEditChannel(r.ch) {
+						btns = append(btns, small(clickOf(m.gear, r.ch.ID), iconSettings))
+					}
+					return layout.Flex{Alignment: layout.Middle}.Layout(gtx, btns...)
+				}
 				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 					small(clickOf(c.voiceChatBtns, r.ch.ID), iconHome),
 					small(clickOf(c.voiceGearBtns, r.ch.ID), iconSettings),
@@ -1547,6 +1591,10 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 			}),
 		)
 	}, selected, r.kind == rowDM && unread != ningen.ChannelRead)
+	if r.ch.GuildID.IsValid() && rightClicked(gtx, c.rightTag("ch"+r.ch.ID.String()), dims.Size) {
+		c.openChannelMenu(r.ch)
+	}
+	return dims
 }
 
 // layoutVoiceMember is someone in a voice channel, under it: their picture,
@@ -1576,6 +1624,9 @@ func (c *chatView) layoutVoiceMember(gtx layout.Context, r channelRow, hovered b
 				// The name, with the server tag beside it, as in the
 				// member list.
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					if slices.Contains(c.u.app.HiddenVoiceNames, r.ch.ID) {
+						return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
+					}
 					m := discord.Member{User: c.voiceUser(r)}
 					dims := c.layoutMemberName(gtx, &m, r.ch.GuildID, label(th, 14, col, r.label))
 					// The whole width, for what follows to stay at the right.

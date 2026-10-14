@@ -712,44 +712,49 @@ func (c *chatView) inviteRows() []layout.Widget {
 		return layout.Dimensions{}
 	})
 	for _, inv := range l.invites.data {
-		inv := inv
-		click := clickFor(&l.revoke, inv.Code)
-		rows = append(rows, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: unit.Dp(5), Bottom: unit.Dp(5)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				who := discord.User{Username: "Unknown"}
-				if inv.Inviter != nil {
-					who = *inv.Inviter
-				}
-				uses := strconv.Itoa(inv.Uses)
-				if inv.MaxUses > 0 {
-					uses += "/" + strconv.Itoa(inv.MaxUses)
-				}
-				expires := "∞"
-				if inv.ExpiresAt != nil {
-					left := max(time.Until(*inv.ExpiresAt), 0).Round(time.Second)
-					expires = fmt.Sprintf("%02d:%02d:%02d:%02d", int(left.Hours())/24, int(left.Hours())%24, int(left.Minutes())%60, int(left.Seconds())%60)
-				}
-				return tableRow(gtx, widths,
-					func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return c.u.picture(gtx, cdnSize(who.AvatarURLWithType(discord.PNGImage)), 28, colorFor(uint64(who.ID)), who.DisplayOrUsername(), -1)
-							}),
-							layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-							layout.Flexed(1, stacked(oneLine(label(th, 14, colorHeader, who.DisplayOrUsername())).Layout, oneLine(label(th, 12, colorMuted, "#"+inv.Channel.Name)).Layout)),
-						)
-					},
-					oneLine(label(th, 13, colorText, inv.Code)).Layout,
-					label(th, 13, colorText, uses).Layout,
-					label(th, 13, colorText, expires).Layout,
-					func(gtx layout.Context) layout.Dimensions {
-						return iconButton(gtx, click, iconClose, colorMuted, colorRed)
-					},
-				)
-			})
-		})
+		rows = append(rows, c.inviteRow(inv, widths, clickFor(&l.revoke, inv.Code)))
 	}
 	return rows
+}
+
+// inviteRow is an invite in a table of invites: who made it, for which
+// channel, its code, uses and time left, and a button that revokes it.
+func (c *chatView) inviteRow(inv gsInvite, widths []float32, click *widget.Clickable) layout.Widget {
+	th := c.u.th
+	return func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(5), Bottom: unit.Dp(5)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			who := discord.User{Username: "Unknown"}
+			if inv.Inviter != nil {
+				who = *inv.Inviter
+			}
+			uses := strconv.Itoa(inv.Uses)
+			if inv.MaxUses > 0 {
+				uses += "/" + strconv.Itoa(inv.MaxUses)
+			}
+			expires := "∞"
+			if inv.ExpiresAt != nil {
+				left := max(time.Until(*inv.ExpiresAt), 0).Round(time.Second)
+				expires = fmt.Sprintf("%02d:%02d:%02d:%02d", int(left.Hours())/24, int(left.Hours())%24, int(left.Minutes())%60, int(left.Seconds())%60)
+			}
+			return tableRow(gtx, widths,
+				func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return c.u.picture(gtx, cdnSize(who.AvatarURLWithType(discord.PNGImage)), 28, colorFor(uint64(who.ID)), who.DisplayOrUsername(), -1)
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+						layout.Flexed(1, stacked(oneLine(label(th, 14, colorHeader, who.DisplayOrUsername())).Layout, oneLine(label(th, 12, colorMuted, "#"+inv.Channel.Name)).Layout)),
+					)
+				},
+				oneLine(label(th, 13, colorText, inv.Code)).Layout,
+				label(th, 13, colorText, uses).Layout,
+				label(th, 13, colorText, expires).Layout,
+				func(gtx layout.Context) layout.Dimensions {
+					return iconButton(gtx, click, iconClose, colorMuted, colorRed)
+				},
+			)
+		})
+	}
 }
 
 // auditFilterKinds are the actions the audit log can be filtered by.

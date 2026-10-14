@@ -37,6 +37,10 @@ type appSettings struct {
 	HideMuted []discord.GuildID `json:"hide_muted,omitempty"`
 	// SearchHistory are the last searches, the newest first.
 	SearchHistory []string `json:"search_history,omitempty"`
+	// PinnedChannels show at the top of their server, and the voice
+	// channels of HiddenVoiceNames show who is in them without names.
+	PinnedChannels   []discord.ChannelID `json:"pinned_channels,omitempty"`
+	HiddenVoiceNames []discord.ChannelID `json:"hidden_voice_names,omitempty"`
 }
 
 func appSettingsPath() string {
