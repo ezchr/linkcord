@@ -247,6 +247,8 @@ type chatView struct {
 	// The member list at the right of the messages.
 	showMembers   bool
 	membersToggle widget.Clickable
+	// callBtn and videoCallBtn call the direct message or group open.
+	callBtn, videoCallBtn widget.Clickable
 	memberRows    []memberRow
 	memberList    widget.List
 	memberChunk   int
@@ -1165,6 +1167,12 @@ func (c *chatView) update(gtx layout.Context) {
 		} else {
 			c.openProfile(c.me, discord.NullGuildID)
 		}
+	}
+	if c.callBtn.Clicked(gtx) && c.selChannel != nil {
+		c.callChannel(*c.selChannel, false)
+	}
+	if c.videoCallBtn.Clicked(gtx) && c.selChannel != nil {
+		c.callChannel(*c.selChannel, true)
 	}
 	if c.membersToggle.Clicked(gtx) {
 		c.showMembers = !c.showMembers

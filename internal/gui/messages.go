@@ -97,6 +97,22 @@ func (c *chatView) chatHeader(gtx layout.Context, title string) layout.Dimension
 				})
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				// Direct messages and groups can be called, as on Discord.
+				if ch.GuildID.IsValid() {
+					return layout.Dimensions{}
+				}
+				return vcenter(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return iconButton(gtx, &c.callBtn, iconCall, colorMuted, colorHeader)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return iconButton(gtx, &c.videoCallBtn, iconCamera, colorMuted, colorHeader)
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout))
+				})
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return vcenter(gtx, c.layoutSearchBox)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {

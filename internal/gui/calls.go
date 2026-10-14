@@ -226,3 +226,24 @@ func centered(l material.LabelStyle) layout.Widget {
 		return l.Layout(gtx)
 	}
 }
+
+// callChannel calls a direct message or group: joins its call and rings
+// the others, as Discord's call button does. video also turns the camera
+// on, which Linkcord does not do yet.
+func (c *chatView) callChannel(ch discord.Channel, video bool) {
+	if c.demo {
+		c.u.voiceInfo("Calls are not made in the demo")
+		return
+	}
+	if c.u.voiceChannel() != ch.ID {
+		c.joinVoice(ch)
+		go func() {
+			// Null recipients ring everyone in it.
+			c.st.Client.FastRequest("POST", api.EndpointChannels+ch.ID.String()+"/call/ring",
+				httputil.WithJSONBody(map[string]any{"recipients": nil}))
+		}()
+	}
+	if video {
+		c.u.voiceInfo("The camera is not supported yet")
+	}
+}
