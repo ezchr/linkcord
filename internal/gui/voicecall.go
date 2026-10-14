@@ -46,7 +46,9 @@ type callView struct {
 	join, invite, fullBtn, leave widget.Clickable
 	// stopWatch stops watching someone's stream, beside the button to hang
 	// up while one is watched.
-	stopWatch                          widget.Clickable
+	stopWatch widget.Clickable
+	// streamClip clips the stream watched, when stream clips are kept.
+	streamClip                         widget.Clickable
 	mic, micMenu, cam, camMenu         widget.Clickable
 	screen, activity, soundboard, more widget.Clickable
 	// streamSound turns the sound of the stream on or off.
@@ -140,6 +142,9 @@ func (c *chatView) updateCall(gtx layout.Context) {
 	}
 	if cv.leave.Clicked(gtx) {
 		u.leaveVoice()
+	}
+	if cv.streamClip.Clicked(gtx) {
+		c.openStreamClip()
 	}
 	if cv.stopWatch.Clicked(gtx) {
 		c.stopWatching()
@@ -623,7 +628,19 @@ func (c *chatView) layoutCallBar(gtx layout.Context, joined bool) layout.Dimensi
 								return layout.Dimensions{}
 							}
 							return layout.Inset{Right: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return callButton(gtx, &cv.stopWatch, iconStopWatching, colorHeader, colorRed, 52)
+								if c.u.app.StreamClipMinutes == 0 {
+									return callButton(gtx, &cv.stopWatch, iconStopWatching, colorHeader, colorRed, 52)
+								}
+								// And one clips it, a Linkcord feature.
+								return layout.Flex{}.Layout(gtx,
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return callButton(gtx, &cv.streamClip, iconClip, colorHeader, callBarColor, 52)
+									}),
+									layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return callButton(gtx, &cv.stopWatch, iconStopWatching, colorHeader, colorRed, 52)
+									}),
+								)
 							})
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {

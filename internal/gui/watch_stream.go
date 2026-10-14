@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -123,6 +124,7 @@ func (c *chatView) startWatching(vs discord.VoiceState) {
 				started.SetAudioVolume(vol)
 			}
 			started.SetAudioMuted(c.streamMuted[vs.UserID])
+			started.SetClipLength(time.Duration(u.app.StreamClipMinutes) * time.Minute)
 		})
 	}()
 }
@@ -227,4 +229,62 @@ func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, 
 		call.Add(gtx.Ops)
 		t.Pop()
 	}
+}
+
+// applyStreamClip keeps the stream watched for clips, as chosen.
+func (c *chatView) applyStreamClip() {
+	if w := c.watch.w; w != nil {
+		w.SetClipLength(time.Duration(c.u.app.StreamClipMinutes) * time.Minute)
+	}
+}
+
+// streamClipLengths are how long a clip of a stream can be, as offered.
+var streamClipLengths = []time.Duration{15 * time.Second, 30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute}
+
+// openStreamClip asks how much of the stream watched to clip.
+func (c *chatView) openStreamClip() {
+	most := time.Duration(c.u.app.StreamClipMinutes) * time.Minute
+	c.openMenu(c.pointerAt, 200, func() []menuItem {
+		items := []menuItem{{title: true, text: "Clip the last"}}
+		for _, d := range streamClipLengths {
+			if d > most {
+				break
+			}
+			d := d
+			items = append(items, menuItem{key: d.String(), text: clipLengthName(d), act: func() { c.saveStreamClip(d) }})
+		}
+		return items
+	})
+}
+
+// saveStreamClip saves the last d of the stream watched as a video in the
+// downloads, and shows it.
+func (c *chatView) saveStreamClip(d time.Duration) {
+	w := c.watch.w
+	if w == nil {
+		return
+	}
+	u := c.u
+	name := "stream"
+	if guildID := c.selGuild; true {
+		name = c.memberName(guildID, w.Streamer(), nil)
+	}
+	out := freeName(filepath.Join(downloadsDir(), fmt.Sprintf("Linkcord stream clip %s - %s.mp4", time.Now().Format("2006-01-02 15-04-05"), safeFileName(name))))
+	u.voiceInfo("Saving the clip of the stream…")
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		ffmpeg, err := needMedia(ctx, "ffmpeg")
+		if err == nil {
+			err = w.SaveClip(ctx, ffmpeg, d, out)
+		}
+		u.post(func() {
+			if err != nil {
+				u.voiceFailed("Could not save the clip", err)
+				return
+			}
+			u.voiceInfo("Clip saved to " + filepath.Base(out))
+			showInFolder(out)
+		})
+	}()
 }

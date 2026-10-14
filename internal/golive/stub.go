@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"image"
+	"time"
 
 	"github.com/ayn2op/arikawa/v3/discord"
 )
@@ -55,3 +56,13 @@ func (*Watch) Info() (int, int, int)    { return 0, 0, 0 }
 func (*Watch) Frame() *image.RGBA       { return nil }
 func (*Watch) Streamer() discord.UserID { return 0 }
 func (*Watch) Stop()                    {}
+
+func (*Watch) SetView(int, int)            {}
+func (*Watch) SetAudioVolume(float32)      {}
+func (*Watch) AudioVolume() float32        { return 1 }
+func (*Watch) SetAudioMuted(bool)          {}
+func (*Watch) AudioMuted() bool            { return false }
+func (*Watch) SetClipLength(time.Duration) {}
+func (*Watch) SaveClip(context.Context, string, time.Duration, string) error {
+	return errors.New("streams cannot be watched in this build")
+}

@@ -101,6 +101,8 @@ type Watch struct {
 	// than its thousandths, zero as it comes; audioMuted mutes it.
 	audioVolume atomic.Uint32
 	audioMuted  atomic.Bool
+	// clip keeps the stream for clips.
+	clip streamClip
 
 	// tw keeps which packets arrived when, for transport feedback; guarded
 	// by mu.
@@ -808,6 +810,7 @@ func (w *Watch) decode(au []byte) {
 		}
 		w.needIDR.Store(false)
 	}
+	w.clip.picture(pic, hasIDR(pic))
 	for _, nal := range splitNALs(pic) {
 		if len(nal) > 1 && nal[0]&0x1F == 7 {
 			if sw, sh, err := spsSize(nal[1:]); err == nil {

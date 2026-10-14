@@ -137,6 +137,7 @@ func (a *streamAudio) run() {
 			if err != nil {
 				continue
 			}
+			a.w.clip.sound(plain[:n])
 			if haveLast {
 				gap := p.seq - last
 				if gap > 1 && gap <= 4 {

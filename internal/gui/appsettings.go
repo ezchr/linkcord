@@ -52,6 +52,9 @@ type appSettings struct {
 	// ClipMinutes is how much of the voice channel is kept for clips, none
 	// when zero; an hour at most.
 	ClipMinutes int `json:"clip_minutes,omitempty"`
+	// StreamClipMinutes is how much of the stream watched is kept for
+	// clips, none when zero; ten minutes at most, as streams are big.
+	StreamClipMinutes int `json:"stream_clip_minutes,omitempty"`
 }
 
 func appSettingsPath() string {
@@ -155,6 +158,8 @@ func (u *ui) applyZoom(gtx *layout.Context) {
 type generalView struct {
 	deletedBtn, levelBtn, bannerBtn, clipBtn widget.Clickable
 	clipLen                                  slider
+	streamClipBtn                            widget.Clickable
+	streamClipLen                            slider
 	zoom, chatText, groupGap                 slider
 	roleColors                               widget.Clickable
 	startup, minimized, tray                 widget.Clickable
@@ -228,6 +233,22 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 		if r.released {
 			u.saveAppSettings()
 			u.applyLinkcordVoice()
+		}
+	}
+	if g.streamClipBtn.Clicked(gtx) {
+		if u.app.StreamClipMinutes > 0 {
+			u.app.StreamClipMinutes = 0
+		} else {
+			u.app.StreamClipMinutes = 2
+		}
+		u.saveAppSettings()
+		c.applyStreamClip()
+	}
+	if r := g.streamClipLen.update(gtx); r.changed || r.released {
+		u.app.StreamClipMinutes = max(1, int(1+r.value*9+0.5))
+		if r.released {
+			u.saveAppSettings()
+			c.applyStreamClip()
 		}
 	}
 	if g.deletedBtn.Clicked(gtx) {
@@ -336,6 +357,20 @@ func (c *chatView) featureRows() []layout.Widget {
 			return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, sliderRow(th, "Longest Clip",
 				"How much is kept, an hour at most. An hour of one person talking takes about 30 MB of memory.",
 				&g.clipLen, float32(mins-1)/59, fmt.Sprintf("%d min", mins)))
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.streamClipBtn, "Stream Clips",
+				"Keeps the stream you watch, as it comes, for a clip of its last minutes, saved as a video with its sound by the clip button beside Stop Watching.", c.u.app.StreamClipMinutes > 0)
+		},
+		func(gtx layout.Context) layout.Dimensions {
+			mins := c.u.app.StreamClipMinutes
+			if mins == 0 {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, sliderRow(th, "Longest Stream Clip",
+				"How much of the stream is kept, ten minutes at most: a minute of a stream takes about 20 to 50 MB of memory.",
+				&g.streamClipLen, float32(mins-1)/9, fmt.Sprintf("%d min", mins)))
 		},
 	}
 }
