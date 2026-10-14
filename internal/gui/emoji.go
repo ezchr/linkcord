@@ -309,6 +309,9 @@ func (c *chatView) layoutEmojiPicker(gtx layout.Context) layout.Dimensions {
 									if cl.url != "" {
 										return c.u.picture(gtx, cl.url, 28, colorPanel, cl.name, 0)
 									}
+									if u := twemojiURL(cl.text, 28); isEmoji(cl.text) && !c.u.images.failed(u, gtx.Dp(28)) {
+										return c.u.picture(gtx, u, 28, colorT{}, "", 0)
+									}
 									l := label(th, 22, colorHeader, cl.text)
 									l.Alignment = text.Middle
 									l.MaxLines = 1

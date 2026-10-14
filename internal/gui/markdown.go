@@ -120,7 +120,7 @@ const (
 
 var (
 	reEmojiParts = regexp.MustCompile(`^<(a?):(\w+):(\d+)>`)
-	reEmojiOnly  = regexp.MustCompile(`^(?:\s*<a?:\w+:\d+>)+\s*$`)
+	reEmojiAny   = regexp.MustCompile(`<a?:\w+:\d+>`)
 )
 
 // emojiURL is the picture of a server emoji, moving if animated.
@@ -135,7 +135,16 @@ func emojiURL(id string, animated bool, px int) string {
 // jumboEmoji reports whether a message is only server emoji, which Discord
 // shows bigger, as it does for up to 30 of them.
 func jumboEmoji(content string) bool {
-	return reEmojiOnly.MatchString(content) && strings.Count(content, "<") <= 30
+	rest := reEmojiAny.ReplaceAllString(content, "")
+	n := strings.Count(content, "<")
+	for _, part := range splitEmoji(rest) {
+		if part.emoji {
+			n++
+		} else if strings.TrimSpace(part.text) != "" {
+			return false
+		}
+	}
+	return n > 0 && n <= 30
 }
 
 // inlineSpans turns a line of Discord markup into styled spans: formatting,
@@ -176,10 +185,29 @@ func (c *chatView) inlineSpans(s string, m discord.Message, base richtext.SpanSt
 			sp.Color = colorServers
 			sp.Interactive = true
 			sp.Set(metaSpoiler, "1")
-		} else {
-			sp.Content = txt
+			spans = append(spans, sp)
+			return
 		}
-		spans = append(spans, sp)
+		// Emoji are Discord's own pictures, as server emoji are, not the
+		// font's.
+		for _, part := range splitEmoji(txt) {
+			sp := sp
+			if !part.emoji {
+				sp.Content = part.text
+				spans = append(spans, sp)
+				continue
+			}
+			scale, px := float32(1.6), 48
+			if jumboEmoji(m.Content) {
+				scale, px = 3.2, 96
+			}
+			sp.Size = base.Size * unit.Sp(scale)
+			sp.Content = "M"
+			sp.Color = colorT{}
+			sp.Set(metaEmoji, twemojiURL(part.text, px))
+			sp.Set(metaCopy, part.text)
+			spans = append(spans, sp)
+		}
 	}
 	special := func(content string, col colorT, key, value string, bold bool) {
 		flush()
@@ -536,6 +564,13 @@ func (c *chatView) richSlice(gtx layout.Context, state *richtextState, all []ric
 		// The picture fills the room of its span, centered.
 		px := min(dims.Size.X, dims.Size.Y)
 		defer op.Offset(image.Pt((dims.Size.X-px)/2, (dims.Size.Y-px)/2)).Push(gtx.Ops).Pop()
+		// An emoji Twemoji has no picture of is drawn with the font.
+		if strings.HasPrefix(url, twemojiBase) && c.u.images.failed(url, px) {
+			e, _ := span.Get(metaCopy).(string)
+			gtx.Constraints = layout.Exact(image.Pt(px, px))
+			layout.Center.Layout(gtx, label(c.u.th, unit.Sp(float32(px)/gtx.Metric.PxPerSp*0.75), colorHeader, e).Layout)
+			return
+		}
 		c.u.picture(gtx, url, unit.Dp(float32(px)/gtx.Metric.PxPerDp), colorT{}, "", 0)
 	}
 	return t.Layout(gtx)
