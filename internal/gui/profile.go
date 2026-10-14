@@ -1219,11 +1219,21 @@ func trackTime(d time.Duration) string {
 func (c *chatView) layoutRoles(gtx layout.Context, guildID discord.GuildID, ids []discord.RoleID) layout.Dimensions {
 	th := c.u.th
 	var children []layout.FlexChild
+	// The highest role first, as on Discord: by position, then the older
+	// role first among equals.
+	var roles []discord.Role
 	for _, id := range ids {
-		role, err := c.st.Cabinet.Role(guildID, id)
-		if err != nil {
-			continue
+		if role, err := c.st.Cabinet.Role(guildID, id); err == nil {
+			roles = append(roles, *role)
 		}
+	}
+	slices.SortStableFunc(roles, func(a, b discord.Role) int {
+		if a.Position != b.Position {
+			return b.Position - a.Position
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
+	for _, role := range roles {
 		col := colorOffline
 		if role.Color != 0 {
 			col = rgb(uint32(role.Color))

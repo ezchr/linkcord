@@ -111,7 +111,7 @@ func newImages(u *ui) *images {
 		u:        u,
 		entries:  make(map[string]*imageEntry),
 		sem:      make(chan struct{}, 12),
-		decode:   make(chan struct{}, 2),
+		decode:   make(chan struct{}, 4),
 		client:   &http.Client{Timeout: 30 * time.Second},
 		dir:      dir,
 		lowPower: performanceModeEnabled(),
