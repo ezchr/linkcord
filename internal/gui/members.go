@@ -184,6 +184,11 @@ func (c *chatView) groupName(guildID discord.GuildID, g gateway.GuildMemberListG
 
 func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 	th := c.u.th
+	// A click earlier in the frame, as on a voice channel, may have closed
+	// the channel the pane was laid out for.
+	if c.selChannel == nil {
+		return layout.Dimensions{Size: gtx.Constraints.Min}
+	}
 	guildID := c.selChannel.GuildID
 	if len(c.memberRows) == 0 {
 		return layout.UniformInset(unit.Dp(16)).Layout(gtx, label(th, 13, colorMuted, "Loading members…").Layout)
