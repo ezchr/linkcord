@@ -40,7 +40,8 @@ var themeGroups = []themeGroup{
 		{"selected", "Selected", "The channel open, and what is chosen.", &colorSelected},
 		{"accent", "Accent", "Main buttons, chosen options and unread pills.", &colorAccent},
 		{"mention", "Mention Text", "Mentions of people and roles in messages.", &colorMention},
-		{"mentionBg", "Mention Background", "Behind mentions, and messages that mention you.", &colorMentionB},
+		{"mentionBg", "Mention Background", "Behind mentions of people and roles.", &colorMentionB},
+		{"mentioned", "Messages That Mention You", "The tint and bar of messages that mention you, or @everyone.", &colorMentioned},
 	}},
 	{"TEXT", []themeColor{
 		{"header", "Headings and Names", "The brightest text: titles, names, and text on buttons.", &colorHeader},

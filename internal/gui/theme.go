@@ -47,6 +47,9 @@ var (
 	colorCode            = rgb(0x18181c)
 	colorMention         = rgb(0xc9cdfb)
 	colorMentionB        = rgb(0x3c4270)
+	// colorMentioned marks the messages that mention the user, as Discord's
+	// gold.
+	colorMentioned = rgb(0xf0b232)
 )
 
 type colorT = color.NRGBA

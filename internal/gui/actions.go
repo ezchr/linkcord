@@ -219,10 +219,15 @@ func (c *chatView) layoutWithActions(gtx layout.Context, m discord.Message, w la
 	macro := op.Record(gtx.Ops)
 	dims := w(gtx)
 	call := macro.Stop()
-	if isEphemeral(m) {
+	switch {
+	case isEphemeral(m):
 		// Messages only this user sees have a tint and a bar on their left.
 		paint.FillShape(gtx.Ops, withAlpha(colorAccent, 0x14), clip.Rect{Max: dims.Size}.Op())
 		paint.FillShape(gtx.Ops, colorAccent, clip.Rect{Max: image.Pt(gtx.Dp(2), dims.Size.Y)}.Op())
+	case c.mentionsMe(m):
+		// So do those that mention the user, in gold, as in Discord.
+		paint.FillShape(gtx.Ops, withAlpha(colorMentioned, 0x10), clip.Rect{Max: dims.Size}.Op())
+		paint.FillShape(gtx.Ops, colorMentioned, clip.Rect{Max: image.Pt(gtx.Dp(2), dims.Size.Y)}.Op())
 	}
 	if over || a.editing == m.ID {
 		paint.FillShape(gtx.Ops, colorMessageHover, clip.Rect{Max: dims.Size}.Op())
@@ -241,6 +246,24 @@ func (c *chatView) layoutWithActions(gtx layout.Context, m discord.Message, w la
 		c.layoutToolbar(gtx, m, dims, tags)
 	}
 	return dims
+}
+
+// mentionsMe reports whether the message mentions the user, by name, by a
+// role of theirs, by a reply that pings, or by @everyone or @here where
+// those are not suppressed.
+func (c *chatView) mentionsMe(m discord.Message) bool {
+	if m.Author.ID == c.me.ID {
+		return false
+	}
+	if c.demo {
+		for _, u := range m.Mentions {
+			if u.ID == c.me.ID {
+				return true
+			}
+		}
+		return m.MentionEveryone || strings.Contains(m.Content, "<@"+c.me.ID.String()+">")
+	}
+	return c.st.MessageMentions(&m) != 0
 }
 
 // layoutToolbar draws the buttons of a message over its top right corner.
