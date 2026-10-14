@@ -174,8 +174,14 @@ func (u *ui) startDemo() {
 	}
 	// A video to test playback with, from LINKCORD_DEMO_VIDEO.
 	if video := os.Getenv("LINKCORD_DEMO_VIDEO"); video != "" {
-		add(channels[0].ID, guild.ID, users[2], 90*time.Minute, "look at this clip", func(m *discord.Message) {
-			m.Attachments = []discord.Attachment{{Filename: "clip.mp4", URL: discord.URL(video), Size: 2 << 20, ContentType: "video/mp4", Width: 1920, Height: 1080}}
+		// LINKCORD_DEMO_VIDEO_SIZE, such as 360x640, gives it another shape.
+		// It is then the newest message, to be seen at once.
+		vw, vh, ago := 1920, 1080, 90*time.Minute
+		if n, _ := fmt.Sscanf(os.Getenv("LINKCORD_DEMO_VIDEO_SIZE"), "%dx%d", &vw, &vh); n == 2 {
+			ago = 0
+		}
+		add(channels[0].ID, guild.ID, users[2], ago, "look at this clip", func(m *discord.Message) {
+			m.Attachments = []discord.Attachment{{Filename: "clip.mp4", URL: discord.URL(video), Size: 2 << 20, ContentType: "video/mp4", Width: uint(vw), Height: uint(vh)}}
 		})
 	}
 	add(channels[0].ID, guild.ID, me, time.Hour, "on my way", func(m *discord.Message) {

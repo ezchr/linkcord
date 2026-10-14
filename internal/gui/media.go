@@ -382,6 +382,9 @@ func (c *chatView) layoutVideo(gtx layout.Context, p mediaPreview) layout.Dimens
 		if active && (frame != nil || ended) {
 			k := &v.ctl[inTile]
 			if hovered || ended || v.paused.Load() || k.bar.dragging || k.volume.dragging {
+				if videoNarrow(gtx, gtx.Constraints.Max.X) {
+					c.videoClock(gtx, v)
+				}
 				layout.S.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
 					return c.layoutControls(gtx, v, inTile)

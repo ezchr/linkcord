@@ -463,6 +463,9 @@ func (c *chatView) layoutControls(gtx layout.Context, v *videoViewer, where int)
 		}
 	}
 
+	// On a narrow video the time and the volume slider leave the bar, as on
+	// Discord: the time shows in the corner instead (see videoClock).
+	narrow := videoNarrow(gtx, gtx.Constraints.Max.X)
 	// A dark band behind the controls, as on Discord's player.
 	return layout.Background{}.Layout(gtx,
 		func(gtx layout.Context) layout.Dimensions {
@@ -476,6 +479,9 @@ func (c *chatView) layoutControls(gtx layout.Context, v *videoViewer, where int)
 				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 					layout.Rigid(btn(&k.play, playIcon)),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if narrow {
+							return layout.Dimensions{Size: image.Pt(gtx.Dp(6), 0)}
+						}
 						return layout.Inset{Left: unit.Dp(4), Right: unit.Dp(8)}.Layout(gtx,
 							oneLine(label(th, 12, colorHeader, clock)).Layout)
 					}),
@@ -488,6 +494,9 @@ func (c *chatView) layoutControls(gtx layout.Context, v *videoViewer, where int)
 					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
 					layout.Rigid(btn(&k.mute, volIcon)),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if narrow {
+							return layout.Dimensions{}
+						}
 						return k.volume.layout(gtx, 64, volume)
 					}),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
@@ -495,6 +504,29 @@ func (c *chatView) layoutControls(gtx layout.Context, v *videoViewer, where int)
 				)
 			})
 		})
+}
+
+// videoNarrow reports whether a player w pixels wide is too narrow for the
+// time and the volume slider in its bar.
+func videoNarrow(gtx layout.Context, w int) bool { return w < gtx.Dp(330) }
+
+// videoClock is the time of the video in the top left corner, faint, for
+// players too narrow to show it in their bar.
+func (c *chatView) videoClock(gtx layout.Context, v *videoViewer) {
+	v.mu.Lock()
+	pos, dur := v.pos, v.dur
+	v.mu.Unlock()
+	clock := formatClock(pos)
+	if dur > 0 {
+		clock += " / " + formatClock(dur)
+	}
+	defer op.Offset(image.Pt(gtx.Dp(6), gtx.Dp(6))).Push(gtx.Ops).Pop()
+	lgtx := gtx
+	lgtx.Constraints.Min = image.Point{}
+	rounded(lgtx, withAlpha(rgb(0x000000), 0x70), 4, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Left: unit.Dp(5), Right: unit.Dp(5), Top: unit.Dp(1), Bottom: unit.Dp(1)}.Layout(gtx,
+			oneLine(label(c.u.th, 11, withAlpha(colorHeader, 0xb0), clock)).Layout)
+	})
 }
 
 // layoutVideoPicture draws the current frame, fitted and centred, on black.
