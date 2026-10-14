@@ -225,6 +225,10 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 		offline := status == discord.OfflineStatus || status == discord.InvisibleStatus
 		return layout.Inset{Left: unit.Dp(8), Right: unit.Dp(8), Top: unit.Dp(1)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return c.memberItem(gtx, m, func(gtx layout.Context, hovered bool) layout.Dimensions {
+				// Who is offline is dimmed whole, picture too, as Discord.
+				if offline && !hovered {
+					defer paint.PushOpacity(gtx.Ops, 0.45).Pop()
+				}
 				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						url := cdnSize(m.User.AvatarURLWithType(discord.PNGImage))
@@ -247,9 +251,6 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 					layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 						col := nameColor
-						if offline && !hovered {
-							col = withAlpha(col, 0x80)
-						}
 						rows := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return c.layoutMemberName(gtx, m, guildID, label(th, 15, col, name))
 						})}
