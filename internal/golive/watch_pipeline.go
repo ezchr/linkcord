@@ -25,9 +25,13 @@ func (w *Watch) submitPicture(frame []byte) {
 	job := pictureJob{frame: bytes.Clone(frame), generation: w.videoGeneration.Load()}
 	select {
 	case w.decodeQueue <- job:
+		if n := int64(len(w.decodeQueue)); n > w.deepest.Load() {
+			w.deepest.Store(n)
+		}
 	case <-w.done:
 	default:
 		// Never block the UDP reader behind a slow decoder.
+		w.overflows.Add(1)
 		w.requireKeyframe()
 		w.requestKeyframe()
 	}

@@ -73,6 +73,13 @@ type Watch struct {
 	packets, assembled, lost, daveFailed, skipped atomic.Int64
 	rtxSeen, rtxIgnored                           atomic.Int64
 	padded                                        atomic.Int64
+	// overflows are pictures the decoder had no room for; keyframes are
+	// the keyframe requests sent; deepest is the longest decode queue seen
+	// since the last log.
+	overflows, keyframes, deepest atomic.Int64
+	// taken is the picture last handed to the GUI, which is not written
+	// over while it may still be drawn. Guarded by mu.
+	taken *image.RGBA
 	videoBytes                                    atomic.Int64
 	reception                                     watchReception // guarded by mu
 	needIDR                                       atomic.Bool
@@ -339,9 +346,10 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 	if w.p.FFmpeg == "" {
 		return nil, errors.New("golive: FFmpeg is needed to watch streams")
 	}
-	// Two seconds of pictures: a short stall of the decoder must not cost a
-	// keyframe, which makes the streamer's picture blurry for a while.
-	w.decodeQueue = make(chan pictureJob, 120)
+	// Half a second of pictures: a short stall of the decoder must not cost
+	// a keyframe, which makes the streamer's picture blurry for a while,
+	// but a longer one must not leave the stream far behind.
+	w.decodeQueue = make(chan pictureJob, 30)
 	if audio, err := newStreamAudio(w); err != nil {
 		w.log.Warn("stream audio unavailable", "err", err)
 	} else {
@@ -930,6 +938,13 @@ func (w *Watch) startDecoder(sw, sh int) error {
 		// which at 1080p60 is 500 MB a second for the collector.
 		var ring [4]*image.RGBA
 		for i := 0; ; i = (i + 1) % len(ring) {
+			// Never the picture shown nor the one the GUI holds: with four,
+			// one of the next two is always free.
+			w.mu.Lock()
+			for ring[i] != nil && (ring[i] == w.frame || ring[i] == w.taken) {
+				i = (i + 1) % len(ring)
+			}
+			w.mu.Unlock()
 			if ring[i] == nil {
 				ring[i] = image.NewRGBA(image.Rect(0, 0, ow, oh))
 			}
@@ -966,6 +981,7 @@ func (w *Watch) requestKeyframe() {
 	// Counted only once sent: before the streamer's video is known, nothing
 	// can be asked for.
 	if w.sendPLI() {
+		w.keyframes.Add(1)
 		w.lastPLI.CompareAndSwap(last, now)
 	}
 }
@@ -1004,7 +1020,8 @@ func (w *Watch) askKeyframes() {
 			seconds := now.Sub(lastStats).Seconds()
 			octets, pictures := w.videoBytes.Load(), w.assembled.Load()
 			w.log.Info("watching", "packets", w.packets.Load(), "pictures", pictures, "lost", w.lost.Load(),
-				"dave_failed", w.daveFailed.Load(), "skipped", w.skipped.Load(), "padded", w.padded.Load(), "shown", frames,
+				"dave_failed", w.daveFailed.Load(), "skipped", w.skipped.Load(), "overflows", w.overflows.Load(),
+				"keyframe_requests", w.keyframes.Load(), "deepest_queue", w.deepest.Swap(0), "padded", w.padded.Load(), "shown", frames,
 				"video_kbps", int(float64(octets-lastBytes)*8/seconds/1000),
 				"received_fps", fmt.Sprintf("%.1f", float64(pictures-lastPictures)/seconds),
 				"decoded_fps", fmt.Sprintf("%.1f", float64(frames-lastShown)/seconds))
@@ -1143,6 +1160,7 @@ func (w *Watch) sendPLI() bool {
 func (w *Watch) Frame() *image.RGBA {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.taken = w.frame
 	return w.frame
 }
 
