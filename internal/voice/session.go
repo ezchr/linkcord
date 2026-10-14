@@ -152,6 +152,8 @@ type Session struct {
 
 	// mu is held while joining, leaving and muting, which are not done while another is.
 	mu sync.Mutex
+	// cancelJoin stops the join going on, if any.
+	cancelJoin atomic.Pointer[context.CancelFunc]
 	// session is nil until the first voice channel is joined.
 	session atomic.Pointer[voice.Session]
 	// playback plays while a voice channel is joined, and capture captures while the user is not muted in it.
@@ -410,6 +412,9 @@ func (s *Session) Join(channelID discord.ChannelID) (err error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	// Leaving while joining stops the join.
+	s.cancelJoin.Store(&cancel)
+	defer s.cancelJoin.Store(nil)
 
 	session := s.session.Load()
 	if session == nil {
@@ -451,6 +456,10 @@ func (s *Session) Join(channelID discord.ChannelID) (err error) {
 // Leave leaves the voice channel that the user is in, if any.
 func (s *Session) Leave() error {
 	if !s.mu.TryLock() {
+		// A join is going on: stopped, it leaves on its own.
+		if c := s.cancelJoin.Load(); c != nil {
+			(*c)()
+		}
 		return nil
 	}
 	defer s.mu.Unlock()

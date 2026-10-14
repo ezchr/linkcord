@@ -376,6 +376,7 @@ func (s *Session) waitForIncoming(ctx context.Context, chs waitEventChs) error {
 	for !(server && state) {
 		select {
 		case ev := <-chs.serverUpdate:
+			slog.Info("voice join: server update", "guild", ev.GuildID, "want_guild", s.state.GuildID, "endpoint", ev.Endpoint != "")
 			// An empty endpoint means the voice server is being reallocated,
 			// and another event follows once it is.
 			if s.state.GuildID != ev.GuildID || ev.Endpoint == "" {
@@ -386,6 +387,9 @@ func (s *Session) waitForIncoming(ctx context.Context, chs waitEventChs) error {
 			server = true
 
 		case ev := <-chs.stateUpdate:
+			if s.state.UserID == ev.UserID {
+				slog.Info("voice join: state update", "guild", ev.GuildID, "want_guild", s.state.GuildID, "channel", ev.ChannelID)
+			}
 			if s.state.GuildID != ev.GuildID || s.state.UserID != ev.UserID {
 				continue
 			}
@@ -394,6 +398,7 @@ func (s *Session) waitForIncoming(ctx context.Context, chs waitEventChs) error {
 			state = true
 
 		case <-ctx.Done():
+			slog.Info("voice join: gave up waiting", "have_server", server, "have_state", state)
 			return ctx.Err()
 		}
 	}
