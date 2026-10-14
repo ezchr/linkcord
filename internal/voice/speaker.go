@@ -65,6 +65,8 @@ func (s *speaker) decode(packet []byte) error {
 		return err
 	}
 
+	fillSilentSide(pcm[:n*channels])
+
 	for _, sample := range pcm[:n*channels] {
 		s.buf = binary.LittleEndian.AppendUint16(s.buf, uint16(sample))
 	}
@@ -126,4 +128,34 @@ func (s *speaker) mix(output []byte, volume float32) {
 
 	s.buf = s.buf[n:]
 	s.playing = len(s.buf) > 0
+}
+
+// fillSilentSide plays a sound sent on one side only on both sides, as when someone's
+// microphone or what they share gives sound on the left alone: the silent side gets a copy
+// of the other. Nothing is mixed, so stereo sound is left as it is.
+func fillSilentSide(pcm []int16) {
+	var left, right int64
+	for i := 0; i+1 < len(pcm); i += 2 {
+		left += abs64(int64(pcm[i]))
+		right += abs64(int64(pcm[i+1]))
+	}
+	// Silent is under 1% of the other side, which must itself be more than a whisper.
+	frames := int64(len(pcm) / 2)
+	switch {
+	case right*100 < left && left > 50*frames:
+		for i := 0; i+1 < len(pcm); i += 2 {
+			pcm[i+1] = pcm[i]
+		}
+	case left*100 < right && right > 50*frames:
+		for i := 0; i+1 < len(pcm); i += 2 {
+			pcm[i] = pcm[i+1]
+		}
+	}
+}
+
+func abs64(v int64) int64 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
