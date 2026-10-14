@@ -98,6 +98,8 @@ type chatView struct {
 	mediaBytes map[string]uint64
 	// stickers are the servers' stickers, for the picker.
 	stickers guildStickers
+	// guildCounts are the members online and in all of each server.
+	guildCounts map[discord.GuildID]*guildCount
 	// friends is the friends page and the message requests of the direct
 	// messages.
 	friends friendsState
@@ -1320,6 +1322,12 @@ func (c *chatView) layoutChannels(gtx layout.Context) layout.Dimensions {
 				return c.layoutGuildHeader(gtx, title)
 			}
 			return header(gtx, th, title)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if !c.selGuild.IsValid() {
+				return layout.Dimensions{}
+			}
+			return c.layoutGuildCounts(gtx, c.selGuild)
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return listLayout(gtx, th, &c.channelList, len(c.rows), func(gtx layout.Context, i int) layout.Dimensions {

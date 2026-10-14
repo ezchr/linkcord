@@ -35,6 +35,23 @@ type appSettings struct {
 	QuitOnClose    bool `json:"quit_on_close,omitempty"`
 	// HideMuted are the servers whose muted channels are hidden.
 	HideMuted []discord.GuildID `json:"hide_muted,omitempty"`
+	// GIFSource is where the picker's GIFs come from: "" is Discord's own
+	// search, "giphy" GIPHY's and "tenor" Tenor's, with the user's own API
+	// key for them.
+	GIFSource string `json:"gif_source,omitempty"`
+	GiphyKey  string `json:"giphy_key,omitempty"`
+	TenorKey  string `json:"tenor_key,omitempty"`
+}
+
+// gifKey is the API key kept for the GIF source, and where it goes.
+func (a *appSettings) gifKey(source string) *string {
+	switch source {
+	case "giphy":
+		return &a.GiphyKey
+	case "tenor":
+		return &a.TenorKey
+	}
+	return nil
 }
 
 func appSettingsPath() string {

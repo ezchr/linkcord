@@ -285,6 +285,9 @@ func (c *chatView) layoutToolbar(gtx layout.Context, m discord.Message, row layo
 				ic, hover := actionIcon(k)
 				btn := c.actionButton(m.ID, k)
 				children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if k == actReact {
+						return glyphButton(gtx, btn, false, emojiGlyph, colorChat)
+					}
 					return iconButton(gtx, btn, ic, colorMuted, hover)
 				}))
 			}
