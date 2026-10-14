@@ -14,6 +14,7 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
+	"gioui.org/widget/material"
 	"github.com/ayn2op/arikawa/v3/api"
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/utils/httputil"
@@ -25,7 +26,10 @@ type accountSettings struct {
 	ExplicitContentFilter   int  `json:"explicit_content_filter"`
 	DefaultGuildsRestricted bool `json:"default_guilds_restricted"`
 	ShowCurrentGame         bool `json:"show_current_game"`
-	FriendSourceFlags       struct {
+	// RestrictedGuilds are the servers whose members may not message the
+	// user.
+	RestrictedGuilds  []discord.GuildID `json:"restricted_guilds"`
+	FriendSourceFlags struct {
 		All           bool `json:"all,omitempty"`
 		MutualFriends bool `json:"mutual_friends,omitempty"`
 		MutualGuilds  bool `json:"mutual_guilds,omitempty"`
@@ -57,6 +61,12 @@ type accountView struct {
 
 	filter                                [3]widget.Clickable
 	dms, frAll, frFriends, frGuilds, game widget.Clickable
+
+	// tab is the Profiles page's tab: the user's profile, or their profile
+	// in one server.
+	tab    int
+	tabs   [2]widget.Clickable
+	server serverProfileView
 }
 
 // loadAccount asks Discord for the account's settings and profile.
@@ -252,6 +262,7 @@ func (c *chatView) updateAccount(gtx layout.Context) {
 		a.setFields(a.orig)
 		a.saveErr, a.saveInfo = "", ""
 	}
+	c.updateServerProfile(gtx)
 	if a.clearStatus.Clicked(gtx) {
 		a.status.SetText("")
 		a.emoji.SetText("")
@@ -378,6 +389,9 @@ func (c *chatView) myAccountRows() []layout.Widget {
 func (c *chatView) profileRows() []layout.Widget {
 	th := c.u.th
 	a := &c.settings.acct
+	if a.tab == 1 {
+		return append([]layout.Widget{c.layoutProfileTabs}, c.serverProfileRows()...)
+	}
 	f := a.fields()
 	input := func(title string, ed *widget.Editor, hint string) layout.Widget {
 		return func(gtx layout.Context) layout.Dimensions {
@@ -437,12 +451,13 @@ func (c *chatView) profileRows() []layout.Widget {
 			))
 		},
 	)
-	rows := append(c.accountNote(), func(gtx layout.Context) layout.Dimensions {
+	rows := append([]layout.Widget{c.layoutProfileTabs}, c.accountNote()...)
+	rows = append(rows, func(gtx layout.Context) layout.Dimensions {
 		wide := gtx.Constraints.Max.X >= gtx.Dp(620)
 		if !wide {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(stacked(form...)),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutProfilePreview(gtx, f) }),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutProfilePreview(gtx, f, discord.NullGuildID) }),
 			)
 		}
 		return layout.Flex{}.Layout(gtx,
@@ -451,50 +466,56 @@ func (c *chatView) profileRows() []layout.Widget {
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Max.X = gtx.Dp(300)
 				gtx.Constraints.Min.X = gtx.Constraints.Max.X
-				return c.layoutProfilePreview(gtx, f)
+				return c.layoutProfilePreview(gtx, f, discord.NullGuildID)
 			}),
 		)
 	})
 	// The bar that saves, while something changed, as in Discord.
 	if f != a.orig || a.saveErr != "" || a.saveInfo != "" {
-		rows = append(rows, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return rounded(gtx, colorServers, 8, func(gtx layout.Context) layout.Dimensions {
-					gtx.Constraints.Min.X = gtx.Constraints.Max.X
-					return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						msg, col := "Careful — you have unsaved changes!", colorHeader
-						switch {
-						case a.saveErr != "":
-							msg, col = a.saveErr, colorRed
-						case a.saving:
-							msg = "Saving…"
-						case f == a.orig && a.saveInfo != "":
-							msg, col = a.saveInfo, colorGreen
-						}
-						children := []layout.FlexChild{layout.Flexed(1, label(th, 14, col, msg).Layout)}
-						if f != a.orig {
-							children = append(children,
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return button(gtx, th, &a.reset, colorSecondaryButton, "Reset")
-								}),
-								layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return button(gtx, th, &a.save, colorGreenButton, "Save Changes")
-								}),
-							)
-						}
-						return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
-					})
-				})
-			})
-		})
+		rows = append(rows, saveBar(th, f != a.orig, a.saving, a.saveErr, a.saveInfo, &a.reset, &a.save))
 	}
 	return rows
 }
 
+// saveBar is the bar that saves what changed, or says how saving went, as
+// Discord's.
+func saveBar(th *material.Theme, changed, saving bool, saveErr, saveInfo string, reset, save *widget.Clickable) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return rounded(gtx, colorServers, 8, func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min.X = gtx.Constraints.Max.X
+				return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					msg, col := "Careful — you have unsaved changes!", colorHeader
+					switch {
+					case saveErr != "":
+						msg, col = saveErr, colorRed
+					case saving:
+						msg = "Saving…"
+					case !changed && saveInfo != "":
+						msg, col = saveInfo, colorGreen
+					}
+					children := []layout.FlexChild{layout.Flexed(1, label(th, 14, col, msg).Layout)}
+					if changed {
+						children = append(children,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return button(gtx, th, reset, colorSecondaryButton, "Reset")
+							}),
+							layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return button(gtx, th, save, colorGreenButton, "Save Changes")
+							}),
+						)
+					}
+					return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
+				})
+			})
+		})
+	}
+}
+
 // layoutProfilePreview is the profile as others will see it, with the
-// fields as they are being edited.
-func (c *chatView) layoutProfilePreview(gtx layout.Context, f profileFields) layout.Dimensions {
+// fields as they are being edited, in the server guildID if valid.
+func (c *chatView) layoutProfilePreview(gtx layout.Context, f profileFields, guildID discord.GuildID) layout.Dimensions {
 	th := c.u.th
 	a := &c.settings.acct
 	me := c.me
@@ -537,7 +558,14 @@ func (c *chatView) layoutProfilePreview(gtx layout.Context, f profileFields) lay
 				x, y := gtx.Dp(16), bannerH-avatar/2-ringPx
 				paint.FillShape(gtx.Ops, colorPopup, clip.Ellipse(image.Rect(x, y, x+avatar+2*ringPx, y+avatar+2*ringPx)).Op(gtx.Ops))
 				t := op.Offset(image.Pt(x+ringPx, y+ringPx)).Push(gtx.Ops)
-				c.avatarStatus(gtx, me, discord.NullGuildID, unit.Dp(float32(avatar)/gtx.Metric.PxPerDp), colorPopup)
+				avSize := unit.Dp(float32(avatar) / gtx.Metric.PxPerDp)
+				if guildID.IsValid() {
+					// The server's own avatar, if the user has one there.
+					dims := c.u.picture(gtx, c.authorAvatarURL(guildID, me), avSize, colorFor(uint64(me.ID)), name, -1)
+					statusDot(gtx, c.status(guildID, me.ID), dims.Size.X, colorPopup)
+				} else {
+					c.avatarStatus(gtx, me, discord.NullGuildID, avSize, colorPopup)
+				}
 				t.Pop()
 				// The custom status, in a thought bubble beside the avatar.
 				if bubble != "" {

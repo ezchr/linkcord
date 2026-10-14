@@ -98,6 +98,10 @@ type chatView struct {
 	friends friendsState
 	// guild is the boost goal and events of the selected server.
 	guild guildInfo
+	// gmenu is the menu of the server's name, and newChannel the form that
+	// makes a channel from it.
+	gmenu      guildMenu
+	newChannel createChannel
 
 	// detached is set while older messages show in place of the newest,
 	// after a jump; flashID is lit until flashUntil.
@@ -596,6 +600,7 @@ func (c *chatView) rebuildRows() {
 		slog.Error("failed to get channels", "err", err, "guild_id", c.selGuild)
 		return
 	}
+	hideMuted := c.u.app.hidesMuted(c.selGuild)
 	var top, categories []discord.Channel
 	children := make(map[discord.ChannelID][]discord.Channel)
 	for _, ch := range channels {
@@ -606,6 +611,7 @@ func (c *chatView) rebuildRows() {
 			// Forums and other kinds are not supported yet.
 		case ch.Type == discord.GuildPublicThread || ch.Type == discord.GuildPrivateThread || ch.Type == discord.GuildAnnouncementThread:
 		case !c.can(ch.ID, discord.PermissionViewChannel):
+		case hideMuted && c.st.ChannelIsMuted(ch.ID, ningen.UnreadOpts{}):
 		case ch.ParentID.IsValid():
 			children[ch.ParentID] = append(children[ch.ParentID], ch)
 		default:
@@ -1154,6 +1160,9 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 	if c.guild.popup != popupNone {
 		c.layoutGuildPopup(gtx)
 	}
+	if c.newChannel.open {
+		c.layoutCreateChannel(gtx)
+	}
 	if c.u.voice.picker.open {
 		c.layoutStreamPicker(gtx)
 	}
@@ -1301,7 +1310,12 @@ func (c *chatView) layoutChannels(gtx layout.Context) layout.Dimensions {
 		}
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return header(gtx, th, title) }),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if c.selGuild.IsValid() {
+				return c.layoutGuildHeader(gtx, title)
+			}
+			return header(gtx, th, title)
+		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return listLayout(gtx, th, &c.channelList, len(c.rows), func(gtx layout.Context, i int) layout.Dimensions {
 				return layout.Inset{Left: unit.Dp(8), Right: unit.Dp(8), Top: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {

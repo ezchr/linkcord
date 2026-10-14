@@ -12,6 +12,7 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"github.com/ayn2op/arikawa/v3/discord"
 )
 
 // appSettings are how Linkcord looks and behaves, kept in app.json beside
@@ -32,6 +33,8 @@ type appSettings struct {
 	// keep running there.
 	StartMinimized bool `json:"start_minimized,omitempty"`
 	QuitOnClose    bool `json:"quit_on_close,omitempty"`
+	// HideMuted are the servers whose muted channels are hidden.
+	HideMuted []discord.GuildID `json:"hide_muted,omitempty"`
 }
 
 func appSettingsPath() string {
