@@ -382,6 +382,11 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 // stickers and embeds.
 func (c *chatView) mediaChildren(m discord.Message) []layout.FlexChild {
 	var children []layout.FlexChild
+	if m.Poll != nil {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return c.layoutPoll(gtx, m)
+		}))
+	}
 	// Messages laid out with components show their files inside them.
 	if m.Flags&discord.IsComponentsV2 == 0 {
 		for _, a := range m.Attachments {

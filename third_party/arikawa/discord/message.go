@@ -125,6 +125,9 @@ type Message struct {
 
 	// Stickers contains the sticker "items" sent with the message.
 	Stickers []StickerItem `json:"sticker_items,omitempty"`
+
+	// Poll is the poll of the message, if any. (Added by Linkcord.)
+	Poll *Poll `json:"poll,omitempty"`
 }
 
 type MessageCall struct {

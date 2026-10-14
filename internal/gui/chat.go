@@ -242,6 +242,11 @@ type chatView struct {
 	voiceStarts   map[discord.ChannelID]time.Time
 	voiceChatBtns map[discord.ChannelID]*widget.Clickable
 	voiceGearBtns map[discord.ChannelID]*widget.Clickable
+	// pollClicks are the clicks of the answers and buttons of polls, and
+	// pollChoice the answers chosen of those that take several, until
+	// voted.
+	pollClicks map[string]*widget.Clickable
+	pollChoice map[discord.MessageID]map[int]bool
 	// pressTag is what was last pressed, at pressAt, for double clicks.
 	pressTag event.Tag
 	pressAt  time.Duration
@@ -326,10 +331,11 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 	c.messageList.ScrollToEnd = true
 	c.composer.Submit = true
 
-	stopChan, stopStatus := st.AddChanHandler(c.events), c.watchVoiceStatus()
+	stopChan, stopStatus, stopPolls := st.AddChanHandler(c.events), c.watchVoiceStatus(), c.watchPolls()
 	c.stopEvents = func() {
 		stopChan()
 		stopStatus()
+		stopPolls()
 	}
 	go c.pump()
 	return c

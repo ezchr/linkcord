@@ -144,6 +144,20 @@ func (u *ui) startDemo() {
 			Content: "**patch notes** are out: new maps and a *faster* lobby", Timestamp: discord.NewTimestamp(time.Now().Add(-26 * time.Hour)),
 		}}}
 	})
+	add(channels[1].ID, guild.ID, users[1], 97*time.Minute, "", func(m *discord.Message) {
+		m.Poll = &discord.Poll{
+			Question: discord.PollMedia{Text: "Which map tonight?"},
+			Answers: []discord.PollAnswer{
+				{AnswerID: 1, PollMedia: discord.PollMedia{Text: "Dust", Emoji: &discord.Emoji{Name: "🏜️"}}},
+				{AnswerID: 2, PollMedia: discord.PollMedia{Text: "Inferno", Emoji: &discord.Emoji{Name: "🔥"}}},
+				{AnswerID: 3, PollMedia: discord.PollMedia{Text: "Mirage", Emoji: &discord.Emoji{Name: "🌴"}}},
+			},
+			Expiry: discord.NewTimestamp(time.Now().Add(20 * time.Hour)),
+			Results: &discord.PollResults{AnswerCounts: []discord.PollAnswerCount{
+				{ID: 1, Count: 4}, {ID: 2, Count: 7, MeVoted: true}, {ID: 3, Count: 2},
+			}},
+		}
+	})
 	add(channels[0].ID, guild.ID, users[0], 95*time.Minute, "the logs from yesterday", func(m *discord.Message) {
 		m.Attachments = []discord.Attachment{{Filename: "server-log.txt", URL: discord.URL(avatar), Size: 18 * 1024, ContentType: "text/plain"}}
 	})
