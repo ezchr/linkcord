@@ -154,6 +154,8 @@ type Session struct {
 	mu sync.Mutex
 	// cancelJoin stops the join going on, if any.
 	cancelJoin atomic.Pointer[context.CancelFunc]
+	// joinedChannel is the channel last joined.
+	joinedChannel discord.ChannelID
 	// session is nil until the first voice channel is joined.
 	session atomic.Pointer[voice.Session]
 	// playback plays while a voice channel is joined, and capture captures while the user is not muted in it.
@@ -392,6 +394,7 @@ func (s *Session) setDevices(mute, deafen bool) error {
 func (s *Session) left() {
 	s.setDevices(true, true)
 	s.setStatus(Status{})
+	s.joinedChannel = 0
 }
 
 // Join joins the voice channel, muted, leaving the one that the user is in.
@@ -439,6 +442,15 @@ func (s *Session) Join(channelID discord.ChannelID) (err error) {
 		return err
 	}
 
+	// Moving between a server's channel and a call of a direct message or
+	// group is a leave and a join: moved in place, the connection waited for
+	// what Discord had already sent, and the call never connected.
+	if prev := s.joinedChannel; prev.IsValid() && prev != channelID && s.crossesKinds(prev, channelID) {
+		if err := session.Leave(ctx); err != nil {
+			slog.Warn("could not leave before moving to the call", "err", err)
+		}
+	}
+
 	if err := session.JoinChannel(ctx, channelID, true, false); err != nil {
 		return err
 	}
@@ -449,8 +461,23 @@ func (s *Session) Join(channelID discord.ChannelID) (err error) {
 	}
 
 	s.setStatus(Status{ChannelID: channelID, Joined: true})
+	s.joinedChannel = channelID
 
 	return nil
+}
+
+// crossesKinds reports whether one of a and b is a server's channel and the
+// other a call of a direct message or group.
+func (s *Session) crossesKinds(a, b discord.ChannelID) bool {
+	ca, err := s.state.Channel(a)
+	if err != nil {
+		return true
+	}
+	cb, err := s.state.Channel(b)
+	if err != nil {
+		return true
+	}
+	return ca.GuildID.IsValid() != cb.GuildID.IsValid()
 }
 
 // Leave leaves the voice channel that the user is in, if any.
