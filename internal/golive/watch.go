@@ -27,6 +27,7 @@ import (
 	"github.com/ayn2op/arikawa/v3/utils/ws"
 	"github.com/ayn2op/arikawa/v3/voice/voicegateway"
 	"github.com/disgoorg/godave"
+	"github.com/thomas-vilte/dave-go/frame"
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
@@ -69,6 +70,9 @@ type Watch struct {
 	frames atomic.Int64
 	// The counts of how the stream goes, which are logged.
 	packets, assembled, lost, daveFailed, skipped atomic.Int64
+	padded                                        atomic.Int64
+	videoBytes                                    atomic.Int64
+	reception                                     watchReception // guarded by mu
 	needIDR                                       atomic.Bool
 	lastPLI                                       atomic.Int64
 	srcW, srcH, fps                               int
@@ -90,7 +94,7 @@ func (*streamWatchCommand) EventType() ws.EventType { return "" }
 // mediaSinkWantsCommand is Op 15: what quality of whose video the client
 // wants, by the SSRC of each video, and "any" for the rest; 100 asks for
 // the best.
-type mediaSinkWantsCommand map[string]int
+type mediaSinkWantsCommand map[string]any
 
 func (*mediaSinkWantsCommand) Op() ws.OpCode           { return 15 }
 func (*mediaSinkWantsCommand) EventType() ws.EventType { return "" }
@@ -341,7 +345,9 @@ func (w *Watch) sendViewerState(ctx context.Context, ssrc uint32) {
 func (w *Watch) sendWants(ctx context.Context, video uint32) {
 	wants := mediaSinkWantsCommand{"any": 100}
 	if video != 0 {
-		wants[fmt.Sprint(video)] = 100
+		key := fmt.Sprint(video)
+		wants[key] = 100
+		wants["pixelCounts"] = map[string]int{key: maxWatchW * maxWatchH}
 	}
 	cmd := wants
 	w.conn.send(ctx, &cmd)
@@ -382,9 +388,11 @@ func (w *Watch) follow(early chan ws.Op) {
 	handle := func(op ws.Op) {
 		if v, ok := op.Data.(*videoEvent); ok && v.UserID == w.p.StreamerID {
 			ssrc := v.VideoSSRC
+			bestQuality, bestPixels := -1, -1
 			for _, s := range v.Streams {
-				if s.Active && s.SSRC != 0 {
-					ssrc = s.SSRC
+				pixels := s.MaxResolution.Width * s.MaxResolution.Height
+				if s.Active && s.SSRC != 0 && (s.Quality > bestQuality || s.Quality == bestQuality && pixels > bestPixels) {
+					ssrc, bestQuality, bestPixels = s.SSRC, s.Quality, pixels
 				}
 			}
 			if ssrc != 0 {
@@ -397,7 +405,7 @@ func (w *Watch) follow(early chan ws.Op) {
 					w.lastPLI.Store(0)
 					w.requestKeyframe()
 				}
-				w.log.Info("stream video found", "ssrc", ssrc)
+				w.log.Info("stream video found", "ssrc", ssrc, "streams", fmt.Sprint(v.Streams))
 			}
 		}
 	}
@@ -495,7 +503,20 @@ func (w *Watch) open(pkt []byte) (header []byte, payload []byte, err error) {
 	if len(plain) < 4*extWords {
 		return nil, nil, errors.New("short extension body")
 	}
-	return pkt[:n], plain[4*extWords:], nil
+	payload = plain[4*extWords:]
+	// RTP padding belongs to the transport, not the H264 picture or its
+	// DAVE footer. Its last byte counts all padding bytes, including itself.
+	if pkt[0]&0x20 != 0 {
+		if len(payload) == 0 {
+			return nil, nil, errors.New("missing RTP padding")
+		}
+		padding := int(payload[len(payload)-1])
+		if padding == 0 || padding > len(payload) {
+			return nil, nil, errors.New("invalid RTP padding")
+		}
+		payload = payload[:len(payload)-padding]
+	}
+	return pkt[:n], payload, nil
 }
 
 // receive reads the streamer's video, rebuilds each picture from its
@@ -518,8 +539,14 @@ func (w *Watch) receive() {
 			return
 		}
 		pkt := buf[:n]
-		// RTCP (types 200–223) and anything not RTP version 2 are skipped.
-		if n < 12 || pkt[0]>>6 != 2 || pkt[1]&0x7F >= 72 && pkt[1]&0x7F <= 95 {
+		if n < 8 || pkt[0]>>6 != 2 {
+			continue
+		}
+		if pkt[1] >= 200 && pkt[1] <= 223 {
+			w.receiveReport(pkt, time.Now())
+			continue
+		}
+		if n < 12 {
 			continue
 		}
 		pt := pkt[1] & 0x7F
@@ -542,8 +569,15 @@ func (w *Watch) receive() {
 			continue
 		}
 		w.packets.Add(1)
+		if hdr[0]&0x20 != 0 {
+			w.padded.Add(1)
+		}
 		seq := binary.BigEndian.Uint16(hdr[2:])
 		ts := binary.BigEndian.Uint32(hdr[4:])
+		w.videoBytes.Add(int64(len(payload)))
+		w.mu.Lock()
+		w.reception.record(ssrc, seq, ts, time.Now())
+		w.mu.Unlock()
 		marker := hdr[1]&0x80 != 0
 		gap := haveSeq && seq != lastSeq+1
 		lastSeq, haveSeq = seq, true
@@ -613,7 +647,27 @@ func (w *Watch) decode(au []byte) {
 	n, err := w.conn.dave.Decrypt(godave.UserID(w.p.StreamerID.String()), au, out)
 	if err != nil {
 		if n := w.daveFailed.Add(1); n <= 5 || n%100 == 0 {
-			w.log.Info("could not decrypt a picture", "err", err, "bytes", len(au), "failures", n)
+			parsed, footerErr := frame.Parse(au)
+			var layout []string
+			for _, nal := range splitNALs(au) {
+				if len(nal) > 0 {
+					layout = append(layout, fmt.Sprintf("%d:%d", nal[0]&0x1F, len(nal)))
+					if len(layout) == 16 {
+						break
+					}
+				}
+			}
+			attrs := []any{
+				"err", err, "bytes", len(au), "failures", n,
+				"dave_frame", frame.LooksLikeDAVEFrame(au), "footer_err", footerErr,
+				"nals", strings.Join(layout, ","),
+				"replay_rejected", w.conn.dave.Stats().RejectedReplayFrames,
+			}
+			if parsed != nil {
+				attrs = append(attrs, "dave_nonce", parsed.TruncatedNonce,
+					"footer_bytes", parsed.SupplementalSize, "ranges", fmt.Sprint(parsed.UnencryptedRanges))
+			}
+			w.log.Info("could not decrypt a picture", attrs...)
 		}
 		w.needIDR.Store(true)
 		w.requestKeyframe()
@@ -754,6 +808,8 @@ func (w *Watch) askKeyframes() {
 	t := time.NewTicker(250 * time.Millisecond)
 	defer t.Stop()
 	var lastFrames int64
+	var lastBytes, lastPictures, lastShown int64
+	lastStats := time.Now()
 	var quarter int
 	tick := 0
 	for {
@@ -775,8 +831,19 @@ func (w *Watch) askKeyframes() {
 		w.sendReport()
 		lastFrames = frames
 		if tick++; tick%5 == 0 {
-			w.log.Info("watching", "packets", w.packets.Load(), "pictures", w.assembled.Load(), "lost", w.lost.Load(),
-				"dave_failed", w.daveFailed.Load(), "skipped", w.skipped.Load(), "shown", frames)
+			now := time.Now()
+			seconds := now.Sub(lastStats).Seconds()
+			octets, pictures := w.videoBytes.Load(), w.assembled.Load()
+			w.log.Info("watching", "packets", w.packets.Load(), "pictures", pictures, "lost", w.lost.Load(),
+				"dave_failed", w.daveFailed.Load(), "skipped", w.skipped.Load(), "padded", w.padded.Load(), "shown", frames,
+				"video_kbps", int(float64(octets-lastBytes)*8/seconds/1000),
+				"received_fps", fmt.Sprintf("%.1f", float64(pictures-lastPictures)/seconds),
+				"decoded_fps", fmt.Sprintf("%.1f", float64(frames-lastShown)/seconds))
+			lastBytes, lastPictures, lastShown, lastStats = octets, pictures, frames, now
+			w.mu.Lock()
+			video := w.videoSSRC
+			w.mu.Unlock()
+			w.sendWants(context.Background(), video)
 		}
 		select {
 		case <-t.C:
@@ -808,12 +875,7 @@ func (w *Watch) sendReport() {
 	if w.videoSSRC == 0 || w.aead == nil {
 		return
 	}
-	// Receiver report (201) with one block, for the streamer's video.
-	rr := make([]byte, 8+24)
-	rr[0], rr[1] = 0x81, 201
-	binary.BigEndian.PutUint16(rr[2:], 7)
-	binary.BigEndian.PutUint32(rr[4:], w.ourSSRC)
-	binary.BigEndian.PutUint32(rr[8:], w.videoSSRC)
+	rr := w.reception.report(w.ourSSRC, w.videoSSRC, time.Now())
 	// REMB (206, format 15): "REMB", one SSRC, the bitrate as exponent and
 	// 18-bit mantissa.
 	exp, mant := 0, maxBitrate

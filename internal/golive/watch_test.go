@@ -35,6 +35,65 @@ func (l *lockedBuffer) Bytes() []byte {
 	return bytes.Clone(l.b.Bytes())
 }
 
+// TestWatchOpen checks that only media bytes survive transport decryption,
+// including when an extension and RTP padding surround the DAVE footer.
+func TestWatchOpen(t *testing.T) {
+	for _, mode := range modes {
+		t.Run(mode, func(t *testing.T) {
+			m := &media{}
+			if err := m.useSecret(mode, [32]byte{}); err != nil {
+				t.Fatal(err)
+			}
+			w := &Watch{aead: m.aead}
+			want := []byte{0x65, 0x88, 0x80, 0x11, 0xfa, 0xfa}
+			for _, tc := range []struct {
+				name    string
+				ext     bool
+				padded  bool
+				padding []byte
+				bad     bool
+			}{
+				{name: "plain"},
+				{name: "extension", ext: true},
+				{name: "padding", padded: true, padding: []byte{0, 0, 0, 4}},
+				{name: "extension and padding", ext: true, padded: true, padding: []byte{0, 0, 0, 4}},
+				{name: "zero padding count", padded: true, padding: []byte{0}, bad: true},
+				{name: "oversized padding", padded: true, padding: []byte{255}, bad: true},
+				{name: "padding includes extension", ext: true, padded: true, padding: []byte{8}, bad: true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					header := make([]byte, 12)
+					header[0], header[1] = 0x80, payloadH264
+					var plain []byte
+					if tc.ext {
+						header[0] |= 0x10
+						header = append(header, 0xbe, 0xde, 0, 1)
+						plain = append(plain, 0x10, 0xaa, 0, 0)
+					}
+					if tc.padded {
+						header[0] |= 0x20
+					}
+					plain = append(plain, want...)
+					plain = append(plain, tc.padding...)
+					gotHeader, got, err := w.open(m.seal(header, plain))
+					if tc.bad {
+						if err == nil {
+							t.Fatal("accepted invalid RTP padding")
+						}
+						return
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(gotHeader, header) || !bytes.Equal(got, want) {
+						t.Fatalf("header %x, payload %x; want header %x, payload %x", gotHeader, got, header, want)
+					}
+				})
+			}
+		})
+	}
+}
+
 // TestWatchReceive sends pictures the way a stream is sent, encrypted and
 // cut into packets, and checks that the watcher rebuilds them exactly.
 func TestWatchReceive(t *testing.T) {
