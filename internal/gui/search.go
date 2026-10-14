@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"gioui.org/io/event"
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -42,6 +43,114 @@ var searchFilters = []struct {
 	{"mentions:", "Mentions a specific user", "mentions: user", &iconFilterAt},
 }
 
+// searchSuggestion is a user, channel or kind that a filter being typed
+// could take.
+type searchSuggestion struct {
+	value      string // what goes after the filter's colon
+	title, sub string
+	user       *discord.User
+	channel    bool
+}
+
+// typedFilter is the filter the last word typed starts with, and what
+// follows its colon, or "" when the last word is not a filter.
+func typedFilter(text string) (key, partial string) {
+	if text == "" || strings.HasSuffix(text, " ") {
+		return "", ""
+	}
+	words := strings.Fields(text)
+	last := words[len(words)-1]
+	k, v, ok := strings.Cut(last, ":")
+	if !ok {
+		return "", ""
+	}
+	switch strings.ToLower(k) {
+	case "from", "de":
+		return "from", v
+	case "mentions", "menciones":
+		return "mentions", v
+	case "in", "en":
+		return "in", v
+	case "has", "tiene":
+		return "has", v
+	}
+	return "", ""
+}
+
+// searchSuggestions are what the filter being typed could take, the
+// closest first, a few at most.
+func (c *chatView) searchSuggestions(key, partial string) []searchSuggestion {
+	q := strings.ToLower(partial)
+	const most = 8
+	var out []searchSuggestion
+	switch key {
+	case "from", "mentions":
+		var users []discord.User
+		nicks := map[discord.UserID]string{}
+		if c.selGuild.IsValid() {
+			members, _ := c.st.Cabinet.Members(c.selGuild)
+			for _, m := range members {
+				users = append(users, m.User)
+				nicks[m.User.ID] = m.Nick
+			}
+		} else if c.selChannel != nil {
+			users = append(slices.Clone(c.selChannel.DMRecipients), c.me)
+		}
+		// Those whose name starts with what was typed go first.
+		var first, rest []searchSuggestion
+		for _, u := range users {
+			name := cmpOr(nicks[u.ID], u.DisplayOrUsername())
+			names := strings.ToLower(u.Username + " " + u.DisplayName + " " + nicks[u.ID])
+			if q != "" && !strings.Contains(names, q) {
+				continue
+			}
+			u := u
+			sg := searchSuggestion{value: u.Username, title: name, sub: u.Username, user: &u}
+			if strings.HasPrefix(strings.ToLower(u.Username), q) || strings.HasPrefix(strings.ToLower(name), q) {
+				first = append(first, sg)
+			} else {
+				rest = append(rest, sg)
+			}
+		}
+		byName := func(a, b searchSuggestion) int {
+			return strings.Compare(strings.ToLower(a.title), strings.ToLower(b.title))
+		}
+		slices.SortFunc(first, byName)
+		slices.SortFunc(rest, byName)
+		out = append(first, rest...)
+	case "in":
+		channels, _ := c.st.Cabinet.Channels(c.selGuild)
+		slices.SortFunc(channels, func(a, b discord.Channel) int { return a.Position - b.Position })
+		for _, ch := range channels {
+			if !isTextual(ch.Type) || ch.Type == discord.GuildPublicThread || ch.Type == discord.GuildPrivateThread || ch.Type == discord.GuildAnnouncementThread {
+				continue
+			}
+			if q != "" && !strings.Contains(strings.ToLower(ch.Name), q) || !c.can(ch.ID, discord.PermissionViewChannel) {
+				continue
+			}
+			sub := ""
+			if parent, err := c.st.Cabinet.Channel(ch.ParentID); err == nil {
+				sub = parent.Name
+			}
+			out = append(out, searchSuggestion{value: ch.Name, title: ch.Name, sub: sub, channel: true})
+		}
+	case "has":
+		for _, h := range []string{"link", "embed", "file", "image", "video", "sound", "sticker", "poll"} {
+			if strings.HasPrefix(h, q) {
+				out = append(out, searchSuggestion{value: h, title: h})
+			}
+		}
+	}
+	return out[:min(len(out), most)]
+}
+
+func cmpOr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
 // searchHas are the words has: takes, in English and Spanish, as Discord's
 // search names them.
 var searchHas = map[string]string{
@@ -54,6 +163,12 @@ var searchHas = map[string]string{
 type searchView struct {
 	ed      widget.Editor
 	focused bool
+	// dismiss takes the presses outside the list while it shows.
+	dismiss bool
+	// suggestions are what the filter being typed could be, as last shown,
+	// and the words each puts in its place.
+	suggestions []searchSuggestion
+	suggestBtns []widget.Clickable
 	// open reports whether the results show in place of the members.
 	open    bool
 	scope   discord.Snowflake // the server, or the conversation, searched
@@ -342,6 +457,19 @@ func (c *chatView) updateSearch(gtx layout.Context) {
 			gtx.Execute(key.FocusCmd{Tag: &s.ed})
 		}
 	}
+	for i := range s.suggestBtns {
+		if i < len(s.suggestions) && s.suggestBtns[i].Clicked(gtx) {
+			text := s.ed.Text()
+			k, partial := typedFilter(text)
+			if k == "" {
+				continue
+			}
+			text = strings.TrimSuffix(text, partial) + s.suggestions[i].value + " "
+			s.ed.SetText(text)
+			s.ed.SetCaret(s.ed.Len(), s.ed.Len())
+			gtx.Execute(key.FocusCmd{Tag: &s.ed})
+		}
+	}
 	for i := range s.historyBtns {
 		if i < len(c.u.app.SearchHistory) && s.historyBtns[i].Clicked(gtx) {
 			q := c.u.app.SearchHistory[i]
@@ -400,6 +528,24 @@ func (c *chatView) layoutSearchMenu(gtx layout.Context) {
 	if !s.focused || c.selChannel == nil {
 		return
 	}
+	// A press anywhere else, below the header where the field is, lets go
+	// of the field and closes the list, as Discord's.
+	for {
+		ev, ok := gtx.Event(pointer.Filter{Target: &s.dismiss, Kinds: pointer.Press})
+		if !ok {
+			break
+		}
+		if e, ok := ev.(pointer.Event); ok && e.Position.Y > float32(gtx.Dp(48)) {
+			gtx.Execute(key.FocusCmd{})
+			s.focused = false
+			return
+		}
+	}
+	area := clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops)
+	pass := pointer.PassOp{}.Push(gtx.Ops)
+	event.Op(gtx.Ops, &s.dismiss)
+	pass.Pop()
+	area.Pop()
 	w := gtx.Dp(320)
 	x := c.comp.paneX + c.comp.paneW - w - gtx.Dp(16)
 	history := c.u.app.SearchHistory
@@ -431,6 +577,37 @@ func (c *chatView) layoutSearchMenu(gtx layout.Context) {
 		})
 	}
 	var children []layout.FlexChild
+	if k, partial := typedFilter(s.ed.Text()); k != "" {
+		s.suggestions = c.searchSuggestions(k, partial)
+		if len(s.suggestBtns) < len(s.suggestions) {
+			s.suggestBtns = make([]widget.Clickable, len(s.suggestions))
+		}
+		heading := map[string]string{"from": "From User", "mentions": "Mentions User", "in": "In Channel", "has": "Has"}[k]
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: unit.Dp(6), Bottom: unit.Dp(4)}.Layout(gtx, bold(label(th, 12, colorMuted, heading)).Layout)
+		}))
+		if len(s.suggestions) == 0 {
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.UniformInset(unit.Dp(6)).Layout(gtx, label(th, 14, colorMuted, "No matches").Layout)
+			}))
+		}
+		for i, sg := range s.suggestions {
+			sg := sg
+			lead := func(gtx layout.Context) layout.Dimensions {
+				switch {
+				case sg.user != nil:
+					return c.u.picture(gtx, c.authorAvatarURL(c.selGuild, *sg.user), 24, colorFor(uint64(sg.user.ID)), sg.title, -1)
+				case sg.channel:
+					return label(th, 20, colorText, "#").Layout(gtx)
+				}
+				return icon(gtx, iconFilterHas, 20, colorText)
+			}
+			children = append(children, row(&s.suggestBtns[i], lead, sg.title, sg.sub))
+		}
+		s.drawList(gtx, x, w, children)
+		return
+	}
+	s.suggestions = nil
 	children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Left: unit.Dp(6), Bottom: unit.Dp(4)}.Layout(gtx, bold(label(th, 12, colorMuted, "Filters")).Layout)
 	}))
@@ -467,6 +644,11 @@ func (c *chatView) layoutSearchMenu(gtx layout.Context) {
 			}, q, ""))
 		}
 	}
+	s.drawList(gtx, x, w, children)
+}
+
+// drawList draws the list under the search field at x, w wide.
+func (s *searchView) drawList(gtx layout.Context, x, w int, children []layout.FlexChild) {
 	mgtx := gtx
 	mgtx.Constraints = layout.Constraints{Min: image.Pt(w, 0), Max: image.Pt(w, gtx.Constraints.Max.Y-gtx.Dp(60))}
 	macro := op.Record(gtx.Ops)
