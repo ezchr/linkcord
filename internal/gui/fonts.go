@@ -135,6 +135,11 @@ func newShaper(name string) *text.Shaper {
 	}
 	// Not the rest of Windows' fonts: Gio would read whole any font that
 	// has a character missing here, a hundred megabytes for one mark.
+	// --system-fonts (LINKCORD_SYSTEM_FONTS=1) lets it, for scripts none of
+	// these fonts have, at that cost.
+	if os.Getenv("LINKCORD_SYSTEM_FONTS") == "1" {
+		return text.NewShaper(text.WithCollection(collection))
+	}
 	return text.NewShaper(text.NoSystemFonts(), text.WithCollection(collection))
 }
 

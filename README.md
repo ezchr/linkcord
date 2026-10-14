@@ -12,31 +12,36 @@ Linkcord was created for people on Windows 7 who can no longer run the official 
 |---|---|
 | QR-code, email/password with 2FA, and token sign-in | Captcha rendering |
 | Windows Credential Manager session storage and refreshed-token persistence | |
-| Servers in the user's order, direct messages, collapsible categories, and channel permissions | Unread counters and notification previews |
-| Discord formatting, mentions, quotes, code, spoilers, links, and BOT badges | Threads and forums |
-| Server emoji as images, large emoji-only messages, and animated GIFs | |
-| PNG, animated APNG, and GIF stickers; animated Tenor embeds | Lottie sticker rendering |
-| Image viewer with zoom, pan, and animation | |
-| Video thumbnails and a play button that opens the video in the browser | In-client video playback |
-| Cached avatars and server icons, presence, member lists with avatar decorations, nameplates, server tags, boosts, and who is in voice, and profile cards | |
-| Friends (online, all, pending, blocked), sending, accepting, and canceling friend requests, and message requests | |
-| Attachments, emoji picker, mention autocomplete, and typing indicators | |
-| Voice join/leave, mute/deafen, connection status, and speaking indicators | Verification in a real voice call |
-| Call view with a card for everyone in the channel, full screen, invite links, soundboard, and microphone/speaker choice; a click on a card shows it big | Camera and activities |
-| Screen sharing (Go Live) of a screen, games in full screen included, or a window, end-to-end encrypted, with its sound, a button to turn the sound on and off, quality choice, and who is watching | Watching other people's streams |
-| Settings: microphone and speakers, input and output volume, a microphone test that plays your voice back, noise suppression, automatic gain control, voice activity sensitivity or push to talk, keybinds to talk, mute and deafen that work in any window, Discord's sounds each on or off with its volume, appearance with ten presets and every color to change, and Performance Mode | Account and privacy settings |
+| Servers in the user's order, server folders (drag to move, drop one server on another to make a folder), direct messages, collapsible categories, and channel permissions | |
+| Unread markers, mention counts on servers and folders, unread direct messages in the server column, and jumping to the next unread (Alt+Shift+Up/Down) | Notification previews |
+| Linkcord opens on the server and channel it was left on; each server opens on the channel last read in it | |
+| Discord formatting, mentions, quotes, code, spoilers, links that wrap like Discord's, and BOT badges | Threads and forums |
+| Emoji drawn with Twemoji, Discord's own set; server emoji as images, large emoji-only messages, and animated GIFs | |
+| PNG, APNG and GIF stickers, sent from the picker too | Lottie sticker rendering |
+| Picker with GIFs (Discord's own GIF search), stickers and emoji, a rail of servers and categories, and Discord's GIF, sticker and emoji buttons | |
+| Images, GIFs and videos in one viewer with zoom and pan, their resolution, size and type, a download button and a copy button; pictures and videos can be dragged out to other windows | |
+| Videos play inside Linkcord with seeking, volume and full screen; voice messages play with their waveform and can be recorded and sent | |
+| Pasted and attached pictures show a preview that opens an editor: crop, draw, rotate, flip, undo | |
+| Profiles with banners, server profiles, moving avatars, avatar decorations, profile effects, clickable badges, server tags that open the server's card, activities with their buttons, and roles in the server's order | |
+| Member lists with avatar decorations and nameplates that move under the pointer, server tags, boost gems, and who is in voice | |
+| Friends (online, all, pending, blocked), sending, accepting and cancelling friend requests, and message requests | |
+| Attachments, mention autocomplete with picked mentions shown in their box, and typing indicators | |
+| Voice channels with mute and deafen (gray when the person did it, red when the server did), speaking rings, a call view with a card for everyone, soundboard, invite links, and a history of who joined and left | Camera and activities |
+| Calls in direct messages and groups: call and video call buttons, an incoming call card with Discord's ring, and the call going on shown above the messages with buttons to join | |
+| Screen sharing (Go Live) of a screen or window, with its sound, end-to-end encrypted; watching other people's streams, with their sound, and clipping them | |
+| Settings: devices and volumes, microphone test, noise suppression, gain control, voice activity or push to talk, keybinds that work in any window, Discord's sounds each on or off, appearance with presets and every color, fonts, account and privacy pages, and Performance Mode | |
+| English and Spanish interface, chosen in Windows Settings; a first start follows the language of Windows | Other languages |
 | Polls: voting, results as they come, taking a vote back, ending one's own | Creating polls |
 | Rich Presence: games and programs show what the user does through Discord's local RPC | RPC commands beyond activities |
 | Linkcord's logo beside who else uses Linkcord, and crash and freeze reports, through Linkcord's server | |
-| Discord's own sounds: muting, deafening, joining and leaving, people joining and leaving your voice channel and your stream, push to talk, and messages | |
-| Voice channels show their status under their name, and their chat and menu beside it | Editing channels |
-| Right-click menu on voice members: per-user volume and mute, notes, friends, blocking, roles, nicknames, server mute/deafen, move, disconnect, timeout, kick, and ban, as permissions allow | Ignore, apps, and moderator view |
-| React, reply, edit, copy, delete, and inline reaction controls | |
-| Selecting text in messages and embeds with the mouse (double click for a word, triple for all), copied with Ctrl+C or the right-click menu | Selecting across several messages |
-| Bot buttons, select menus, and forms; components V2 layouts; embeds with formatting, fields, authors, and footers | Multi-value select menus |
-| Server boost goal, boost levels and perks, and scheduled events | |
-| Closing the window keeps Linkcord running, voice included, with an icon in the notification area; clicking it, or starting Linkcord again, brings the window back, and its menu or the profile menu quits | |
-| English interface and project documentation | Testing on a physical Windows 7 machine |
+| Right-click menus on members, channels, servers and messages, with moderation as permissions allow | |
+| React, reply, edit, copy, delete, forward, and a log of messages others delete while Linkcord is open | |
+| Bot buttons, select menus and forms; components V2 layouts; embeds with formatting, fields, authors and footers | Multi-value select menus |
+| Server boost goal, boost levels and perks, scheduled events, and online and member counts under the server name | |
+| Closing the window keeps Linkcord running, voice included, with an icon in the notification area, which is there while the window is open too | |
+| Under Log Out: Discord's build, Linkcord's version and Windows' | Testing on a physical Windows 7 machine |
+
+Discord keeps one voice connection for an account, across all its devices, so Linkcord, as Discord's app, is in one voice channel or call at a time: joining a call while in a server's channel moves you to it.
 
 Shift-click Delete skips confirmation. Up Arrow in an empty composer edits your most recent message.
 
@@ -96,7 +101,7 @@ The repository is currently private. Release checks use `LINKCORD_GITHUB_TOKEN`,
 | `--no-update` or `LINKCORD_NO_UPDATE=1` | Skips executable update checks but still refreshes Discord metadata. |
 | `--demo` or `LINKCORD_DEMO=1` | Shows account-free demo data and performs no startup update requests. |
 | `--low-power` or `LINKCORD_LOW_POWER=1` | Shows static GIF/APNG previews to reduce animation CPU and memory use. |
-| `--system-fonts` | Compatibility option; full system font fallback is already enabled. |
+| `--system-fonts` or `LINKCORD_SYSTEM_FONTS=1` | Lets Gio look through all of Windows' fonts for characters Linkcord's own fonts lack, which uses much more memory. |
 
 Development builds identify themselves as `v1.4.2-dev`; they cannot downgrade to an older stable release. For a release, build the graphical entry point with its exact GitHub tag:
 
@@ -125,17 +130,19 @@ The active chat refreshes from Discord when the window regains focus, returns fr
 
 ## Resource usage
 
-Normal mode retains full system font fallback, bundled Go and Noto Color Emoji fonts, and animated GIF/APNG previews. Visible animations retain their original frame scheduling even when the window is unfocused; minimized windows do not request animation redraws.
+Fonts are most of what Linkcord keeps in memory, as Gio reads every glyph of a font it loads. So Segoe UI, Go and Noto Color Emoji are loaded at start, and the rest only once text shown needs them: Segoe UI Symbol and Cambria for symbols and decorative letters, Yu Gothic (also used for Chinese characters) for Japanese and Chinese, Malgun Gothic for Korean, and Nirmala, Leelawadee, Myanmar Text and Ebrima for Indic scripts, Thai, Myanmar and Ethiopic, one face of each. Gio does not look through the rest of Windows' fonts for characters these lack, which would read a whole font for one mark; `--system-fonts` lets it, at that cost. Emoji variation selectors (U+FE0E, U+FE0F) are left out of drawn text, as no font has them.
 
-Decoded images use a 64 MiB cache budget with eviction of older completed entries. Up to two image loads decode at once, with at most 64 pending loads. Each animation retains at most 48 MiB of frames, with a maximum decoded side of 2048 pixels. Animations that exceed the retained-frame budget merge frame delays, preserving duration with fewer retained frames. The currently requested entry is protected from eviction.
+Animated GIFs, APNGs, emoji and avatars play while Linkcord's window is in front, and stop while it is in the background or minimized, as Discord plays GIFs only while it is focused: every frame of an animation redraws the window. Avatar decorations and nameplates move only under the pointer, and on profile cards.
 
-Open your own user profile and click **Performance Mode** to toggle still GIF/APNG previews. The choice is saved locally and applies immediately. On uses the first animation frame without retaining subsequent frames or scheduling animation redraws. Off restores animation loading. Both modes retain full font fallback. `--low-power` or `LINKCORD_LOW_POWER=1` overrides the saved startup preference; `LINKCORD_LOW_POWER=0` starts in normal mode.
+Decoded images use a 64 MiB cache budget with eviction of older completed entries. Up to four cached images are read from disk at once and twelve downloads run at once, with at most 64 pending loads. Small files, such as emoji and stickers, are also kept as downloaded, so that showing them at another size needs no download. Each animation retains at most 48 MiB of frames, with a maximum decoded side of 2048 pixels. Animations that exceed the retained-frame budget merge frame delays, preserving duration with fewer retained frames. The currently requested entry is protected from eviction.
+
+Open your own user profile and click **Performance Mode** to toggle still GIF/APNG previews. The choice is saved locally and applies immediately. On uses the first animation frame without retaining subsequent frames or scheduling animation redraws. Off restores animation loading. `--low-power` or `LINKCORD_LOW_POWER=1` overrides the saved startup preference; `LINKCORD_LOW_POWER=0` starts in normal mode.
 
 Video attachments and direct video embeds open inside Linkcord with pause, mute, replay, and close controls. Closing the viewer or logging out cancels playback. Playback requires `ffmpeg` and `ffprobe` on PATH, beside `linkcord.exe`, or in its `media` subfolder. Videos download to a temporary file before playback; closing the viewer removes the file after decoder shutdown. The current limits are 256 MiB per download, a 4K pixel count, and 120 fps. Provider watch pages without direct media URLs and DRM streams are unsupported. Variable-frame-rate input is normalized to its reported average frame rate. Builds with `no_voice` play video silently.
 
 These are application cache limits, not a limit on total process memory. Fonts, message state, the Go runtime, and graphics-driver allocations also consume memory.
 
-For a controlled diagnostic session, set `LINKCORD_PROFILE` to an output folder. On a normal window close it writes `cpu.pprof`, `heap.pprof`, and `summary.json`, including rendered frame count and heap statistics. Ordinary launches do not enable profiling.
+For a controlled diagnostic session, set `LINKCORD_PROFILE` to an output folder. On a normal window close, or after `LINKCORD_PROFILE_SECONDS` seconds with Linkcord still open, it writes `cpu.pprof`, `heap.pprof`, and `summary.json`, including rendered frame count and heap statistics. Ordinary launches do not enable profiling.
 
 ## Screen sharing
 
@@ -173,6 +180,8 @@ In a voice channel, the log says every minute how many voice packets were sent a
 | `LINKCORD_RENDER=...` | Output folder for screenless rendering tests. |
 | `LINKCORD_LIVE_TENOR=...` | A Tenor media URL for the optional live animation smoke test. |
 | `LINKCORD_LIVE_APNG=...` | An APNG URL for the optional live animation smoke test. |
+| `LINKCORD_DEMO_VIDEO=...` | A video URL the demo shows in a message, to test playback. `LINKCORD_DEMO_VIDEO_SIZE=360x640` gives it another shape and makes it the newest message. |
+| `LINKCORD_DEMO_CALL=1` | The demo rings with a call from a made-up friend, who is in it. |
 
 `scripts/test-window.ps1` sends clicks, wheel events, and keys directly to the application's window without moving the real mouse, then captures its content even when another window covers it. See the script's header for usage.
 
@@ -245,11 +254,13 @@ When merging upstream discordo changes, replace `github.com/ayn2op/discordo` mod
 
 ## Fonts and color emoji
 
-Noto Color Emoji is embedded in the executable and supplies PNG-based CBDT glyphs. Segoe UI Emoji's COLR layers are unsupported by the current renderer.
+Emoji in messages, reactions and the picker are Twemoji pictures, as Discord draws them, from jsDelivr, kept in the image cache. Noto Color Emoji, embedded in the executable, draws emoji elsewhere, such as in names, and those Twemoji lacks. Segoe UI Emoji's COLR layers are unsupported by the current renderer.
 
-`narrowSpace` in `theme.go` reduces the emoji font's unusually wide space; `theme_test.go` covers it. Segoe UI Symbol and Cambria Math provide fallback symbols and decorative letters.
+`narrowSpace` in `theme.go` reduces the emoji font's unusually wide space; `theme_test.go` covers it. The fallback fonts are listed in `theme.go` and loaded as `fontneeds.go` finds text that needs them; see Resource usage.
 
 Do not set a fixed `th.Face`: bold text must retain fallback-font lookup.
+
+The interface's text goes through `tr` in `i18n.go`, which `label` and the text fields call; `i18n_es.go` holds the Spanish, by the English text. Text that starts or ends with a space also translates the beginning or end of longer text, such as "Replying to " and a name.
 
 ## Interface implementation notes
 
@@ -270,10 +281,9 @@ Refreshing a Discord web-build number can update client metadata. Actual API, ga
 ## Remaining work
 
 - Test on a physical Windows 7 machine, including its root-certificate configuration.
-- Verify voice in a real call.
-- Unread counters, mention counters, and notification previews.
-- Lottie stickers, threads, forums, and friends.
-- Executable icon/manifest and installation packaging.
+- Camera in voice channels and calls.
+- Notification previews, threads and forums, and Lottie stickers.
+- Text built from several parts, such as "MEMBERS — 3", in Spanish.
 
 ## Licenses
 

@@ -25,7 +25,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "print the embedded version and exit")
 	demo := flag.Bool("demo", false, "show demo data without connecting or checking for updates")
 	noUpdate := flag.Bool("no-update", false, "skip executable updates; still refresh Discord metadata")
-	systemFonts := flag.Bool("system-fonts", false, "enable full system font fallback for additional scripts")
+	systemFonts := flag.Bool("system-fonts", false, "look through all of Windows' fonts for characters Linkcord's fonts lack (uses much more memory)")
 	lowPower := flag.Bool("low-power", false, "show static animation previews to reduce CPU and memory use")
 	check := flag.Bool("check-updates", false, "check release and Discord metadata, print JSON, and exit without installing")
 	minimized := flag.Bool("minimized", false, "start hidden in the notification area, as when Windows starts Linkcord")
