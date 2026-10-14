@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ezchr/linkcord/internal/consts"
 )
@@ -21,6 +22,12 @@ func Load(path string, level slog.Level) (io.Closer, error) {
 	if err := os.MkdirAll(filepath.Dir(path), os.ModePerm); err != nil {
 		return nil, err
 	}
+
+	// The last session's log is kept beside the new one: what went wrong
+	// in it is often why the app was restarted.
+	prev := strings.TrimSuffix(path, filepath.Ext(path)) + ".prev" + filepath.Ext(path)
+	os.Remove(prev)
+	os.Rename(path, prev)
 
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
 	if err != nil {
