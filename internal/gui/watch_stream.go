@@ -49,12 +49,18 @@ func (c *chatView) startWatching(vs discord.VoiceState) {
 		u.voiceFailed("Could not watch the stream", err)
 		return
 	}
+	// The stream is named for the server of its channel: a voice state does
+	// not always carry it, and a guild stream named as a call is not found.
+	guildID := vs.GuildID
+	if ch, err := c.st.Cabinet.Channel(vs.ChannelID); err == nil {
+		guildID = ch.GuildID
+	}
 	c.watch.streamer, c.watch.starting = vs.UserID, true
 	var w *golive.Watch
 	params := golive.WatchParams{
 		Main:       c.st,
 		Subscribe:  func(h any) func() { return subscribeStream(c, h) },
-		GuildID:    vs.GuildID,
+		GuildID:    guildID,
 		ChannelID:  vs.ChannelID,
 		StreamerID: vs.UserID,
 		UserID:     c.me.ID,

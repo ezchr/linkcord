@@ -109,8 +109,50 @@ func init() {
 	unmarshalers.Add(func() ws.Event { return new(videoEvent) })
 }
 
+// joinVariant is a way of joining a stream server as a viewer. How viewers
+// must join is not documented, and a server ends a join it does not take
+// (4006, the session is no longer valid) without saying what: each is tried
+// in turn, with a new token, and the log tells which one is taken.
+type joinVariant struct {
+	name string
+	// video and streams are said in the identify; slot describes the video
+	// slots the server gives before asking for the media.
+	video   bool
+	streams []streamInfo
+	slot    bool
+}
+
+var joinVariants = []joinVariant{
+	{name: "screen-slot", video: true, streams: []streamInfo{{Type: "screen", RID: "100", Quality: 100}}, slot: true},
+	{name: "screen", video: true, streams: []streamInfo{{Type: "screen", RID: "100", Quality: 100}}},
+	{name: "plain", video: true},
+	{name: "no-video"},
+}
+
 // StartWatching starts watching the stream of p.StreamerID.
 func StartWatching(ctx context.Context, p WatchParams) (*Watch, error) {
+	var errs []error
+	for _, v := range joinVariants {
+		w, err := startWatching(ctx, p, v)
+		if err == nil {
+			w.log.Info("joined the stream", "variant", v.name)
+			return w, nil
+		}
+		slog.Info("could not join the stream", "variant", v.name, "err", err)
+		errs = append(errs, fmt.Errorf("%s: %w", v.name, err))
+		// Only a refused join is worth another way; the rest would fail the
+		// same.
+		if !errors.Is(err, errJoinRefused) || ctx.Err() != nil {
+			break
+		}
+	}
+	return nil, errors.Join(errs...)
+}
+
+// errJoinRefused is when the stream server ends the session while joining.
+var errJoinRefused = errors.New("the stream server refused to join")
+
+func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, error) {
 	w := &Watch{
 		p:    p,
 		key:  StreamKey(p.GuildID, p.ChannelID, p.StreamerID),
@@ -209,8 +251,8 @@ func StartWatching(ctx context.Context, p WatchParams) (*Watch, error) {
 		UserID:    p.UserID,
 		SessionID: p.SessionID,
 		Token:     se.Token,
-		Video:     true,
-		Streams:   []streamInfo{{Type: "screen", RID: "100", Quality: 100}},
+		Video:     v.video,
+		Streams:   v.streams,
 	}, daveChannel.Uint64(), w.log)
 	// The streamer's SSRCs come in an Op 12, perhaps before the ready.
 	early := make(chan ws.Op, 64)
@@ -231,7 +273,7 @@ func StartWatching(ctx context.Context, p WatchParams) (*Watch, error) {
 	w.conn.send(wait, &versionCommand{})
 	// As Discord's clients do, viewers too: the video slots the server gave,
 	// not sending.
-	if len(r.Streams) > 0 {
+	if v.slot && len(r.Streams) > 0 {
 		st := r.Streams[0]
 		w.conn.send(wait, &videoCommand{
 			AudioSSRC: r.SSRC, VideoSSRC: st.SSRC, RTXSSRC: st.RTXSSRC,
@@ -288,7 +330,7 @@ func waitOp(ctx context.Context, log *slog.Logger, ops <-chan ws.Op, keep chan w
 			log.Info("stream server op", "op", op.Code, "type", fmt.Sprintf("%T", op.Data))
 			switch ev := op.Data.(type) {
 			case *ws.CloseEvent:
-				return nil, fmt.Errorf("the stream server closed the connection (code %d): %w", ev.Code, ev.Err)
+				return nil, fmt.Errorf("%w (code %d): %w", errJoinRefused, ev.Code, ev.Err)
 			case *ws.BackgroundErrorEvent:
 				log.Warn("stream server error", "err", ev.Err)
 				continue

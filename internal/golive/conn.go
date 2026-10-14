@@ -35,7 +35,7 @@ type identifyCommand struct {
 	SessionID              string         `json:"session_id"`
 	Token                  string         `json:"token"`
 	Video                  bool           `json:"video"`
-	Streams                []streamInfo   `json:"streams"`
+	Streams                []streamInfo   `json:"streams,omitempty"`
 	MaxDAVEProtocolVersion int            `json:"max_dave_protocol_version"`
 }
 
