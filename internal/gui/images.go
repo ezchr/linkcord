@@ -110,7 +110,7 @@ func newImages(u *ui) *images {
 	return &images{
 		u:        u,
 		entries:  make(map[string]*imageEntry),
-		sem:      make(chan struct{}, 6),
+		sem:      make(chan struct{}, 12),
 		decode:   make(chan struct{}, 2),
 		client:   &http.Client{Timeout: 30 * time.Second},
 		dir:      dir,
@@ -190,12 +190,15 @@ func (im *images) failed(url string, size int) bool {
 }
 
 func (im *images) load(key, url string, size int, e *imageEntry) {
+	// The limit is for reading the disk only: holding it while downloading
+	// let two pictures load at a time, which made emoji and stickers crawl.
 	im.decode <- struct{}{}
 	frames, delays, err := im.animFromDisk(key, size)
 	var img image.Image
 	if err != nil && (!isGIFVideoURL(url) || im.lowPower) {
 		img, err = im.fromDisk(stillKey(key, url))
 	}
+	<-im.decode
 	if err != nil {
 		frames, delays, img, err = im.download(key, url, size)
 	}
@@ -227,7 +230,6 @@ func (im *images) load(key, url string, size int, e *imageEntry) {
 	im.pendingLoads--
 	im.trimCacheLocked(e)
 	im.mu.Unlock()
-	<-im.decode
 	// One redraw at most every 50 ms, including failed loads so that their
 	// fallback appears without waiting for another user event.
 	if im.u != nil && im.redraw.CompareAndSwap(false, true) {
@@ -303,6 +305,23 @@ func stillKey(key, url string) string {
 
 // fetch downloads the picture at url.
 func (im *images) fetch(url string) ([]byte, error) {
+	// Small files, such as emoji and stickers, are kept as downloaded too,
+	// so that showing them at another size needs no download.
+	raw := ""
+	if im.dir != "" && !isGIFVideoURL(url) {
+		raw = strings.TrimSuffix(im.path("raw:"+url), ".png") + ".raw"
+		if data, err := os.ReadFile(raw); err == nil {
+			return data, nil
+		}
+	}
+	data, err := im.fetchNet(url)
+	if err == nil && raw != "" && len(data) <= 512<<10 {
+		writeFile(raw, data)
+	}
+	return data, err
+}
+
+func (im *images) fetchNet(url string) ([]byte, error) {
 	resp, err := im.client.Get(url)
 	if err != nil {
 		return nil, err

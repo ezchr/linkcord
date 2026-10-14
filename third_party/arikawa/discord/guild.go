@@ -65,6 +65,8 @@ type Guild struct {
 	Roles []Role `json:"roles"`
 	// Emojis are the custom guild emojis.
 	Emojis []Emoji `json:"emojis"`
+	// Stickers are the server's stickers, sent with it to user accounts.
+	Stickers []StickerItem `json:"stickers,omitempty"`
 	// Features are the enabled guild features.
 	Features []GuildFeature `json:"features"`
 

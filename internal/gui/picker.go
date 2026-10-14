@@ -561,9 +561,16 @@ func (c *chatView) fetchStickers(guilds []discord.GuildID) {
 	}
 	var missing []discord.GuildID
 	for _, g := range guilds {
-		if _, ok := c.stickers.byGuild[g]; !ok {
-			missing = append(missing, g)
+		if _, ok := c.stickers.byGuild[g]; ok {
+			continue
 		}
+		// Discord sends the stickers with each server, as its app uses them;
+		// only a server that came without them is asked.
+		if guild, err := c.st.Cabinet.Guild(g); err == nil && guild.Stickers != nil {
+			c.stickers.byGuild[g] = guild.Stickers
+			continue
+		}
+		missing = append(missing, g)
 	}
 	if len(missing) == 0 {
 		return
