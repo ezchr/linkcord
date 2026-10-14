@@ -85,7 +85,14 @@ func (c *chatView) layoutGuildHeader(gtx layout.Context, title string) layout.Di
 		layout.Inset{Left: unit.Dp(16), Right: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return vcenter(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-					layout.Flexed(1, oneLine(bold(label(th, 16, colorHeader, title))).Layout),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						// The members online and in all, small, under the name.
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+							layout.Rigid(oneLine(bold(label(th, 16, colorHeader, title))).Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return c.layoutGuildCounts(gtx, c.selGuild)
+							}))
+					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						ic := iconMenuDown
 						if gm.open {

@@ -1451,12 +1451,6 @@ func (c *chatView) layoutChannels(gtx layout.Context) layout.Dimensions {
 			}
 			return header(gtx, th, title)
 		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if !c.selGuild.IsValid() {
-				return layout.Dimensions{}
-			}
-			return c.layoutGuildCounts(gtx, c.selGuild)
-		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			// Channels, categories and people in voice can be dragged,
 			// read before the rows take their clicks.

@@ -20,7 +20,8 @@ type guildCount struct {
 	fetching      bool
 }
 
-// layoutGuildCounts is the line under the server's name: a green dot with
+// layoutGuildCounts is the line under the server's name, in its button: a
+// green dot with
 // the members online, a gray one with all of them, as on Discord's invites.
 func (c *chatView) layoutGuildCounts(gtx layout.Context, id discord.GuildID) layout.Dimensions {
 	if c.guildCounts == nil {
@@ -30,6 +31,10 @@ func (c *chatView) layoutGuildCounts(gtx layout.Context, id discord.GuildID) lay
 	if n == nil {
 		n = &guildCount{}
 		c.guildCounts[id] = n
+	}
+	// The demo has its few members.
+	if c.demo {
+		n.online, n.total, n.at = 5, 6, time.Now()
 	}
 	// Asked again every five minutes, never while drawing.
 	if !n.fetching && time.Since(n.at) > 5*time.Minute {
@@ -50,22 +55,20 @@ func (c *chatView) layoutGuildCounts(gtx layout.Context, id discord.GuildID) lay
 	th := c.u.th
 	dot := func(col colorT) layout.Widget {
 		return func(gtx layout.Context) layout.Dimensions {
-			s := gtx.Dp(8)
+			s := gtx.Dp(7)
 			paint.FillShape(gtx.Ops, col, clip.Ellipse(image.Rect(0, 0, s, s)).Op(gtx.Ops))
 			return layout.Dimensions{Size: image.Pt(s, s)}
 		}
 	}
-	return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16), Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-			layout.Rigid(dot(colorGreen)),
-			layout.Rigid(layout.Spacer{Width: unit.Dp(5)}.Layout),
-			layout.Rigid(oneLine(label(th, 12, colorMuted, fmt.Sprintf("%s Online", groupThousands(n.online)))).Layout),
-			layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
-			layout.Rigid(dot(colorMuted)),
-			layout.Rigid(layout.Spacer{Width: unit.Dp(5)}.Layout),
-			layout.Rigid(oneLine(label(th, 12, colorMuted, fmt.Sprintf("%s Members", groupThousands(n.total)))).Layout),
-		)
-	})
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(dot(colorGreen)),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
+		layout.Rigid(oneLine(label(th, 11, colorMuted, fmt.Sprintf("%s Online", groupThousands(n.online)))).Layout),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+		layout.Rigid(dot(colorMuted)),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
+		layout.Rigid(oneLine(label(th, 11, colorMuted, fmt.Sprintf("%s Members", groupThousands(n.total)))).Layout),
+	)
 }
 
 // groupThousands writes n with commas: 12,480.
