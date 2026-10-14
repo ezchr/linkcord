@@ -27,7 +27,11 @@ var iconSettings = mustIcon(icons.ActionSettings)
 type settingsPage int
 
 const (
-	pageVoice settingsPage = iota
+	pageAccount settingsPage = iota
+	pageProfiles
+	pageSocial
+	pagePrivacy
+	pageVoice
 	pageKeybinds
 	pageSounds
 	pageAppearance
@@ -35,7 +39,10 @@ const (
 	settingsPages
 )
 
-var settingsPageNames = [settingsPages]string{"Voice & Video", "Keybinds", "Sounds", "Appearance", "Advanced"}
+var settingsPageNames = [settingsPages]string{
+	"My Account", "Profiles", "Content & Social", "Data & Privacy",
+	"Voice & Video", "Keybinds", "Sounds", "Appearance", "Advanced",
+}
 
 // settingsView is the screen of the user's settings, over the whole window,
 // as Discord's, opened by the gear beside the voice buttons.
@@ -71,7 +78,9 @@ type settingsView struct {
 	soundVolume            map[string]*slider
 
 	// Appearance.
-	look         appearanceView
+	look appearanceView
+	// The account's pages.
+	acct         accountView
 	keybindsLink widget.Clickable
 
 	// Keybinds: recording is the action whose keys are being recorded.
@@ -99,7 +108,8 @@ func (c *chatView) openSettings() {
 	}
 	s.level = voice.SilentLevel
 	c.u.loadDevices()
-	c.showSettingsPage(pageVoice)
+	c.loadAccount()
+	c.showSettingsPage(pageAccount)
 }
 
 // closeSettings goes back to the chat, letting go of the microphone.
@@ -312,6 +322,7 @@ func (c *chatView) updateSettings(gtx layout.Context) {
 	}
 	c.updateSoundSettings(gtx)
 	c.updateAppearance(gtx)
+	c.updateAccount(gtx)
 	if s.agcBtn.Clicked(gtx) {
 		settings.NoAutoGain = !settings.NoAutoGain
 		u.applyVoiceSettings()
@@ -457,10 +468,16 @@ func (c *chatView) layoutSettingsSidebar(gtx layout.Context) layout.Dimensions {
 			})
 		})
 	}
-	children := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Left: unit.Dp(10), Bottom: unit.Dp(6)}.Layout(gtx, oneLine(bold(label(th, 12, colorMuted, "USER SETTINGS"))).Layout)
-	})}
+	heading := func(txt string) layout.FlexChild {
+		return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: unit.Dp(10), Bottom: unit.Dp(6), Top: unit.Dp(6)}.Layout(gtx, oneLine(bold(label(th, 12, colorMuted, txt))).Layout)
+		})
+	}
+	children := []layout.FlexChild{layout.Rigid(c.layoutSettingsUser), heading("USER SETTINGS")}
 	for p := range settingsPages {
+		if p == pageVoice {
+			children = append(children, heading("APP SETTINGS"))
+		}
 		children = append(children, row(&s.pages[p], settingsPageNames[p], colorMuted, s.page == p, nil))
 	}
 	children = append(children,
@@ -509,6 +526,14 @@ func (c *chatView) layoutSettingsPage(gtx layout.Context) layout.Dimensions {
 		rows = c.voiceSettingsRows()
 	case pageKeybinds:
 		rows = c.keybindRows()
+	case pageAccount:
+		rows = c.myAccountRows()
+	case pageProfiles:
+		rows = c.profileRows()
+	case pageSocial:
+		rows = c.socialRows()
+	case pagePrivacy:
+		rows = c.privacyRows()
 	case pageSounds:
 		rows = c.soundRows()
 	case pageAppearance:

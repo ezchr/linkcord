@@ -145,6 +145,19 @@ func button(gtx layout.Context, th *material.Theme, click *widget.Clickable, bg 
 
 // textField is an editor over a dark rounded background.
 func textField(gtx layout.Context, th *material.Theme, ed *widget.Editor, hint string) layout.Dimensions {
+	// Outlined, so that it shows on any colors chosen, even all black.
+	return layout.Stack{}.Layout(gtx,
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions { return textFieldBody(gtx, th, ed, hint) }),
+		layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+			r := image.Rectangle{Max: gtx.Constraints.Min}
+			w := max(gtx.Dp(1), 1)
+			paint.FillShape(gtx.Ops, colorInput, clip.Stroke{Path: clip.UniformRRect(r, gtx.Dp(4)).Path(gtx.Ops), Width: float32(w)}.Op())
+			return layout.Dimensions{Size: r.Max}
+		}),
+	)
+}
+
+func textFieldBody(gtx layout.Context, th *material.Theme, ed *widget.Editor, hint string) layout.Dimensions {
 	return rounded(gtx, colorServers, 4, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
