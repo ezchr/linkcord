@@ -199,7 +199,9 @@ func (c *chatView) avatarStatus(gtx layout.Context, user discord.User, guildID d
 // avatarStatusSpeaking is avatarStatus with the green ring of who is
 // speaking around the picture if speaking, as Discord shows it.
 func (c *chatView) avatarStatusSpeaking(gtx layout.Context, user discord.User, guildID discord.GuildID, size unit.Dp, ring colorT, speaking bool) layout.Dimensions {
-	dims := c.u.picture(gtx, cdnSize(user.AvatarURLWithType(discord.PNGImage)), size, colorFor(uint64(user.ID)), user.DisplayOrUsername(), -1)
+	// The picture of their server profile in a server, as the member list
+	// and the chat show it.
+	dims := c.u.picture(gtx, c.authorAvatarURL(guildID, user), size, colorFor(uint64(user.ID)), user.DisplayOrUsername(), -1)
 	if speaking {
 		speakingRing(gtx, dims.Size.X, ring)
 	}
