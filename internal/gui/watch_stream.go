@@ -188,6 +188,17 @@ func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, 
 		scale := min(float32(size.X)/float32(b.X), float32(size.Y)/float32(b.Y)) / gtx.Metric.PxPerDp
 		widget.Image{Src: *frame, Fit: widget.Contain, Scale: scale}.Layout(igtx)
 		c.layoutStreamInfo(gtx)
+		if ids, ok := c.streamViewers(vs); ok && len(ids) > 0 {
+			t := op.Offset(image.Pt(gtx.Dp(10), gtx.Dp(10))).Push(gtx.Ops)
+			m := op.Record(gtx.Ops)
+			d := layout.UniformInset(unit.Dp(6)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return c.layoutStreamViewers(gtx, vs.GuildID, ids)
+			})
+			call := m.Stop()
+			paint.FillShape(gtx.Ops, withAlpha(rgb(0x000000), 0xa0), clip.UniformRRect(image.Rectangle{Max: d.Size}, gtx.Dp(6)).Op(gtx.Ops))
+			call.Add(gtx.Ops)
+			t.Pop()
+		}
 		return true, nil
 	}
 	if c.watch.buttons == nil {

@@ -160,6 +160,11 @@ func (c *chatView) layoutLiveHover(gtx layout.Context) {
 			if game != "" {
 				rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout), layout.Rigid(bold(label(th, 15, colorHeader, game)).Layout))
 			}
+			if ids, ok := c.streamViewers(h.vs); ok && len(ids) > 0 {
+				rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return c.layoutStreamViewers(gtx, h.vs.GuildID, ids)
+				}))
+			}
 			if joined {
 				rows = append(rows, layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout), layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X

@@ -125,6 +125,8 @@ type chatView struct {
 	// stream whose card shows while its streamer is hovered.
 	previews map[string]*streamPreview
 	live     liveHover
+	// viewers are who watch each stream, by its key, as Discord said.
+	viewers map[string][]discord.UserID
 	// clips is the window that makes clips of the voice channel.
 	clips clipView
 	// shownBlocked are the messages of blocked users the user asked to see.
@@ -386,13 +388,14 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 	c.composer.Submit = true
 
 	stopChan, stopStatus, stopPolls, stopMine := st.AddChanHandler(c.events), c.watchVoiceStatus(), c.watchPolls(), c.watchMyPresence()
-	stopSounds := c.watchSoundboard()
+	stopSounds, stopViewers := c.watchSoundboard(), c.watchViewers()
 	c.stopEvents = func() {
 		stopChan()
 		stopStatus()
 		stopPolls()
 		stopMine()
 		stopSounds()
+		stopViewers()
 	}
 	go c.pump()
 	return c
