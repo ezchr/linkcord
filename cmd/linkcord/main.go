@@ -28,6 +28,7 @@ func main() {
 	systemFonts := flag.Bool("system-fonts", false, "enable full system font fallback for additional scripts")
 	lowPower := flag.Bool("low-power", false, "show static animation previews to reduce CPU and memory use")
 	check := flag.Bool("check-updates", false, "check release and Discord metadata, print JSON, and exit without installing")
+	minimized := flag.Bool("minimized", false, "start hidden in the notification area, as when Windows starts Linkcord")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version.String())
@@ -50,6 +51,9 @@ func main() {
 	}
 	if *noUpdate {
 		os.Setenv("LINKCORD_NO_UPDATE", "1")
+	}
+	if *minimized {
+		os.Setenv("LINKCORD_MINIMIZED", "1")
 	}
 	// A fixed window class lets a second start find this window whatever
 	// the executable is called.

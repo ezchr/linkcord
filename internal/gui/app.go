@@ -134,6 +134,8 @@ type ui struct {
 	images *images
 	// appearance are the colors the user chose.
 	appearance appearanceSettings
+	// app is how Linkcord looks and behaves otherwise.
+	app appSettings
 	// rpcStarted reports whether Discord's RPC is served, and rpcMe is who
 	// it says the user is.
 	rpcStarted bool
@@ -161,7 +163,7 @@ func newUI(w *app.Window) *ui {
 	// The colors chosen are set before anything takes its own copy of them.
 	appearance := loadAppearance()
 	applyAppearance(appearance)
-	u := &ui{win: w, th: newTheme(), focused: true, appearance: appearance}
+	u := &ui{win: w, th: newTheme(), focused: true, appearance: appearance, app: loadAppSettings()}
 	u.images = newImages(u)
 	if os.Getenv(demoEnvVar) == "1" {
 		u.startDemo()
@@ -216,7 +218,7 @@ func (u *ui) loop() error {
 			// Closing the window leaves Linkcord running in the
 			// notification area, as Discord does, unless quitting.
 			slog.Info("window closing", "quitting", u.quitting.Load())
-			if !u.quitting.Load() && u.hideToTray() {
+			if !u.quitting.Load() && !u.app.QuitOnClose && u.hideToTray() {
 				e.Abort()
 			}
 		case app.DestroyEvent:
@@ -260,6 +262,7 @@ func (u *ui) loop() error {
 			if u.images != nil {
 				u.images.newFrame()
 			}
+			u.applyZoom(&gtx)
 			u.layout(gtx)
 			laid := time.Since(start)
 			e.Frame(gtx.Ops)

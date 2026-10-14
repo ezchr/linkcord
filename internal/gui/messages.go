@@ -211,6 +211,8 @@ func isRegular(m discord.Message) bool {
 }
 
 func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
+	// The chat's text is as big as chosen.
+	gtx.Metric.PxPerSp *= c.u.app.chatScale()
 	th := c.u.th
 	m := c.messages[i]
 	if !isRegular(m) {
@@ -218,7 +220,7 @@ func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
 			label(th, 14, colorMuted, c.systemText(m)).Layout)
 	}
 	grouped := c.grouped(i)
-	top := unit.Dp(16)
+	top := c.u.app.groupGap()
 	if grouped {
 		top = 2
 	}

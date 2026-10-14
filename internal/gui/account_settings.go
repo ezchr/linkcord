@@ -682,4 +682,3 @@ func (c *chatView) layoutSettingsUser(gtx layout.Context) layout.Dimensions {
 		}, c.settings.page == pageProfiles)
 	})
 }
-

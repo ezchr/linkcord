@@ -214,7 +214,7 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 		}
 		name := cmp.Or(m.Nick, m.User.DisplayOrUsername())
 		nameColor := colorText
-		if guildID.IsValid() {
+		if guildID.IsValid() && !c.u.app.NoRoleColors {
 			if col, ok := state.MemberColor(m, func(id discord.RoleID) *discord.Role {
 				role, _ := c.st.Cabinet.Role(guildID, id)
 				return role

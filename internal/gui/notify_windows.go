@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"os"
 	"syscall"
 	"unsafe"
 
@@ -39,9 +40,18 @@ func (u *ui) notify() {
 	u.playSound(dcsound.Message)
 }
 
-// viewEvent keeps the native window handle, which notify needs.
+// viewEvent keeps the native window handle, which notify needs. Started by
+// Windows to start minimized, the window goes to the notification area as
+// soon as it is there.
 func (u *ui) viewEvent(e app.ViewEvent) {
 	if v, ok := e.(app.Win32ViewEvent); ok {
+		first := u.hwnd == 0 && v.HWND != 0
 		u.hwnd = v.HWND
+		if first && os.Getenv("LINKCORD_MINIMIZED") == "1" {
+			os.Unsetenv("LINKCORD_MINIMIZED")
+			// Shown that way, it says nothing of still running.
+			u.trayHinted = true
+			u.hideToTray()
+		}
 	}
 }

@@ -35,13 +35,16 @@ const (
 	pageKeybinds
 	pageSounds
 	pageAppearance
+	pageAccessibility
+	pageGeneral
 	pageAdvanced
 	settingsPages
 )
 
 var settingsPageNames = [settingsPages]string{
 	"My Account", "Profiles", "Content & Social", "Data & Privacy",
-	"Voice & Video", "Keybinds", "Sounds", "Appearance", "Advanced",
+	"Voice & Video", "Keybinds", "Sounds", "Appearance", "Accessibility",
+	"Windows Settings", "Advanced",
 }
 
 // settingsView is the screen of the user's settings, over the whole window,
@@ -80,7 +83,9 @@ type settingsView struct {
 	// Appearance.
 	look appearanceView
 	// The account's pages.
-	acct         accountView
+	acct accountView
+	// General and Accessibility.
+	general      generalView
 	keybindsLink widget.Clickable
 
 	// Keybinds: recording is the action whose keys are being recorded.
@@ -323,6 +328,7 @@ func (c *chatView) updateSettings(gtx layout.Context) {
 	c.updateSoundSettings(gtx)
 	c.updateAppearance(gtx)
 	c.updateAccount(gtx)
+	c.updateGeneral(gtx)
 	if s.agcBtn.Clicked(gtx) {
 		settings.NoAutoGain = !settings.NoAutoGain
 		u.applyVoiceSettings()
@@ -538,6 +544,10 @@ func (c *chatView) layoutSettingsPage(gtx layout.Context) layout.Dimensions {
 		rows = c.soundRows()
 	case pageAppearance:
 		rows = c.appearanceRows()
+	case pageAccessibility:
+		rows = c.accessibilityRows()
+	case pageGeneral:
+		rows = c.generalRows()
 	case pageAdvanced:
 		rows = c.advancedRows()
 	}

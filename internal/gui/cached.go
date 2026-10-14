@@ -14,6 +14,9 @@ import (
 
 // memberColor is the color of a member's name, from the cache.
 func (c *chatView) memberColor(guildID discord.GuildID, userID discord.UserID) (discord.Color, bool) {
+	if c.u.app.NoRoleColors {
+		return discord.NullColor, false
+	}
 	m, err := c.st.Cabinet.Member(guildID, userID)
 	if err != nil {
 		return discord.NullColor, false
