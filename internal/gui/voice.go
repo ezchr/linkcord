@@ -19,6 +19,7 @@ import (
 	"gioui.org/widget"
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/ningen/v3"
+	"github.com/ezchr/linkcord/internal/golive"
 	"github.com/ezchr/linkcord/internal/voice"
 	"golang.org/x/exp/shiny/materialdesign/icons"
 )
@@ -61,6 +62,17 @@ type voiceState struct {
 	// while in a voice channel and not muted.
 	demoSpeaker discord.UserID
 
+	// stream is the screen shared, if any, streamStarting reports that it is
+	// starting, and picker is the window to choose it. demoStream is the
+	// picture of what the demo pretends to share.
+	stream         *golive.Stream
+	streamStarting bool
+	picker         streamPicker
+	demoStream     *image.RGBA
+	// previewImg is the last picture of what is shared that was shown.
+	previewImg   *image.RGBA
+	previewImgOp paint.ImageOp
+
 	// err says why the last voice action failed, or what it did if info,
 	// until errUntil.
 	err      string
@@ -83,6 +95,11 @@ type voiceSettings struct {
 	// "" for the default ones.
 	Input  string `json:"input,omitempty"`
 	Output string `json:"output,omitempty"`
+	// StreamHeight and StreamFPS are the quality chosen last to stream at.
+	StreamHeight int `json:"stream_height,omitempty"`
+	StreamFPS    int `json:"stream_fps,omitempty"`
+	// StreamMute streams without sound.
+	StreamMute bool `json:"stream_mute,omitempty"`
 }
 
 func voiceSettingsPath() string {
@@ -316,6 +333,7 @@ func (c *chatView) joinVoice(ch discord.Channel) {
 		u.voiceFailed("Could not join "+ch.Name, err)
 		return
 	}
+	u.stopStream()
 	if c.demo {
 		c.demoVoice(ch)
 		return
@@ -340,6 +358,7 @@ func (c *chatView) joinVoice(ch discord.Channel) {
 
 // leaveVoice leaves the voice channel the user is in, if any.
 func (u *ui) leaveVoice() {
+	u.stopStream()
 	v := &u.voice
 	if v.demoChannel.IsValid() && u.chat != nil {
 		u.chat.demoVoice(discord.Channel{})
@@ -423,7 +442,7 @@ func (u *ui) updateVoice(gtx layout.Context) {
 		u.voiceInfo("The camera is not supported yet")
 	}
 	if v.screenBtn.Clicked(gtx) {
-		u.voiceInfo("Screen sharing is not supported yet")
+		c.screenShareClicked()
 	}
 	if v.activityBtn.Clicked(gtx) {
 		u.voiceInfo("Activities only work in Discord's own app")
@@ -514,7 +533,13 @@ func (u *ui) layoutVoicePanel(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{}.Layout(gtx,
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return panelButton(gtx, &v.camBtn, iconCamera) }),
 						gap,
-						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return panelButton(gtx, &v.screenBtn, iconScreen) }),
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							// Lit while the screen is shared, as in Discord.
+							if u.streaming() {
+								return panelButtonColored(gtx, &v.screenBtn, iconScreen, colorHeader, colorGreenButton)
+							}
+							return panelButton(gtx, &v.screenBtn, iconScreen)
+						}),
 						gap,
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return panelButton(gtx, &v.activityBtn, iconActivity) }),
 						gap,
@@ -546,16 +571,20 @@ func (u *ui) layoutVoicePanel(gtx layout.Context) layout.Dimensions {
 // panelButton is a button of the voice panel: ic on a gray patch as wide as
 // it is given.
 func panelButton(gtx layout.Context, click *widget.Clickable, ic *widget.Icon) layout.Dimensions {
+	return panelButtonColored(gtx, click, ic, colorText, colorInput)
+}
+
+// panelButtonColored is panelButton in fg on bg.
+func panelButtonColored(gtx layout.Context, click *widget.Clickable, ic *widget.Icon, fg, bg colorT) layout.Dimensions {
 	return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		pointer.CursorPointer.Add(gtx.Ops)
 		size := image.Pt(gtx.Constraints.Max.X, gtx.Dp(32))
-		bg := colorInput
 		if click.Hovered() {
-			bg = colorSelected
+			bg = lighten(bg)
 		}
 		paint.FillShape(gtx.Ops, bg, clip.UniformRRect(image.Rectangle{Max: size}, gtx.Dp(6)).Op(gtx.Ops))
 		gtx.Constraints = layout.Exact(size)
-		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return icon(gtx, ic, 18, colorText) })
+		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return icon(gtx, ic, 18, fg) })
 	})
 }
 

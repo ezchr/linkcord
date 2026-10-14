@@ -17,3 +17,17 @@ func StartMediaAudio(fill func([]byte)) (func(), error) {
 	}
 	return func() { device.Uninit() }, nil
 }
+
+// StartLoopback captures what the speakers play, in stereo, 48 kHz, signed
+// 16-bit PCM, giving it to data, which must not block. It is what Windows 7
+// can capture of the sound of a screen shared. The returned function stops
+// it, outside the callback.
+func StartLoopback(data func(pcm []byte)) (func(), error) {
+	device, err := startDeviceOn(malgo.Loopback, "", 2, func(_, input []byte) {
+		data(input)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return func() { device.Uninit() }, nil
+}

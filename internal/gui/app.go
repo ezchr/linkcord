@@ -5,10 +5,12 @@ package gui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,6 +28,7 @@ import (
 	"github.com/ezchr/linkcord/internal/auth"
 	"github.com/ezchr/linkcord/internal/logger"
 	"github.com/ezchr/linkcord/internal/tray"
+	"github.com/ezchr/linkcord/internal/version"
 )
 
 const appName = "Linkcord"
@@ -38,6 +41,15 @@ func Run() error {
 	moveLegacyDir()
 	if closer, err := logger.Load(logPath(), slog.LevelInfo); err == nil {
 		defer closer.Close()
+	}
+	// A crash, of Go or of C code, is written beside the log, which a
+	// window without a console would otherwise lose.
+	if f, err := os.OpenFile(filepath.Join(filepath.Dir(logPath()), "crash.txt"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+		fmt.Fprintf(f, "\n--- %s started %s\n", version.String(), time.Now().Format(time.RFC3339))
+		if err := debug.SetCrashOutput(f, debug.CrashOptions{}); err != nil {
+			slog.Warn("could not keep crashes", "err", err)
+		}
+		f.Close()
 	}
 
 	errc := make(chan error, 1)
@@ -173,12 +185,19 @@ func (u *ui) loop() error {
 		case *app.ClosingEvent:
 			// Closing the window leaves Linkcord running in the
 			// notification area, as Discord does, unless quitting.
+			slog.Info("window closing", "quitting", u.quitting.Load())
 			if !u.quitting.Load() && u.hideToTray() {
 				e.Abort()
 			}
 		case app.DestroyEvent:
+			slog.Info("window closed", "err", e.Err)
 			if u.tray != nil {
 				u.tray.Close()
+			}
+			// Tell Discord the stream ended, rather than leave it hanging.
+			if s := u.voice.stream; s != nil {
+				u.voice.stream = nil
+				s.Stop()
 			}
 			if u.startup.cancel != nil {
 				u.startup.cancel()

@@ -188,7 +188,7 @@ diff --git a/session/video.go b/session/video.go
 index e69de29..6087c7c 100644
 --- /dev/null
 +++ b/session/video.go
-@@ -0,0 +1,77 @@
+@@ -0,0 +1,79 @@
 +package session
 +
 +// Added by Linkcord: end-to-end encryption of the H264 frames of a screen
@@ -232,7 +232,9 @@ index e69de29..6087c7c 100644
 +		return plain, nil
 +	}
 +
-+	out := make([]byte, s.MaxEncryptedFrameSize(len(plain)))
++	// The footer grows with the readable ranges, two varints each, which
++	// MaxEncryptedFrameSize does not count.
++	out := make([]byte, s.MaxEncryptedFrameSize(len(plain))+20*len(ranges))
 +	for range maxH264Attempts {
 +		_, truncatedNonce, generation := s.sendCounter.Next()
 +		key, err := ratchet.GetKey(generation)

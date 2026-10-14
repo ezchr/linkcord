@@ -22,7 +22,8 @@ Linkcord was created for people on Windows 7 who can no longer run the official 
 | Friends (online, all, pending, blocked), sending, accepting, and canceling friend requests, and message requests | |
 | Attachments, emoji picker, mention autocomplete, and typing indicators | |
 | Voice join/leave, mute/deafen, connection status, and speaking indicators | Verification in a real voice call |
-| Call view with a card for everyone in the channel, full screen, invite links, soundboard, and microphone/speaker choice | Camera, screen sharing, and activities |
+| Call view with a card for everyone in the channel, full screen, invite links, soundboard, and microphone/speaker choice; a click on a card shows it big | Camera and activities |
+| Screen sharing (Go Live) of a screen or a window, end-to-end encrypted, with its sound, a button to turn the sound on and off, quality choice, and who is watching | Watching other people's streams |
 | Right-click menu on voice members: per-user volume and mute, notes, friends, blocking, roles, nicknames, server mute/deafen, move, disconnect, timeout, kick, and ban, as permissions allow | Ignore, apps, and moderator view |
 | React, reply, edit, copy, delete, and inline reaction controls | |
 | Selecting text in messages and embeds with the mouse (double click for a word, triple for all), copied with Ctrl+C or the right-click menu | Selecting across several messages |
@@ -121,6 +122,10 @@ These are application cache limits, not a limit on total process memory. Fonts, 
 
 For a controlled diagnostic session, set `LINKCORD_PROFILE` to an output folder. On a normal window close it writes `cpu.pprof`, `heap.pprof`, and `summary.json`, including rendered frame count and heap statistics. Ordinary launches do not enable profiling.
 
+## Screen sharing
+
+Screen sharing encodes with Cisco's OpenH264 2.6.0, which is not in the executable: the first stream downloads it from Cisco, as browsers do, so that Cisco covers its H264 licence, checks its SHA-256 digest, and keeps it in `%LOCALAPPDATA%\linkcord`. It needs only kernel32, so it runs on Windows 7. A window's sound is captured from its own processes on Windows 10 version 2004 and later, and a screen's from every process but Linkcord; older Windows send the sound of the whole system. Frames are encrypted with DAVE as Discord's own clients do.
+
 ## Test without an account
 
 | Environment variable | Purpose |
@@ -144,7 +149,7 @@ For screenless media renders, set `LINKCORD_RENDER` and run `go test ./internal/
 
 Local application data:
 
-- Log: `%LOCALAPPDATA%\linkcord\logs.txt`.
+- Log: `%LOCALAPPDATA%\linkcord\logs.txt`; crashes are written to `crash.txt` beside it.
 - Image cache: `%LOCALAPPDATA%\linkcord\images`.
 - Discord token: Windows Credential Manager, under the name `linkcord`.
 
@@ -170,6 +175,8 @@ Local application data:
 | `internal/gui/profile.go`, `presence.go` | Profile cards, status menus, activities, and presence indicators. |
 | `internal/gui/voice.go` | Voice panel, controls, speaking indicators, and saved per-user volumes and devices, backed by `internal/voice`. |
 | `internal/gui/voicecall.go`, `voicemenu.go` | Call view, soundboard, device menu, and the right-click menu of voice members with its moderation actions. |
+| `internal/gui/golive.go` | Stream picker, the user's own stream on its card, and who watches it. |
+| `internal/golive/` | Go Live: screen and window capture, H264 encoding with OpenH264, sound capture, and the stream's voice connection. |
 | `internal/gui/menu.go` | Context menus opened at the pointer. |
 | `internal/gui/theme.go`, `widgets.go` | Colors, fonts, and shared interface components. |
 | `internal/gui/demo.go` | Account-free demo fixtures. |
@@ -229,4 +236,4 @@ Refreshing a Discord web-build number can update client metadata. Actual API, ga
 
 Linkcord is **GPL-3.0**, inherited from discordo; see `LICENSE`. Distributing the executable requires making its corresponding source available under that license.
 
-Gio uses MIT/Unlicense terms. Noto Color Emoji uses the SIL Open Font License 1.1; see `internal/gui/fonts/OFL.txt`.
+Gio uses MIT/Unlicense terms. The OpenH264 headers in `third_party/openh264` are BSD-2-Clause; see the `LICENSE` beside them. Noto Color Emoji uses the SIL Open Font License 1.1; see `internal/gui/fonts/OFL.txt`.

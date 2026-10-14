@@ -41,7 +41,9 @@ func (s *Session) EncryptH264(f []byte) ([]byte, error) {
 		return plain, nil
 	}
 
-	out := make([]byte, s.MaxEncryptedFrameSize(len(plain)))
+	// The footer grows with the readable ranges, two varints each, which
+	// MaxEncryptedFrameSize does not count.
+	out := make([]byte, s.MaxEncryptedFrameSize(len(plain))+20*len(ranges))
 	for range maxH264Attempts {
 		_, truncatedNonce, generation := s.sendCounter.Next()
 		key, err := ratchet.GetKey(generation)

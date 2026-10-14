@@ -6,8 +6,10 @@ import (
 	"image/color"
 	"slices"
 	"strings"
+	"time"
 
 	"gioui.org/app"
+	"gioui.org/gesture"
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -44,6 +46,14 @@ type callView struct {
 	join, invite, fullBtn, leave       widget.Clickable
 	mic, micMenu, cam, camMenu         widget.Clickable
 	screen, activity, soundboard, more widget.Clickable
+	// streamSound turns the sound of the stream on or off.
+	streamSound widget.Clickable
+	// focus is whose card is shown big, with the others in a row under it,
+	// as a click on a card does; cards are their cards' clicks.
+	focus discord.UserID
+	cards map[discord.UserID]*widget.Clickable
+	// viewers is the pointer over the faces of who watches the user's stream.
+	viewers gesture.Hover
 }
 
 // soundboard is the sounds that can be played to everyone in the voice
@@ -140,7 +150,19 @@ func (c *chatView) updateCall(gtx layout.Context) {
 		u.voiceInfo("The camera is not supported yet")
 	}
 	if cv.screen.Clicked(gtx) {
-		u.voiceInfo("Screen sharing is not supported yet")
+		c.screenShareClicked()
+	}
+	if cv.streamSound.Clicked(gtx) {
+		u.toggleStreamSound()
+	}
+	for id, cl := range cv.cards {
+		if cl.Clicked(gtx) {
+			if cv.focus == id {
+				cv.focus = 0
+			} else {
+				cv.focus = id
+			}
+		}
 	}
 	if cv.activity.Clicked(gtx) {
 		u.voiceInfo("Activities only work in Discord's own app")
@@ -245,6 +267,10 @@ func gridFit(n, w, h, gap int) (cols, tw, th int) {
 func (c *chatView) layoutCallGrid(gtx layout.Context, guildID discord.GuildID, states []discord.VoiceState) layout.Dimensions {
 	size := gtx.Constraints.Max
 	gap := gtx.Dp(8)
+	if i := slices.IndexFunc(states, func(vs discord.VoiceState) bool { return vs.UserID == c.call.focus }); i >= 0 {
+		return c.layoutCallFocus(gtx, guildID, states, i)
+	}
+	c.call.focus = 0
 	cols, tw, th := gridFit(len(states), size.X, size.Y, gap)
 	if cols == 0 {
 		return layout.Dimensions{Size: size}
@@ -259,11 +285,67 @@ func (c *chatView) layoutCallGrid(gtx layout.Context, guildID discord.GuildID, s
 			t := op.Offset(image.Pt(x+i*(tw+gap), y+r*(th+gap))).Push(gtx.Ops)
 			cgtx := gtx
 			cgtx.Constraints = layout.Exact(image.Pt(tw, th))
-			c.layoutCallCard(cgtx, guildID, vs)
+			c.layoutCallCard(cgtx, guildID, vs, false)
 			t.Pop()
 		}
 	}
 	return layout.Dimensions{Size: size}
+}
+
+// layoutCallFocus shows the card of states[focus] big, and the others in a
+// row under it, as many as fit.
+func (c *chatView) layoutCallFocus(gtx layout.Context, guildID discord.GuildID, states []discord.VoiceState, focus int) layout.Dimensions {
+	size := gtx.Constraints.Max
+	gap := gtx.Dp(8)
+	others := slices.Delete(slices.Clone(states), focus, focus+1)
+	stripH := 0
+	if len(others) > 0 {
+		stripH = min(gtx.Dp(110), size.Y/4)
+	}
+	// The big card, 16:9, as large as fits above the row.
+	areaH := size.Y - stripH
+	if stripH > 0 {
+		areaH -= gap
+	}
+	bw, bh := size.X, size.X*9/16
+	if bh > areaH {
+		bh = areaH
+		bw = bh * 16 / 9
+	}
+	t := op.Offset(image.Pt((size.X-bw)/2, (areaH-bh)/2)).Push(gtx.Ops)
+	cgtx := gtx
+	cgtx.Constraints = layout.Exact(image.Pt(bw, bh))
+	c.layoutCallCard(cgtx, guildID, states[focus], true)
+	t.Pop()
+
+	if stripH == 0 {
+		return layout.Dimensions{Size: size}
+	}
+	// The cards of the row shrink for all to fit, down to a size where
+	// they still read; past it, those that do not fit are left out.
+	tw := min(stripH*16/9, (size.X-gap*(len(others)-1))/len(others))
+	if minW := gtx.Dp(120); tw < minW {
+		tw = minW
+	}
+	stripH = min(stripH, tw*9/16)
+	n := min(len(others), max((size.X+gap)/(tw+gap), 1))
+	x := (size.X - (n*tw + gap*(n-1))) / 2
+	for i := range n {
+		t := op.Offset(image.Pt(x+i*(tw+gap), size.Y-stripH)).Push(gtx.Ops)
+		cgtx := gtx
+		cgtx.Constraints = layout.Exact(image.Pt(tw, stripH))
+		c.layoutCallCard(cgtx, guildID, others[i], false)
+		t.Pop()
+	}
+	return layout.Dimensions{Size: size}
+}
+
+// cardClick is the click of the card of id, which shows it big or back.
+func (cv *callView) cardClick(id discord.UserID) *widget.Clickable {
+	if cv.cards == nil {
+		cv.cards = make(map[discord.UserID]*widget.Clickable)
+	}
+	return clickOf(cv.cards, id)
 }
 
 // cardColor is the color of the card of a user without video: their color,
@@ -276,15 +358,44 @@ func cardColor(id discord.UserID) color.NRGBA {
 
 // layoutCallCard is the card of someone in the call: their picture in the
 // middle, and their name at the bottom left.
-func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, vs discord.VoiceState) layout.Dimensions {
-	th := c.u.th
+//
+// A click on it shows it big, or back among the others if big already.
+func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, vs discord.VoiceState, big bool) layout.Dimensions {
 	size := gtx.Constraints.Max
 	radius := gtx.Dp(8)
+	// The click goes under what is drawn on the card, which may take the
+	// pointer itself.
+	cl := c.call.cardClick(vs.UserID)
+	cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		pointer.CursorPointer.Add(gtx.Ops)
+		return layout.Dimensions{Size: size}
+	})
 	speaking := c.u.voiceSpeaking(vs.UserID)
 	rr := clip.UniformRRect(image.Rectangle{Max: size}, radius)
 	paint.FillShape(gtx.Ops, cardColor(vs.UserID), rr.Op(gtx.Ops))
 
 	name := c.memberName(guildID, vs.UserID, vs.Member)
+	if vs.UserID == c.me.ID {
+		if img := c.u.streamPreview(); img != nil {
+			c.layoutStreamCard(gtx, img, size, radius)
+			gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(time.Second)})
+			c.layoutCardName(gtx, vs, name, size, true)
+			if rightClicked(gtx, c.rightTag("card"+vs.UserID.String()), size) {
+				c.openUserMenu(vs.UserID, guildID, vs.ChannelID)
+			}
+			// Who watches: how many on a small card; on a big one their
+			// faces at the top right, and their names under the pointer.
+			pad := gtx.Dp(8)
+			if big {
+				c.layoutViewerFaces(gtx, guildID, size)
+			} else {
+				t := op.Offset(image.Pt(pad, pad)).Push(gtx.Ops)
+				c.layoutViewers(gtx, guildID)
+				t.Pop()
+			}
+			return layout.Dimensions{Size: size}
+		}
+	}
 	px := min(size.Y*2/5, gtx.Dp(96), size.X*2/5)
 	dp := unit.Dp(float32(px) / gtx.Metric.PxPerDp)
 	center := op.Offset(image.Pt((size.X-px)/2, (size.Y-px)/2)).Push(gtx.Ops)
@@ -295,8 +406,35 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 	c.u.picture(gtx, c.voiceAvatarURL(guildID, vs), dp, colorFor(uint64(vs.UserID)), name, -1)
 	center.Pop()
 
-	// The name, with the microphone or headset struck through, on a dark
-	// patch at the bottom left.
+	c.layoutCardName(gtx, vs, name, size, vs.SelfStream)
+
+	if speaking {
+		w := gtx.Dp(2)
+		paint.FillShape(gtx.Ops, colorGreen, clip.Stroke{Path: clip.UniformRRect(image.Rectangle{Max: size}.Inset(w/2), radius).Path(gtx.Ops), Width: float32(w)}.Op())
+	}
+	if rightClicked(gtx, c.rightTag("card"+vs.UserID.String()), size) {
+		c.openUserMenu(vs.UserID, guildID, vs.ChannelID)
+	}
+	return layout.Dimensions{Size: size}
+}
+
+// layoutStreamCard fills the card with the picture of what is shared.
+func (c *chatView) layoutStreamCard(gtx layout.Context, img *image.RGBA, size image.Point, radius int) {
+	src := c.u.voice.previewOp(img)
+	defer clip.UniformRRect(image.Rectangle{Max: size}, radius).Push(gtx.Ops).Pop()
+	paint.FillShape(gtx.Ops, rgb(0x000000), clip.Rect{Max: size}.Op())
+	igtx := gtx
+	igtx.Constraints = layout.Exact(size)
+	b := img.Bounds()
+	scale := min(float32(size.X)/float32(b.Dx()), float32(size.Y)/float32(b.Dy())) / gtx.Metric.PxPerDp
+	widget.Image{Src: src, Fit: widget.Contain, Scale: scale}.Layout(igtx)
+}
+
+// layoutCardName is the name on a card, with the microphone or headset
+// struck through, and "LIVE" for who shares their screen, on a dark patch
+// at the bottom left.
+func (c *chatView) layoutCardName(gtx layout.Context, vs discord.VoiceState, name string, size image.Point, live bool) {
+	th := c.u.th
 	pad := gtx.Dp(8)
 	macro := op.Record(gtx.Ops)
 	ngtx := gtx
@@ -319,6 +457,14 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 					})
 				}),
 				layout.Rigid(oneLine(bold(label(th, 14, colorHeader, name))).Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if !live {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return liveBadge(gtx, th)
+					})
+				}),
 			)
 		})
 	})
@@ -326,15 +472,6 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 	t := op.Offset(image.Pt(pad, size.Y-pad-ndims.Size.Y)).Push(gtx.Ops)
 	call.Add(gtx.Ops)
 	t.Pop()
-
-	if speaking {
-		w := gtx.Dp(2)
-		paint.FillShape(gtx.Ops, colorGreen, clip.Stroke{Path: clip.UniformRRect(image.Rectangle{Max: size}.Inset(w/2), radius).Path(gtx.Ops), Width: float32(w)}.Op())
-	}
-	if rightClicked(gtx, c.rightTag("card"+vs.UserID.String()), size) {
-		c.openUserMenu(vs.UserID, guildID, vs.ChannelID)
-	}
-	return layout.Dimensions{Size: size}
 }
 
 // callButton is a button of the bar of the call: ic on a rounded patch of
@@ -358,8 +495,9 @@ func splitButton(gtx layout.Context, main, arrow *widget.Clickable, ic *widget.I
 	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return callButton(gtx, main, ic, fg, bg, 52) }),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(2)}.Layout),
+		// The arrow is darker, to tell it from the button.
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return callButton(gtx, arrow, iconArrowUp, colorText, bg, 26)
+			return callButton(gtx, arrow, iconArrowUp, colorText, rgb(0x141517), 26)
 		}),
 	)
 }
@@ -414,7 +552,25 @@ func (c *chatView) layoutCallBar(gtx layout.Context, joined bool) layout.Dimensi
 						}),
 						gap,
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return callButton(gtx, &cv.screen, iconScreen, colorHeader, callBarColor, 52)
+							bg := callBarColor
+							if c.u.streaming() {
+								bg = colorGreenButton
+							}
+							return callButton(gtx, &cv.screen, iconScreen, colorHeader, bg, 52)
+						}),
+						// While live, the sound of the stream can be turned
+						// on and off.
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if !c.u.streaming() {
+								return layout.Dimensions{}
+							}
+							ic, fg, bg := iconSoundOn, colorHeader, colorGreenButton
+							if !c.u.streamSound() {
+								ic, fg, bg = iconSoundOff, colorRed, rgb(0x3b1d20)
+							}
+							return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return callButton(gtx, &cv.streamSound, ic, fg, bg, 52)
+							})
 						}),
 						gap,
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {

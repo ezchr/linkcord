@@ -82,8 +82,10 @@ type channelRow struct {
 	// muted reports whether a voice member is muted or deafened, and deaf
 	// whether deafened.
 	muted, deaf bool
-	// avatar is the picture of a voice member, "" when it isn't known.
+	// avatar is the picture of a voice member, "" when it isn't known, and
+	// live whether they share their screen.
 	avatar string
+	live   bool
 }
 
 type chatView struct {
@@ -591,6 +593,7 @@ func (c *chatView) rebuildRows() {
 						muted:  vs.Mute || vs.SelfMute || vs.Deaf || vs.SelfDeaf,
 						deaf:   vs.Deaf || vs.SelfDeaf,
 						avatar: c.voiceAvatarURL(c.selGuild, vs),
+						live:   vs.SelfStream,
 					})
 				}
 			}
@@ -1079,6 +1082,9 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 	if c.guild.popup != popupNone {
 		c.layoutGuildPopup(gtx)
 	}
+	if c.u.voice.picker.open {
+		c.layoutStreamPicker(gtx)
+	}
 	c.layoutMenu(gtx)
 	c.watchPointer(gtx)
 }
@@ -1321,6 +1327,14 @@ func (c *chatView) layoutVoiceMember(gtx layout.Context, r channelRow, hovered b
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Flexed(1, oneLine(label(th, 14, col, r.label)).Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if !r.live {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Left: unit.Dp(4), Right: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return liveBadge(gtx, th)
+					})
+				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					switch {
 					case r.deaf:
