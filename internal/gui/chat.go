@@ -9,8 +9,8 @@ import (
 	"log/slog"
 	"os"
 	"slices"
-	"sync"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -117,6 +117,10 @@ type chatView struct {
 	gset   guildSettings
 	cset   channelSettings
 	chmenu channelMenu
+	// chDrag is what is dragged in the channel list, whose rows were last
+	// drawn rowHeights tall.
+	chDrag     channelDrag
+	rowHeights map[int]int
 
 	// detached is set while older messages show in place of the newest,
 	// after a jump; flashID is lit until flashUntil.
@@ -157,13 +161,13 @@ type chatView struct {
 	folderClicks map[int64]*widget.Clickable
 	drag         guildDrag
 	dragHead     int
-	homeClick  widget.Clickable
+	homeClick    widget.Clickable
 	// selGuild is the server shown, or NullGuildID for direct messages.
 	selGuild    discord.GuildID
 	lastChannel map[discord.GuildID]discord.ChannelID
 	// placeMu keeps the writes of lastplace.json in order.
-	placeMu sync.Mutex
-	collapsed   map[discord.ChannelID]bool
+	placeMu   sync.Mutex
+	collapsed map[discord.ChannelID]bool
 
 	rows       []channelRow
 	selChannel *discord.Channel
@@ -1415,11 +1419,21 @@ func (c *chatView) layoutChannels(gtx layout.Context) layout.Dimensions {
 			return c.layoutGuildCounts(gtx, c.selGuild)
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return listLayout(gtx, th, &c.channelList, len(c.rows), func(gtx layout.Context, i int) layout.Dimensions {
-				return layout.Inset{Left: unit.Dp(8), Right: unit.Dp(8), Top: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			// Channels, categories and people in voice can be dragged,
+			// read before the rows take their clicks.
+			c.updateChannelDrag(gtx)
+			if c.rowHeights == nil {
+				c.rowHeights = make(map[int]int)
+			}
+			dims := listLayout(gtx, th, &c.channelList, len(c.rows), func(gtx layout.Context, i int) layout.Dimensions {
+				dims := layout.Inset{Left: unit.Dp(8), Right: unit.Dp(8), Top: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					return c.layoutRow(gtx, c.rows[i], i == 0)
 				})
+				c.rowHeights[i] = dims.Size.Y
+				return dims
 			})
+			c.channelDropArea(gtx)
+			return dims
 		}),
 		layout.Rigid(c.layoutUserPanel),
 	)
