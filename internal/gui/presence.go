@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"cmp"
 	"fmt"
 	"image"
 	"strings"
@@ -10,8 +11,13 @@ import (
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
+	"gioui.org/widget/material"
 	"github.com/ayn2op/arikawa/v3/discord"
+	"golang.org/x/exp/shiny/materialdesign/icons"
 )
+
+// iconMusic marks music being listened to, as Discord's note.
+var iconMusic = mustIcon(icons.ImageMusicNote)
 
 // presence returns what the user is doing, looked up in the server first and
 // then among friends, or nil if it is not known.
@@ -113,6 +119,28 @@ func activityLine(p *discord.Presence) string {
 		}
 	}
 	return ""
+}
+
+// layoutActivityLine is the line under a name of what someone does: music
+// shows as a note and what plays, as on Discord, the rest as line says.
+func layoutActivityLine(gtx layout.Context, th *material.Theme, p *discord.Presence, line string) layout.Dimensions {
+	if customStatus(p) == "" && p != nil {
+		for _, a := range p.Activities {
+			if a.Type == discord.CustomActivity {
+				continue
+			}
+			if a.Type == discord.ListeningActivity {
+				what := cmp.Or(a.State, a.Details, a.Name)
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconMusic, 13, colorGreen) }),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
+					layout.Flexed(1, oneLine(label(th, 12, colorMuted, what)).Layout),
+				)
+			}
+			break
+		}
+	}
+	return oneLine(label(th, 12, colorMuted, line)).Layout(gtx)
 }
 
 // activityVerb is the header of an activity, such as "Playing Minecraft".

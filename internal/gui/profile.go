@@ -136,6 +136,8 @@ type profileView struct {
 	statusMenu       bool
 	statusOpts       [4]widget.Clickable
 	copied           bool
+	// joinVoice joins the voice channel they are in.
+	joinVoice widget.Clickable
 	// The lists of servers and friends in common, shown when clicked.
 	mutualGuildsBtn, mutualFriendsBtn widget.Clickable
 	showGuilds, showFriends           bool
@@ -260,6 +262,14 @@ func (c *chatView) updateProfile(gtx layout.Context) {
 	if p.message.Clicked(gtx) {
 		c.profile = nil
 		c.openDM(p.user.ID)
+	}
+	if p.joinVoice.Clicked(gtx) {
+		if ch, ok := c.userVoiceChannel(p.guildID, p.user.ID); ok {
+			c.profile = nil
+			c.joinVoice(ch)
+			c.openCall(ch)
+			return
+		}
 	}
 	if p.mutualGuildsBtn.Clicked(gtx) {
 		p.showGuilds, p.showFriends = !p.showGuilds, false
@@ -631,6 +641,14 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 		}
 	}
 
+	// The voice channel they are in, as Discord shows it.
+	if card := c.layoutVoiceCard(p, user.ID); card != nil {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+			section(card),
+		)
+	}
+
 	// Since when.
 	children = append(children,
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
@@ -692,6 +710,108 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 
 	gtx.Constraints.Min.X = width
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+}
+
+// userVoiceChannel is the voice channel the user is in, in the server
+// given, or else in any server known.
+func (c *chatView) userVoiceChannel(guildID discord.GuildID, id discord.UserID) (discord.Channel, bool) {
+	guilds := append([]discord.GuildID{guildID}, c.guildOrder...)
+	for _, g := range guilds {
+		if !g.IsValid() {
+			continue
+		}
+		if vs, err := c.st.Cabinet.VoiceState(g, id); err == nil && vs.ChannelID.IsValid() {
+			if ch, err := c.st.Cabinet.Channel(vs.ChannelID); err == nil {
+				return *ch, true
+			}
+		}
+	}
+	return discord.Channel{}, false
+}
+
+// layoutVoiceCard is the card of the voice channel someone is in, with who
+// is there and a button to join, or nil when they are in none known.
+func (c *chatView) layoutVoiceCard(p *profileView, id discord.UserID) layout.Widget {
+	ch, ok := c.userVoiceChannel(p.guildID, id)
+	if !ok {
+		return nil
+	}
+	th := c.u.th
+	gname := ""
+	if g, err := c.st.Cabinet.Guild(ch.GuildID); err == nil {
+		gname = g.Name
+	}
+	states, _ := c.st.Cabinet.VoiceStates(ch.GuildID)
+	var there []discord.VoiceState
+	for _, vs := range states {
+		if vs.ChannelID == ch.ID {
+			there = append(there, vs)
+		}
+	}
+	status := c.voiceStatuses[ch.ID]
+	joined := c.u.voiceChannel() == ch.ID
+	return func(gtx layout.Context) layout.Dimensions {
+		bg := colorMenu
+		if _, _, themed := p.data.themeColors(p.guildID); themed {
+			bg = withAlpha(rgb(0x000000), 0x66)
+		}
+		return rounded(gtx, bg, 8, func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X = gtx.Constraints.Max.X
+			return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				rows := []layout.FlexChild{
+					layout.Rigid(bold(label(th, 12, colorText, "In voice channel")).Layout),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+							// Who is there, overlapping, in a box as Discord's.
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								size := gtx.Dp(60)
+								paint.FillShape(gtx.Ops, colorServers, clip.UniformRRect(image.Rectangle{Max: image.Pt(size, size)}, gtx.Dp(8)).Op(gtx.Ops))
+								n := min(len(there), 2)
+								for i := 0; i < n; i++ {
+									vs := there[i]
+									s := 26
+									t := offset(gtx, gtx.Dp(6)+i*gtx.Dp(22), gtx.Dp(6)+i*gtx.Dp(22))
+									c.u.picture(gtx, c.voiceAvatarURL(ch.GuildID, vs), unit.Dp(s), colorFor(uint64(vs.UserID)), c.memberName(ch.GuildID, vs.UserID, vs.Member), -1)
+									t.Pop()
+								}
+								return layout.Dimensions{Size: image.Pt(size, size)}
+							}),
+							layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+								lines := []layout.FlexChild{
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconVoice, 14, colorHeader) }),
+											layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
+											layout.Flexed(1, oneLine(bold(label(th, 14, colorHeader, ch.Name))).Layout),
+										)
+									}),
+								}
+								if gname != "" {
+									lines = append(lines, layout.Rigid(oneLine(label(th, 12, colorText, "in "+gname)).Layout))
+								}
+								if status != "" {
+									lines = append(lines, layout.Rigid(oneLine(label(th, 12, colorMuted, status)).Layout))
+								}
+								return layout.Flex{Axis: layout.Vertical}.Layout(gtx, lines...)
+							}),
+						)
+					}),
+				}
+				if !joined {
+					rows = append(rows,
+						layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							gtx.Constraints.Min.X = gtx.Constraints.Max.X
+							return button(gtx, th, &p.joinVoice, colorSecondaryButton, "Join Voice Chat")
+						}),
+					)
+				}
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
+			})
+		})
+	}
 }
 
 // layoutMutuals is the line of friends and servers in common, and the list

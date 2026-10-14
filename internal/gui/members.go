@@ -255,13 +255,15 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 						})}
 						if !offline {
 							if line := activityLine(presence); line != "" {
-								rows = append(rows, layout.Rigid(oneLine(label(th, 12, colorMuted, line)).Layout))
+								rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return layoutActivityLine(gtx, th, presence, line)
+								}))
 							} else if c.inVoice(guildID, m.User.ID) {
 								rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 									return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconVoice, 12, colorGreen) }),
 										layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-										layout.Flexed(1, oneLine(label(th, 12, colorMuted, "In a voice channel")).Layout),
+										layout.Flexed(1, oneLine(label(th, 12, colorMuted, "In voice channel")).Layout),
 									)
 								}))
 							}

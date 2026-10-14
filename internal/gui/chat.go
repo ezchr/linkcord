@@ -1732,8 +1732,23 @@ func (c *chatView) layoutUserPanel(gtx layout.Context) layout.Dimensions {
 								gtx.Constraints.Min.X = gtx.Constraints.Max.X
 								return layout.Inset{Top: unit.Dp(4), Bottom: unit.Dp(4), Left: unit.Dp(2), Right: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 									return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+										// In a server, the user shows as there: with
+										// its avatar, name and decoration.
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											return c.avatarStatusSpeaking(gtx, c.me, discord.NullGuildID, 32, bg, c.u.voiceSpeaking(c.me.ID))
+											guildID := c.selGuild
+											url := cdnSize(c.me.AvatarURLWithType(discord.PNGImage))
+											if guildID.IsValid() {
+												url = c.authorAvatarURL(guildID, c.me)
+											}
+											dims := c.u.picture(gtx, url, 32, colorFor(uint64(c.me.ID)), c.me.DisplayOrUsername(), -1)
+											if d := c.me.AvatarDecoration; d != nil && d.Asset != "" {
+												c.u.decoration(gtx, d.URL(true), dims.Size.X)
+											}
+											if c.u.voiceSpeaking(c.me.ID) {
+												speakingRing(gtx, dims.Size.X, bg)
+											}
+											statusDot(gtx, c.status(discord.NullGuildID, c.me.ID), dims.Size.X, bg)
+											return dims
 										}),
 										layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -1741,8 +1756,22 @@ func (c *chatView) layoutUserPanel(gtx layout.Context) layout.Dimensions {
 											if hovered {
 												sub = statusName(c.status(discord.NullGuildID, c.me.ID))
 											}
+											name := c.me.DisplayOrUsername()
+											col := colorHeader
+											m := &discord.Member{User: c.me}
+											if guildID := c.selGuild; guildID.IsValid() {
+												if mm, err := c.st.Cabinet.Member(guildID, c.me.ID); err == nil {
+													m = mm
+												}
+												name = c.memberName(guildID, c.me.ID, m)
+												if cl, ok := c.memberColor(guildID, c.me.ID); ok && cl != 0 && cl != discord.NullColor {
+													col = rgb(uint32(cl))
+												}
+											}
 											return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-												layout.Rigid(oneLine(bold(label(th, 14, colorHeader, c.me.DisplayOrUsername()))).Layout),
+												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+													return c.layoutMemberName(gtx, m, c.selGuild, oneLine(bold(label(th, 14, col, name))))
+												}),
 												layout.Rigid(oneLine(label(th, 12, colorMuted, sub)).Layout),
 											)
 										}),
