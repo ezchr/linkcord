@@ -17,6 +17,7 @@ import (
 	"gioui.org/io/clipboard"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/text"
@@ -1103,7 +1104,7 @@ func (c *chatView) layoutGuilds(gtx layout.Context) layout.Dimensions {
 			var dims layout.Dimensions
 			if i == 0 {
 				unread := c.dmsUnread()
-				dims = c.guildButton(gtx, &c.homeClick, !c.selGuild.IsValid(), unread, func(gtx layout.Context, active bool) layout.Dimensions {
+				dims = c.guildButton(gtx, &c.homeClick, !c.selGuild.IsValid(), unread, c.incomingRequests(), nil, func(gtx layout.Context, active bool) layout.Dimensions {
 					bg := colorSidebar
 					if active {
 						bg = colorAccent
@@ -1134,20 +1135,22 @@ func (c *chatView) layoutGuilds(gtx layout.Context) layout.Dimensions {
 			return layout.Dimensions{}
 		}
 		unread := c.guildUnread(id)
-		return c.guildButton(gtx, c.click(discord.Snowflake(id)), id == c.selGuild, unread, func(gtx layout.Context, active bool) layout.Dimensions {
+		return c.guildButton(gtx, c.click(discord.Snowflake(id)), id == c.selGuild, unread, c.guildMentions(id), c.voiceBadge(id), func(gtx layout.Context, active bool) layout.Dimensions {
+			// Servers are rounded squares, as on Discord.
 			bg := colorSidebar
-			radius := -1
 			if active {
-				bg, radius = colorAccent, gtx.Dp(16)
+				bg = colorAccent
 			}
-			return c.u.picture(gtx, cdnSize(guild.IconURLWithType(discord.PNGImage)), 48, bg, guild.Name, radius)
+			return c.u.picture(gtx, cdnSize(guild.IconURLWithType(discord.PNGImage)), 48, bg, guild.Name, gtx.Dp(16))
 		})
 	})
 }
 
 // guildButton lays out one entry of the server column, with the pill on its
 // left that marks the selected and unread servers.
-func (c *chatView) guildButton(gtx layout.Context, click *widget.Clickable, selected bool, unread ningen.UnreadIndication, w func(gtx layout.Context, active bool) layout.Dimensions) layout.Dimensions {
+// mentions is the number on the red pill at its bottom right, and corner a
+// badge at its top right, such as the voice one, as on Discord.
+func (c *chatView) guildButton(gtx layout.Context, click *widget.Clickable, selected bool, unread ningen.UnreadIndication, mentions int, corner layout.Widget, w func(gtx layout.Context, active bool) layout.Dimensions) layout.Dimensions {
 	return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		return layout.Stack{Alignment: layout.W}.Layout(gtx,
@@ -1157,13 +1160,25 @@ func (c *chatView) guildButton(gtx layout.Context, click *widget.Clickable, sele
 					return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						pointer.CursorPointer.Add(gtx.Ops)
 						dims := w(gtx, selected || click.Hovered())
-						if unread == ningen.ChannelMentioned {
-							// A red dot in the corner marks mentions, cut out of
-							// the column by a ring of its color.
-							s, ring := gtx.Dp(14), gtx.Dp(3)
-							x, y := dims.Size.X-s+ring/2, dims.Size.Y-s+ring/2
-							paint.FillShape(gtx.Ops, colorServers, clip.Ellipse(image.Rect(x-ring, y-ring, x+s+ring, y+s+ring)).Op(gtx.Ops))
-							paint.FillShape(gtx.Ops, colorRed, clip.Ellipse(image.Rect(x, y, x+s, y+s)).Op(gtx.Ops))
+						// The number of mentions on a red pill at the bottom
+						// right, ringed in the column's color.
+						if mentions > 0 {
+							macro := op.Record(gtx.Ops)
+							bd := outlinedBadge(gtx, c, mentions)
+							call := macro.Stop()
+							t := op.Offset(image.Pt(dims.Size.X-bd.Size.X+gtx.Dp(4), dims.Size.Y-bd.Size.Y+gtx.Dp(4))).Push(gtx.Ops)
+							call.Add(gtx.Ops)
+							t.Pop()
+						}
+						if corner != nil {
+							macro := op.Record(gtx.Ops)
+							cgtx := gtx
+							cgtx.Constraints.Min = image.Point{}
+							bd := corner(cgtx)
+							call := macro.Stop()
+							t := op.Offset(image.Pt(dims.Size.X-bd.Size.X+gtx.Dp(4), -gtx.Dp(4))).Push(gtx.Ops)
+							call.Add(gtx.Ops)
+							t.Pop()
 						}
 						return dims
 					})
@@ -1476,10 +1491,7 @@ func iconButton(gtx layout.Context, click *widget.Clickable, ic *widget.Icon, c,
 // circleIcon is ic centered in a 48dp circle of color bg, squarer when active.
 func circleIcon(gtx layout.Context, bg colorT, ic *widget.Icon, active bool) layout.Dimensions {
 	size := gtx.Dp(48)
-	radius := size / 2
-	if active {
-		radius = gtx.Dp(16)
-	}
+	radius := gtx.Dp(16)
 	r := image.Rectangle{Max: image.Pt(size, size)}
 	paint.FillShape(gtx.Ops, bg, clip.UniformRRect(r, radius).Op(gtx.Ops))
 	gtx.Constraints = layout.Exact(r.Max)

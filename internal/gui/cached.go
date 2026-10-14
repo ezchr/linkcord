@@ -114,3 +114,18 @@ func (c *chatView) guildUnread(guildID discord.GuildID) ningen.UnreadIndication 
 	}
 	return ind
 }
+
+// guildMentions is how many mentions wait in a server's channels.
+func (c *chatView) guildMentions(guildID discord.GuildID) int {
+	chs, err := c.st.Cabinet.Channels(guildID)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, ch := range chs {
+		if rs := c.st.ReadState.ReadState(ch.ID); rs != nil && rs.MentionCount > 0 && c.can(ch.ID, discord.PermissionViewChannel) {
+			n += rs.MentionCount
+		}
+	}
+	return n
+}

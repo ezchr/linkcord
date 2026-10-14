@@ -6,7 +6,6 @@ import (
 	"slices"
 
 	"gioui.org/layout"
-	"gioui.org/op"
 	"gioui.org/unit"
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/ningen/v3"
@@ -71,7 +70,7 @@ func (c *chatView) layoutUnreadDM(gtx layout.Context, ch discord.Channel) layout
 	}
 	selected := c.selChannel != nil && c.selChannel.ID == ch.ID
 	name := c.dmName(ch)
-	dims := c.guildButton(gtx, cl, selected, ningen.ChannelRead, func(gtx layout.Context, active bool) layout.Dimensions {
+	dims := c.guildButton(gtx, cl, selected, ningen.ChannelRead, c.dmUnreadCount(ch.ID), nil, func(gtx layout.Context, active bool) layout.Dimensions {
 		if ch.Type == discord.DirectMessage && len(ch.DMRecipients) > 0 {
 			u := ch.DMRecipients[0]
 			return c.u.picture(gtx, c.authorAvatarURL(discord.NullGuildID, u), 48, colorFor(uint64(u.ID)), name, -1)
@@ -82,17 +81,6 @@ func (c *chatView) layoutUnreadDM(gtx layout.Context, ch discord.Channel) layout
 		}
 		return c.u.picture(gtx, url, 48, colorFor(uint64(ch.ID)), name, -1)
 	})
-	// The count sits on the bottom right of the picture, as on Discord.
-	if n := c.dmUnreadCount(ch.ID); n > 0 {
-		macro := op.Record(gtx.Ops)
-		bd := outlinedBadge(gtx, c, n)
-		call := macro.Stop()
-		x := dims.Size.X/2 + gtx.Dp(28) - bd.Size.X
-		y := dims.Size.Y - bd.Size.Y + gtx.Dp(2)
-		t := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
-		call.Add(gtx.Ops)
-		t.Pop()
-	}
 	return dims
 }
 
