@@ -55,7 +55,9 @@ func rounded(gtx layout.Context, bg color.NRGBA, radius unit.Dp, w layout.Widget
 
 // label returns a text label of the given size and color.
 func label(th *material.Theme, size unit.Sp, c color.NRGBA, txt string) material.LabelStyle {
-	l := material.Label(th, size, tr(txt))
+	txt = drawable(tr(txt))
+	noteText(txt)
+	l := material.Label(th, size, txt)
 	l.Color = c
 	return l
 }

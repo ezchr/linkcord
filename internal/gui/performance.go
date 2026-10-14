@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"strconv"
+	"sync"
 	"time"
 )
 
@@ -33,7 +35,20 @@ func (u *ui) startPerformanceProfile() func() {
 		return func() {}
 	}
 	started := time.Now()
-	return func() {
+	var once sync.Once
+	stop := func() {
+		once.Do(func() { u.writeProfile(dir, cpu, started) })
+	}
+	// LINKCORD_PROFILE_SECONDS ends the profile after that long, with
+	// Linkcord still open, as an idle window is what is measured.
+	if n, err := strconv.Atoi(os.Getenv("LINKCORD_PROFILE_SECONDS")); err == nil && n > 0 {
+		time.AfterFunc(time.Duration(n)*time.Second, stop)
+	}
+	return stop
+}
+
+func (u *ui) writeProfile(dir string, cpu *os.File, started time.Time) {
+	{
 		pprof.StopCPUProfile()
 		cpu.Close()
 		var before, after runtime.MemStats

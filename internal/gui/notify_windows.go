@@ -52,6 +52,9 @@ func (u *ui) viewEvent(e app.ViewEvent) {
 			// Shown that way, it says nothing of still running.
 			u.trayHinted = true
 			u.hideToTray()
+		} else if first {
+			// The icon is there while the window is open too, as Discord's.
+			u.showTrayIcon("")
 		}
 	}
 }

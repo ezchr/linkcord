@@ -74,6 +74,24 @@ func ParseCollection(src []byte) ([]giofont.FontFace, error) {
 	return out, nil
 }
 
+// ParseFirst parses only the first face of a font or collection, sparing
+// the memory of the others, whose glyphs are read whole.
+func ParseFirst(src []byte) (giofont.FontFace, error) {
+	lds, err := opentype.NewLoaders(bytes.NewReader(src))
+	if err != nil {
+		return giofont.FontFace{}, err
+	}
+	if len(lds) == 0 {
+		return giofont.FontFace{}, fmt.Errorf("no font in the file")
+	}
+	face, md, err := parseLoader(lds[0])
+	if err != nil {
+		return giofont.FontFace{}, err
+	}
+	ff := Face{face: face, font: md}
+	return giofont.FontFace{Face: ff, Font: ff.Font()}, nil
+}
+
 func DescriptionToFont(md fontapi.Description) giofont.Font {
 	return giofont.Font{
 		Typeface: giofont.Typeface(md.Family),

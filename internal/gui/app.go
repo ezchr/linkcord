@@ -176,6 +176,32 @@ func newUI(w *app.Window) *ui {
 	uiLang = settings.Language
 	u := &ui{win: w, th: newThemeFont(settings.Font), focused: true, appearance: appearance, app: settings}
 	u.images = newImages(u)
+	// Text that needs the fonts for symbols or Asian scripts has them
+	// read, and the interface shaped again with them.
+	var reshaping atomic.Bool
+	onFontNeeds = func() {
+		if !reshaping.CompareAndSwap(false, true) {
+			return
+		}
+		go func() {
+			sh := newShaper(u.app.Font)
+			u.post(func() {
+				u.th.Shaper = sh
+				reshaping.Store(false)
+				// The fonts of the old shaper are many megabytes, given
+				// back to Windows at once rather than kept by Go.
+				go func() {
+					time.Sleep(2 * time.Second)
+					debug.FreeOSMemory()
+				}()
+				u.win.Invalidate()
+				// More may have been needed meanwhile.
+				if fontNeeds.Load() != fontsLoaded.Load() {
+					onFontNeeds()
+				}
+			})
+		}()
+	}
 	// How the download of FFmpeg goes shows as the voice's messages do.
 	mediaNotify = func(s string) { u.post(func() { u.voiceInfo(s) }) }
 	if os.Getenv(demoEnvVar) == "1" {
@@ -449,6 +475,21 @@ func (u *ui) hideToTray() bool {
 	if u.hwnd == 0 {
 		return false
 	}
+	hint := ""
+	if !u.trayHinted {
+		hint = appName + " is still running. Click its icon to open it, or right-click it to quit."
+		u.trayHinted = true
+	}
+	if !u.showTrayIcon(hint) {
+		return false
+	}
+	tray.HideWindow(u.hwnd)
+	return true
+}
+
+// showTrayIcon shows Linkcord's icon in the notification area, with hint
+// in a balloon if it is not empty, and reports whether it is there.
+func (u *ui) showTrayIcon(hint string) bool {
 	if u.tray == nil {
 		t, err := tray.Start(appName, "Open "+appName, "Quit "+appName, u.showFromTray, u.quit)
 		if err != nil {
@@ -457,16 +498,10 @@ func (u *ui) hideToTray() bool {
 		}
 		u.tray = t
 	}
-	hint := ""
-	if !u.trayHinted {
-		hint = appName + " is still running. Click its icon to open it, or right-click it to quit."
-		u.trayHinted = true
-	}
 	if err := u.tray.Show(appName, hint); err != nil {
 		slog.Warn("could not show the notification area icon", "err", err)
 		return false
 	}
-	tray.HideWindow(u.hwnd)
 	return true
 }
 

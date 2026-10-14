@@ -161,8 +161,10 @@ func (im *images) frame(gtx layout.Context, url string, size int) *paint.ImageOp
 	if e == nil || len(e.frames) < 2 || e.cycle <= 0 {
 		return img
 	}
-	// Only optional low-power mode or a minimized window pauses playback.
-	if im.lowPower || (im.u != nil && im.u.minimized) {
+	// Low-power mode, and a window minimized or in the background, pause
+	// playback, as Discord plays GIFs only while it is in front: each
+	// frame of an animation redraws the whole window.
+	if im.lowPower || (im.u != nil && (im.u.minimized || !im.u.focused)) {
 		return img
 	}
 	now := gtx.Now

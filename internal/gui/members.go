@@ -242,8 +242,10 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 						dims := c.u.picture(gtx, url, 32, colorFor(uint64(m.User.ID)), name, -1)
 						// The frame goes over the picture and the status over
 						// both, as in Discord.
+						// The frame moves only under the pointer, as on
+						// Discord: a list of moving frames keeps redrawing.
 						if d := m.User.AvatarDecoration; d != nil && d.Asset != "" {
-							c.u.decoration(gtx, d.URL(true), dims.Size.X)
+							c.u.decoration(gtx, d.URL(hovered), dims.Size.X)
 						}
 						statusDot(gtx, status, dims.Size.X, bg)
 						return dims

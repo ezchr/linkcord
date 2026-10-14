@@ -65,6 +65,8 @@ func fontLabel(name string) string {
 // it is not there, falling back to the bundled and selected fonts for what
 // it lacks. The faces loaded first are the default.
 func newShaper(name string) *text.Shaper {
+	needs := fontNeeds.Load()
+	defer fontsLoaded.Store(needs)
 	var collection []font.FontFace
 	dir := windowsFonts()
 	var chosen []string
@@ -83,6 +85,22 @@ func newShaper(name string) *text.Shaper {
 		}
 		collection = append(collection, faces...)
 	}
+	// The first of the faces in a big font file is enough: the others are
+	// variants, such as a UI version, of the same letters.
+	loadFirst := func(files []string) {
+		for _, file := range files {
+			data, err := os.ReadFile(filepath.Join(dir, file))
+			if err != nil {
+				continue
+			}
+			face, err := opentype.ParseFirst(data)
+			if err != nil {
+				continue
+			}
+			collection = append(collection, face)
+			return
+		}
+	}
 	for _, file := range chosen {
 		load(file)
 	}
@@ -97,15 +115,27 @@ func newShaper(name string) *text.Shaper {
 			load(file)
 		}
 	}
-	for _, group := range cjkFonts {
-		for _, file := range group {
-			if _, err := os.Stat(filepath.Join(windowsFonts(), file)); err == nil {
+	if needs&needSymbols != 0 {
+		for _, file := range symbolFonts {
+			if !slices.Contains(chosen, file) {
 				load(file)
-				break
 			}
 		}
 	}
-	return text.NewShaper(text.WithCollection(collection))
+	if needs&needCJK != 0 {
+		loadFirst(cjkFonts)
+	}
+	if needs&needKorean != 0 {
+		loadFirst(koreanFonts)
+	}
+	for need, files := range scriptFonts {
+		if needs&need != 0 {
+			loadFirst(files)
+		}
+	}
+	// Not the rest of Windows' fonts: Gio would read whole any font that
+	// has a character missing here, a hundred megabytes for one mark.
+	return text.NewShaper(text.NoSystemFonts(), text.WithCollection(collection))
 }
 
 // fontView is the choice of font in the settings.

@@ -61,15 +61,31 @@ var colorEmoji []byte
 
 // Selected Windows fonts cover common scripts, symbols, and mathematical
 // alphabets without loading the full system font catalog. Noto supplies emoji.
-var fallbackFonts = []string{"segoeui.ttf", "seguisym.ttf", "cambria.ttc"}
+var fallbackFonts = []string{"segoeui.ttf"}
+
+// symbolFonts cover symbols and mathematical alphabets, such as the fancy
+// letters of names: loaded once some text needs them, as each takes many
+// megabytes once read.
+var symbolFonts = []string{"seguisym.ttf", "cambria.ttc"}
 
 // cjkFonts are Windows' fonts for Japanese, Korean and Chinese, which the
 // fonts above lack: of each group, the first installed is used, the later
-// ones for older Windows.
-var cjkFonts = [][]string{
-	{"YuGothM.ttc", "meiryo.ttc", "msgothic.ttc"},
-	{"malgun.ttf", "gulim.ttc"},
-	{"msyh.ttc", "simsun.ttc"},
+// ones for older Windows. They are loaded once some text needs them: read,
+// they take hundreds of megabytes.
+// The Japanese font also has the Chinese characters most used, which saves
+// loading a Chinese one too.
+var cjkFonts = []string{"YuGothM.ttc", "meiryo.ttc", "msgothic.ttc"}
+
+// koreanFonts are for Hangul, loaded once Korean is shown.
+var koreanFonts = []string{"malgun.ttf", "gulim.ttc"}
+
+// scriptFonts are for the scripts Segoe UI lacks, each loaded once its
+// text is shown: the first of each group that Windows has.
+var scriptFonts = map[uint32][]string{
+	needIndic:    {"Nirmala.ttc", "Nirmala.ttf", "mangal.ttf"},
+	needThai:     {"LeelawUI.ttf", "leelawad.ttf", "tahoma.ttf"},
+	needMyanmar:  {"mmrtext.ttf"},
+	needEthiopic: {"ebrima.ttf"},
 }
 
 // narrowSpace returns a copy of a font whose space glyph is a quarter of an

@@ -175,6 +175,7 @@ func (c *chatView) inlineSpans(s string, m discord.Message, base richtext.SpanSt
 		if buf.Len() == 0 {
 			return
 		}
+		noteText(buf.String())
 		sp := style()
 		txt := buf.String()
 		buf.Reset()
@@ -212,7 +213,7 @@ func (c *chatView) inlineSpans(s string, m discord.Message, base richtext.SpanSt
 	special := func(content string, col colorT, key, value string, bold bool) {
 		flush()
 		sp := style()
-		sp.Content, sp.Color = content, col
+		sp.Content, sp.Color = drawable(content), col
 		if bold {
 			sp.Font.Weight = font.Bold
 		}

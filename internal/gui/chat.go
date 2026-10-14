@@ -1784,7 +1784,7 @@ func (c *chatView) layoutUserPanel(gtx layout.Context) layout.Dimensions {
 											}
 											dims := c.u.picture(gtx, url, 32, colorFor(uint64(c.me.ID)), c.me.DisplayOrUsername(), -1)
 											if d := c.me.AvatarDecoration; d != nil && d.Asset != "" {
-												c.u.decoration(gtx, d.URL(true), dims.Size.X)
+												c.u.decoration(gtx, d.URL(false), dims.Size.X)
 											}
 											if c.u.voiceSpeaking(c.me.ID) {
 												speakingRing(gtx, dims.Size.X, bg)

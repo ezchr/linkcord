@@ -107,14 +107,29 @@ func TestMinimizedAnimationDoesNotRedraw(t *testing.T) {
 		t.Fatal("background animation requested a redraw")
 	}
 
+	// A visible window in the background pauses too, as Discord plays GIFs
+	// only while it is in front: the frames redraw the whole window.
 	ops.Reset()
+	var unfocusedRouter input.Router
+	gtx.Source = unfocusedRouter.Source()
 	im.u.minimized = false
 	gtx.Now = animEpoch
 	im.frame(gtx, "test", 2)
-	router.Frame(&ops)
-	at, redraw := router.WakeupTime()
+	unfocusedRouter.Frame(&ops)
+	if _, redraw := unfocusedRouter.WakeupTime(); redraw {
+		t.Fatal("background window requested a redraw")
+	}
+
+	// In front, it plays at its own pace.
+	ops.Reset()
+	var focusedRouter input.Router
+	gtx.Source = focusedRouter.Source()
+	im.u.focused = true
+	im.frame(gtx, "test", 2)
+	focusedRouter.Frame(&ops)
+	at, redraw := focusedRouter.WakeupTime()
 	if !redraw || !at.Equal(gtx.Now.Add(time.Millisecond)) {
-		t.Fatalf("visible unfocused window lost original frame timing: %v, %v", at, redraw)
+		t.Fatalf("focused window lost original frame timing: %v, %v", at, redraw)
 	}
 
 	ops.Reset()
