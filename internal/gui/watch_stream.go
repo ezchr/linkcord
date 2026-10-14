@@ -173,7 +173,8 @@ func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, 
 	if c.watching(vs.UserID) {
 		text = "Loading stream…"
 	}
-	// The button sits in the middle of the card, under the picture.
+	// The button sits in the middle of the card, clear of the name and
+	// "LIVE" at the bottom left.
 	macro := op.Record(gtx.Ops)
 	bgtx := gtx
 	bgtx.Constraints.Min = image.Point{}
@@ -189,7 +190,7 @@ func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, 
 		})
 	})
 	call := macro.Stop()
-	t := op.Offset(image.Pt((size.X-bd.Size.X)/2, size.Y*3/4-bd.Size.Y/2)).Push(gtx.Ops)
+	t := op.Offset(image.Pt((size.X-bd.Size.X)/2, (size.Y-bd.Size.Y)/2)).Push(gtx.Ops)
 	call.Add(gtx.Ops)
 	t.Pop()
 	return false

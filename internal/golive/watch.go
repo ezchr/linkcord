@@ -68,14 +68,15 @@ type Watch struct {
 	frame  *image.RGBA
 	frames atomic.Int64
 	// The counts of how the stream goes, which are logged.
-	packets, assembled, lost, daveFailed atomic.Int64
-	lastPLI                              atomic.Int64
-	srcW, srcH, fps                      int
-	created                              bool
-	once                                 sync.Once
-	decoder                              *exec.Cmd
-	decIn                                io.WriteCloser
-	done                                 chan struct{}
+	packets, assembled, lost, daveFailed, skipped atomic.Int64
+	needIDR                                       atomic.Bool
+	lastPLI                                       atomic.Int64
+	srcW, srcH, fps                               int
+	created                                       bool
+	once                                          sync.Once
+	decoder                                       *exec.Cmd
+	decIn                                         io.WriteCloser
+	done                                          chan struct{}
 }
 
 // streamWatchCommand is Op 20: it asks to watch a stream.
@@ -550,6 +551,7 @@ func (w *Watch) receive() {
 			// A new picture: the last one was cut short.
 			if len(au) > 0 {
 				w.lost.Add(1)
+				w.needIDR.Store(true)
 				w.requestKeyframe()
 			}
 			au, auTS, lost, fuActive = au[:0], ts, false, false
@@ -596,6 +598,7 @@ func (w *Watch) receive() {
 			// A picture with a packet missing cannot be shown, nor those
 			// after it, until a keyframe.
 			w.lost.Add(1)
+			w.needIDR.Store(true)
 			w.requestKeyframe()
 		}
 		au, lost, fuActive = au[:0], false, false
@@ -609,11 +612,24 @@ func (w *Watch) decode(au []byte) {
 	out := make([]byte, w.conn.dave.MaxDecryptedFrameSize(godave.UserID(w.p.StreamerID.String()), len(au)))
 	n, err := w.conn.dave.Decrypt(godave.UserID(w.p.StreamerID.String()), au, out)
 	if err != nil {
-		w.daveFailed.Add(1)
+		if n := w.daveFailed.Add(1); n <= 5 || n%100 == 0 {
+			w.log.Info("could not decrypt a picture", "err", err, "bytes", len(au), "failures", n)
+		}
+		w.needIDR.Store(true)
 		w.requestKeyframe()
 		return
 	}
 	pic := out[:n]
+	// After a picture is missing, the ones built on it would smear: they
+	// wait for a keyframe, which starts afresh.
+	if w.needIDR.Load() {
+		if !hasIDR(pic) {
+			w.skipped.Add(1)
+			w.requestKeyframe()
+			return
+		}
+		w.needIDR.Store(false)
+	}
 	for _, nal := range splitNALs(pic) {
 		if len(nal) > 1 && nal[0]&0x1F == 7 {
 			if sw, sh, err := spsSize(nal[1:]); err == nil {
@@ -756,16 +772,69 @@ func (w *Watch) askKeyframes() {
 		w.mu.Lock()
 		w.fps = int(frames - lastFrames)
 		w.mu.Unlock()
+		w.sendReport()
 		lastFrames = frames
 		if tick++; tick%5 == 0 {
 			w.log.Info("watching", "packets", w.packets.Load(), "pictures", w.assembled.Load(), "lost", w.lost.Load(),
-				"dave_failed", w.daveFailed.Load(), "shown", frames)
+				"dave_failed", w.daveFailed.Load(), "skipped", w.skipped.Load(), "shown", frames)
 		}
 		select {
 		case <-t.C:
 		case <-w.done:
 			return
 		}
+	}
+}
+
+// hasIDR reports whether an Annex B picture holds a keyframe slice.
+func hasIDR(pic []byte) bool {
+	for _, nal := range splitNALs(pic) {
+		if len(nal) > 0 && nal[0]&0x1F == 5 {
+			return true
+		}
+	}
+	return false
+}
+
+// maxBitrate is what the viewer says it can take, in bits a second: servers
+// lower a stream's quality for viewers that say nothing.
+const maxBitrate = 8_000_000
+
+// sendReport sends an RTCP receiver report with a REMB, as WebRTC clients
+// do every second: how the video arrives, and the bitrate it can take.
+func (w *Watch) sendReport() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.videoSSRC == 0 || w.aead == nil {
+		return
+	}
+	// Receiver report (201) with one block, for the streamer's video.
+	rr := make([]byte, 8+24)
+	rr[0], rr[1] = 0x81, 201
+	binary.BigEndian.PutUint16(rr[2:], 7)
+	binary.BigEndian.PutUint32(rr[4:], w.ourSSRC)
+	binary.BigEndian.PutUint32(rr[8:], w.videoSSRC)
+	// REMB (206, format 15): "REMB", one SSRC, the bitrate as exponent and
+	// 18-bit mantissa.
+	exp, mant := 0, maxBitrate
+	for mant >= 1<<18 {
+		mant >>= 1
+		exp++
+	}
+	remb := make([]byte, 8+16)
+	remb[0], remb[1] = 0x8F, 206
+	binary.BigEndian.PutUint16(remb[2:], 5)
+	binary.BigEndian.PutUint32(remb[4:], w.ourSSRC)
+	copy(remb[12:], "REMB")
+	remb[16] = 1
+	remb[17] = byte(exp<<2) | byte(mant>>16)
+	binary.BigEndian.PutUint16(remb[18:], uint16(mant))
+	binary.BigEndian.PutUint32(remb[20:], w.videoSSRC)
+	for _, pkt := range [][]byte{rr, remb} {
+		header := pkt[:8]
+		binary.BigEndian.PutUint32(w.nonce[:4], binary.BigEndian.Uint32(w.nonce[:4])+1)
+		sealed := w.aead.Seal(append([]byte(nil), header...), w.nonce[:w.aead.NonceSize()], pkt[8:], header)
+		w.udp.Write(append(sealed, w.nonce[:4]...))
 	}
 }
 
