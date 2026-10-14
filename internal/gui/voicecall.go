@@ -43,7 +43,10 @@ type callView struct {
 	full    bool
 	channel discord.ChannelID
 
-	join, invite, fullBtn, leave       widget.Clickable
+	join, invite, fullBtn, leave widget.Clickable
+	// stopWatch stops watching someone's stream, beside the button to hang
+	// up while one is watched.
+	stopWatch                          widget.Clickable
 	mic, micMenu, cam, camMenu         widget.Clickable
 	screen, activity, soundboard, more widget.Clickable
 	// streamSound turns the sound of the stream on or off.
@@ -137,6 +140,9 @@ func (c *chatView) updateCall(gtx layout.Context) {
 	}
 	if cv.leave.Clicked(gtx) {
 		u.leaveVoice()
+	}
+	if cv.stopWatch.Clicked(gtx) {
+		c.stopWatching()
 	}
 	if cv.mic.Clicked(gtx) {
 		u.toggleVoice(false)
@@ -610,6 +616,16 @@ func (c *chatView) layoutCallBar(gtx layout.Context, joined bool) layout.Dimensi
 							return callButton(gtx, &cv.more, iconMore, colorHeader, callBarColor, 52)
 						}),
 						gap,
+						// While a stream is watched, a button stops watching
+						// it, beside the one that hangs up.
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if !c.watch.streamer.IsValid() {
+								return layout.Dimensions{}
+							}
+							return layout.Inset{Right: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return callButton(gtx, &cv.stopWatch, iconStopWatching, colorHeader, colorRed, 52)
+							})
+						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return callButton(gtx, &cv.leave, iconHangUp, colorHeader, colorRed, 64)
 						}),

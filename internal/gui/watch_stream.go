@@ -15,6 +15,7 @@ import (
 	"gioui.org/widget"
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ezchr/linkcord/internal/golive"
+	"golang.org/x/exp/shiny/materialdesign/icons"
 )
 
 // streamWatch is the stream of someone else being watched: one at a time,
@@ -30,6 +31,9 @@ type streamWatch struct {
 	// buttons are the "Watch Stream" buttons, by streamer.
 	buttons map[discord.UserID]*widget.Clickable
 }
+
+// iconStopWatching is the button that stops watching a stream.
+var iconStopWatching = mustIcon(icons.ActionVisibilityOff)
 
 // watching reports whether the stream of id is watched or starting.
 func (c *chatView) watching(id discord.UserID) bool {
