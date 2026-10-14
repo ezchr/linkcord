@@ -86,10 +86,9 @@ func (*streamWatchCommand) Op() ws.OpCode           { return 20 }
 func (*streamWatchCommand) EventType() ws.EventType { return "" }
 
 // mediaSinkWantsCommand is Op 15: what quality of whose video the client
-// wants; "any" at 100 asks for everything at its best.
-type mediaSinkWantsCommand struct {
-	Any int `json:"any"`
-}
+// wants, by the SSRC of each video, and "any" for the rest; 100 asks for
+// the best.
+type mediaSinkWantsCommand map[string]int
 
 func (*mediaSinkWantsCommand) Op() ws.OpCode           { return 15 }
 func (*mediaSinkWantsCommand) EventType() ws.EventType { return "" }
@@ -115,17 +114,15 @@ func init() {
 // in turn, with a new token, and the log tells which one is taken.
 type joinVariant struct {
 	name string
-	// video and streams are said in the identify; slot describes the video
-	// slots the server gives before asking for the media.
+	// video and streams are said in the identify.
 	video   bool
 	streams []streamInfo
-	slot    bool
 }
 
 var joinVariants = []joinVariant{
-	{name: "screen-slot", video: true, streams: []streamInfo{{Type: "screen", RID: "100", Quality: 100}}, slot: true},
-	{name: "screen", video: true, streams: []streamInfo{{Type: "screen", RID: "100", Quality: 100}}},
-	{name: "plain", video: true},
+	// As the Userdoccers describe a viewer: offering no stream of its own.
+	{name: "viewer", video: true},
+	{name: "viewer-screen", video: true, streams: []streamInfo{{Type: "screen", RID: "100", Quality: 100}}},
 	{name: "no-video"},
 }
 
@@ -286,16 +283,10 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 		return nil, err
 	}
 	w.conn.send(wait, &versionCommand{})
-	// As Discord's clients do, viewers too: the video slots the server gave,
-	// not sending.
-	if v.slot && len(r.Streams) > 0 {
-		st := r.Streams[0]
-		w.conn.send(wait, &videoCommand{
-			AudioSSRC: r.SSRC, VideoSSRC: st.SSRC, RTXSSRC: st.RTXSSRC,
-			Streams: []videoStream{{Type: "video", RID: "100", SSRC: st.SSRC, Quality: 100, RTXSSRC: st.RTXSSRC,
-				MaxResolution: maxResolution{Type: "fixed"}}},
-		})
-	}
+	// A client must send a Speaking and a Video before it receives media,
+	// or the server ends its session; a viewer's say it sends nothing: no
+	// speaking, and a video with no SSRC and no streams.
+	w.sendViewerState(wait, r.SSRC)
 	if err := w.conn.send(wait, &selectProtocolCommand{
 		Protocol: "udp",
 		Codecs: []codecInfo{
@@ -321,7 +312,11 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 	if err := w.useSecret(d.Mode, d.SecretKey); err != nil {
 		return nil, err
 	}
-	w.conn.send(wait, &mediaSinkWantsCommand{Any: 100})
+	w.sendViewerState(wait, r.SSRC)
+	w.mu.Lock()
+	video := w.videoSSRC
+	w.mu.Unlock()
+	w.sendWants(wait, video)
 	w.log.Info("watching", "mode", d.Mode, "video_codec", d.VideoCodec, "dave", d.DAVEProtocolVersion)
 
 	if err := w.startDecoder(); err != nil {
@@ -332,6 +327,22 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 	go w.receive()
 	go w.askKeyframes()
 	return w, nil
+}
+
+// sendViewerState tells the server the viewer sends nothing.
+func (w *Watch) sendViewerState(ctx context.Context, ssrc uint32) {
+	w.conn.send(ctx, &voicegateway.SpeakingEvent{Speaking: 0, SSRC: ssrc})
+	w.conn.send(ctx, &videoCommand{AudioSSRC: ssrc, Streams: []videoStream{}})
+}
+
+// sendWants asks for the streamer's video, by its SSRC when known.
+func (w *Watch) sendWants(ctx context.Context, video uint32) {
+	wants := mediaSinkWantsCommand{"any": 100}
+	if video != 0 {
+		wants[fmt.Sprint(video)] = 100
+	}
+	cmd := wants
+	w.conn.send(ctx, &cmd)
 }
 
 // waitOp waits for the op that match accepts, keeping the others in keep.
@@ -378,6 +389,7 @@ func (w *Watch) follow(early chan ws.Op) {
 				w.mu.Lock()
 				w.videoSSRC = ssrc
 				w.mu.Unlock()
+				w.sendWants(context.Background(), ssrc)
 				w.log.Info("stream video found", "ssrc", ssrc)
 			}
 		}
