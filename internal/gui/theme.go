@@ -63,6 +63,15 @@ var colorEmoji []byte
 // alphabets without loading the full system font catalog. Noto supplies emoji.
 var fallbackFonts = []string{"segoeui.ttf", "seguisym.ttf", "cambria.ttc"}
 
+// cjkFonts are Windows' fonts for Japanese, Korean and Chinese, which the
+// fonts above lack: of each group, the first installed is used, the later
+// ones for older Windows.
+var cjkFonts = [][]string{
+	{"YuGothM.ttc", "meiryo.ttc", "msgothic.ttc"},
+	{"malgun.ttf", "gulim.ttc"},
+	{"msyh.ttc", "simsun.ttc"},
+}
+
 // narrowSpace returns a copy of a font whose space glyph is a quarter of an
 // em wide, as in text fonts. Noto Color Emoji has a space as wide as an
 // emoji, and the shaper keeps the spaces that follow an emoji in its font,

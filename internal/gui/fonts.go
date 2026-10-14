@@ -97,6 +97,14 @@ func newShaper(name string) *text.Shaper {
 			load(file)
 		}
 	}
+	for _, group := range cjkFonts {
+		for _, file := range group {
+			if _, err := os.Stat(filepath.Join(windowsFonts(), file)); err == nil {
+				load(file)
+				break
+			}
+		}
+	}
 	return text.NewShaper(text.WithCollection(collection))
 }
 

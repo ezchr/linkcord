@@ -27,7 +27,7 @@ func (u *ui) startDemo() {
 		{ID: discord.UserID(id(2)), Discriminator: "0", Username: "ana", DisplayName: "Ana", PrimaryGuild: &discord.PrimaryGuild{GuildID: discord.GuildID(id(100)), Enabled: true, Tag: "DEMO"}},
 		{ID: discord.UserID(id(3)), Discriminator: "0", Username: "beto", DisplayName: "Beto"},
 		{ID: discord.UserID(id(4)), Discriminator: "0", Username: "carla", DisplayName: "Carla"},
-		{ID: discord.UserID(id(5)), Discriminator: "0", Username: "dani", DisplayName: "Dani"},
+		{ID: discord.UserID(id(5)), Discriminator: "0", Username: "dani", DisplayName: "Dani ダニ"},
 		{ID: discord.UserID(id(6)), Discriminator: "0", Username: "demo_bot", DisplayName: "Welcome Bot", Bot: true},
 		{ID: discord.UserID(id(7)), Discriminator: "0", Username: "elena", DisplayName: "𝓔𝓵𝓮𝓷𝓪 | ᴷⁱⁿᵍ"},
 		{ID: discord.UserID(id(8)), Discriminator: "0", Username: "fer", DisplayName: "Fer"},
