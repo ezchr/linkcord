@@ -33,6 +33,9 @@ type fakeDiscord struct {
 	wsURL    string
 	udp      *net.UDPConn
 	dropRate float64
+	// noReplay leaves out telling who joins later of the videos before, to
+	// check that the viewer finds the resend stream by itself.
+	noReplay bool
 	dropped  atomic.Int64
 	relayed  atomic.Int64
 
@@ -41,6 +44,9 @@ type fakeDiscord struct {
 	peers    map[string]*net.UDPAddr
 	conns    []*fakeConn
 	nextSSRC uint32
+	// videos are the last video ops of each user, told to who joins later,
+	// as Discord does.
+	videos map[string]map[string]any
 }
 
 type fakeConn struct {
@@ -148,6 +154,21 @@ func (f *fakeDiscord) serve(c *fakeConn) {
 			_, port, _ := net.SplitHostPort(f.udp.LocalAddr().String())
 			var p int
 			json.Unmarshal([]byte(port), &p)
+			// Told after the ready, which this goroutine sends first.
+			go func() {
+				time.Sleep(50 * time.Millisecond)
+				f.mu.Lock()
+				if f.noReplay {
+					f.mu.Unlock()
+					return
+				}
+				for user, v := range f.videos {
+					if user != c.userID {
+						go c.send(12, v)
+					}
+				}
+				f.mu.Unlock()
+			}()
 			c.send(2, map[string]any{"ssrc": audio, "ip": "127.0.0.1", "port": p,
 				"modes":   []string{"aead_aes256_gcm_rtpsize"},
 				"streams": []map[string]any{{"type": "video", "rid": "100", "ssrc": audio + 1, "rtx_ssrc": audio + 2, "active": false, "quality": 100}}})
@@ -161,6 +182,10 @@ func (f *fakeDiscord) serve(c *fakeConn) {
 			json.Unmarshal(msg.D, &v)
 			v["user_id"] = c.userID
 			f.mu.Lock()
+			if f.videos == nil {
+				f.videos = make(map[string]map[string]any)
+			}
+			f.videos[c.userID] = v
 			for _, o := range f.conns {
 				if o != c {
 					go o.send(12, v)
@@ -252,9 +277,13 @@ func TestStreamLoopback(t *testing.T) {
 	if screen == nil {
 		t.Skip("the test pattern window did not show")
 	}
-	for _, loss := range []float64{0, 0.02} {
+	for _, run := range []struct {
+		loss     float64
+		noReplay bool
+	}{{0, false}, {0.02, false}, {0.02, true}} {
+		loss := run.loss
 		f := newFakeDiscord(t)
-		f.dropRate = loss
+		f.dropRate, f.noReplay = loss, run.noReplay
 		guild, channel := discord.GuildID(10), discord.ChannelID(20)
 		stream, err := Start(context.Background(), Params{
 			Main: f, Subscribe: f.Subscribe, GuildID: guild, ChannelID: channel, UserID: 1,
@@ -285,6 +314,12 @@ func TestStreamLoopback(t *testing.T) {
 			last = n
 		}
 		wd, ht, _ := w.Info()
+		stream.med.mu.Lock()
+		resent, missed := stream.med.resent, stream.med.resendMissed
+		stream.med.mu.Unlock()
+		w.mu.Lock()
+		t.Logf("resends: sent %d, not possible %d; received %d, ignored %d; streamer rtx %d, viewer expects video %d rtx %d", resent, missed, w.rtxSeen.Load(), w.rtxIgnored.Load(), stream.med.rtxSSRC, w.videoSSRC, w.rtxSSRC)
+		w.mu.Unlock()
 		t.Logf("loss %.0f%%: first picture after %v, %dx%d, pictures a second %v, relayed %d, dropped %d, lost pictures %d, dave failures %d",
 			loss*100, first.Round(time.Millisecond), wd, ht, perSecond, f.relayed.Load(), f.dropped.Load(), w.lost.Load(), w.daveFailed.Load())
 		w.Stop()

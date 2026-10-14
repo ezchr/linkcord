@@ -17,6 +17,9 @@ func TestCaptureEncode(t *testing.T) {
 	if len(sources) == 0 || sources[0].Kind != Screen {
 		t.Fatalf("no screen in %v", sources)
 	}
+	if sources[0].Thumb == nil {
+		t.Skip("the screen cannot be captured now, as when it is locked or off")
+	}
 	t.Logf("%d sources, the first %dx%d, thumbnail %v", len(sources), sources[0].W, sources[0].H, sources[0].Thumb.Bounds())
 
 	cache, err := os.UserCacheDir()
