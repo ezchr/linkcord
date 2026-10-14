@@ -36,6 +36,30 @@ func TestImageCacheEviction(t *testing.T) {
 	}
 }
 
+// TestImageCacheKeepsShown keeps the pictures on the window while a big one,
+// as a GIF opened, holds the cache over its budget: released, they would
+// load again and release one another over and over.
+func TestImageCacheKeepsShown(t *testing.T) {
+	big := &imageEntry{state: imageReady, bytes: imageCacheBudget}
+	avatar := &imageEntry{state: imageReady, bytes: 1 << 10}
+	old := &imageEntry{state: imageReady, bytes: 1 << 10, used: 1}
+	im := &images{
+		cacheBytes: imageCacheBudget + 2<<10,
+		entries:    map[string]*imageEntry{"big": big, "avatar": avatar, "old": old},
+		clock:      5,
+	}
+	im.newFrame()
+	im.newFrame()
+	avatar.used, big.used = 6, 7
+	im.trimCacheLocked(big)
+	if im.entries["avatar"] != avatar {
+		t.Fatal("a picture on the window was released")
+	}
+	if _, ok := im.entries["old"]; ok {
+		t.Fatal("a picture off the window was kept over the budget")
+	}
+}
+
 func TestImageCacheEntryLimit(t *testing.T) {
 	im := &images{entries: make(map[string]*imageEntry)}
 	for i := range imageCacheEntries + 10 {

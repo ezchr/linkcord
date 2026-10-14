@@ -319,6 +319,10 @@ func (c *chatView) memberItem(gtx layout.Context, m *discord.Member, w func(gtx 
 // tag of the server they wear and the gem of those who boost the server.
 func (c *chatView) layoutMemberName(gtx layout.Context, m *discord.Member, guildID discord.GuildID, name material.LabelStyle) layout.Dimensions {
 	var after []layout.Widget
+	// Bots are marked as in the chat.
+	if m.User.Bot {
+		after = append(after, botTag(c.u.th))
+	}
 	if pg := m.User.PrimaryGuild; pg != nil && pg.Enabled && pg.Tag != "" {
 		after = append(after, func(gtx layout.Context) layout.Dimensions {
 			return c.guildTag(gtx, pg.GuildID, pg.Badge, pg.Tag)

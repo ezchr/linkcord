@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"gioui.org/io/event"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -233,10 +234,42 @@ func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
 	// The gap above stays outside, so that the highlight under the pointer
 	// covers only the message.
 	return layout.Inset{Top: top - 2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return c.layoutWithActions(gtx, m, func(gtx layout.Context) layout.Dimensions {
+		dims := c.layoutWithActions(gtx, m, func(gtx layout.Context) layout.Dimensions {
 			return c.layoutMessageBody(gtx, m, grouped, name, nameColor)
 		})
+		// A double click on a message answers it.
+		if c.doubleClicked(gtx, c.rightTag("reply"+m.ID.String()), dims.Size) {
+			c.startReply(m)
+		}
+		return dims
 	})
+}
+
+// doubleClicked reports whether the area of size at the origin was double
+// clicked with the main button, and has it watched for the next frame.
+// Clicks still reach what is under it, as text, which a double click
+// selects a word of.
+func (c *chatView) doubleClicked(gtx layout.Context, tag event.Tag, size image.Point) bool {
+	clicked := false
+	for {
+		e, ok := gtx.Event(pointer.Filter{Target: tag, Kinds: pointer.Press})
+		if !ok {
+			break
+		}
+		pe, ok := e.(pointer.Event)
+		if !ok || !pe.Buttons.Contain(pointer.ButtonPrimary) {
+			continue
+		}
+		if c.pressTag == tag && pe.Time-c.pressAt < doubleClick {
+			clicked, c.pressTag = true, nil
+		} else {
+			c.pressTag, c.pressAt = tag, pe.Time
+		}
+	}
+	defer clip.Rect{Max: size}.Push(gtx.Ops).Pop()
+	defer pointer.PassOp{}.Push(gtx.Ops).Pop()
+	event.Op(gtx.Ops, tag)
+	return clicked
 }
 
 func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grouped bool, name string, nameColor colorT) layout.Dimensions {

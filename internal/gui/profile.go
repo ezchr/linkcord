@@ -82,7 +82,9 @@ type profileView struct {
 	data    *profileData
 	loading bool
 
-	backdrop         widget.Clickable
+	backdrop widget.Clickable
+	// avatarBtn opens the avatar big in the viewer.
+	avatarBtn        widget.Clickable
 	closeBtn         widget.Clickable
 	message          widget.Clickable
 	copyID           widget.Clickable
@@ -145,6 +147,9 @@ func (c *chatView) updateProfile(gtx layout.Context) {
 	if p.backdrop.Clicked(gtx) || p.closeBtn.Clicked(gtx) {
 		c.profile = nil
 		return
+	}
+	if p.avatarBtn.Clicked(gtx) {
+		c.openAvatar(p.user, p.guildID)
 	}
 	if p.copyID.Clicked(gtx) {
 		gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(p.user.ID.String()))})
@@ -353,6 +358,12 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 			paint.FillShape(gtx.Ops, colorPopup, clip.Ellipse(ring).Op(gtx.Ops))
 			t := op.Offset(image.Pt(x+ringPx, y+ringPx)).Push(gtx.Ops)
 			c.avatarStatus(gtx, user, p.guildID, avatarSize, colorPopup)
+			// A click on the avatar shows it big, to look at or save.
+			p.avatarBtn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				defer clip.Ellipse(image.Rect(0, 0, avatarPx, avatarPx)).Push(gtx.Ops).Pop()
+				pointer.CursorPointer.Add(gtx.Ops)
+				return layout.Dimensions{Size: image.Pt(avatarPx, avatarPx)}
+			})
 			t.Pop()
 
 			if cs := customStatus(presence); cs != "" {
@@ -779,4 +790,25 @@ func formatDate(t time.Time) string {
 	months := [...]string{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
 	t = t.Local()
 	return strconv.Itoa(t.Day()) + " " + months[t.Month()-1] + " " + strconv.Itoa(t.Year())
+}
+
+// openAvatar shows the avatar of user, as it shows in guildID, big in the
+// viewer, from which it can be saved; an animated one moves.
+func (c *chatView) openAvatar(user discord.User, guildID discord.GuildID) {
+	hash, url := user.Avatar, user.AvatarURLWithType(discord.PNGImage)
+	if guildID.IsValid() {
+		if m, err := c.st.Cabinet.Member(guildID, user.ID); err == nil && m.Avatar != "" {
+			hash, url = m.Avatar, m.AvatarURLWithType(discord.PNGImage, guildID)
+		}
+	}
+	if hash == "" {
+		// The default avatar is small, and no bigger exists.
+		c.openViewer("", url, 256, 256, url, "", 0)
+		return
+	}
+	if strings.HasPrefix(hash, "a_") {
+		url = strings.TrimSuffix(url, ".png") + ".gif"
+	}
+	thumb := c.authorAvatarURL(guildID, user)
+	c.openViewer("", url+"?size=1024", 1024, 1024, url+"?size=1024", thumb, 128)
 }

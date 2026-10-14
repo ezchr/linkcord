@@ -5,6 +5,7 @@ import (
 	"unsafe"
 
 	"gioui.org/app"
+	"github.com/ezchr/linkcord/internal/dcsound"
 )
 
 var (
@@ -28,14 +29,17 @@ const (
 )
 
 // notify flashes the taskbar button until the window is focused and plays
-// the notification sound, which works the same on Windows 7 and later.
+// Discord's sound of a message, or Windows' notification sound if Discord's
+// sounds are off, which works the same on Windows 7 and later.
 func (u *ui) notify() {
 	if u.hwnd != 0 && !u.focused {
 		fi := flashInfo{hwnd: u.hwnd, flags: flashTray | flashTimerNoFG}
 		fi.size = uint32(unsafe.Sizeof(fi))
 		procFlashWindow.Call(uintptr(unsafe.Pointer(&fi)))
 	}
-	procMessageBeep.Call(beepNotification)
+	if !u.playSound(dcsound.Message) {
+		procMessageBeep.Call(beepNotification)
+	}
 }
 
 // viewEvent keeps the native window handle, which notify needs.

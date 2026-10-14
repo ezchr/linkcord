@@ -80,6 +80,9 @@ type images struct {
 	cacheBytes   int64
 	clock        uint64
 	pendingLoads int
+	// shown is the clock when the frame before the current one started:
+	// what was used since is on the window, and is not released.
+	shown, frameStart uint64
 
 	// sem limits the downloads at once, for slow connections.
 	sem chan struct{}
@@ -535,4 +538,11 @@ func (u *ui) decoration(gtx layout.Context, url string, px int) {
 	defer op.Offset(image.Pt(-off, -off)).Push(gtx.Ops).Pop()
 	gtx.Constraints = layout.Exact(image.Pt(size, size))
 	widget.Image{Src: *img, Fit: widget.Contain}.Layout(gtx)
+}
+
+// newFrame starts a frame: what the last two used stays cached.
+func (im *images) newFrame() {
+	im.mu.Lock()
+	defer im.mu.Unlock()
+	im.shown, im.frameStart = im.frameStart, im.clock+1
 }

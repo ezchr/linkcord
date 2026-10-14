@@ -21,9 +21,12 @@ const maxEcho = 10 * frameBytes
 type MicTest struct {
 	capture *malgo.Device
 
-	// gain and volume are how many times as loud what is captured is measured and played back, as the bits of a float32, and level how loud what was captured last was, in dB, as the bits of a float64.
-	gain, volume atomic.Uint32
-	level        atomic.Uint64
+	// proc readies what is captured as it would be sent, volume is how many times as loud it is played back, as the bits of a float32, and level how loud what was captured last was, in dB, as the bits of a float64.
+	proc   *processor
+	volume atomic.Uint32
+	level  atomic.Uint64
+	// pending is what was captured short of a whole block for proc.
+	pending []int16
 
 	mu       sync.Mutex
 	playback *malgo.Device
@@ -32,8 +35,7 @@ type MicTest struct {
 
 // StartMicTest starts capturing the microphone with the ID input, "" for the default one.
 func StartMicTest(input string) (*MicTest, error) {
-	t := new(MicTest)
-	t.SetInputVolume(1)
+	t := &MicTest{proc: newProcessor()}
 	t.SetOutputVolume(1)
 	t.level.Store(math.Float64bits(SilentLevel))
 
@@ -49,7 +51,17 @@ func StartMicTest(input string) (*MicTest, error) {
 
 // SetInputVolume measures and plays back what is captured gain times as loud, as it would be sent.
 func (t *MicTest) SetInputVolume(gain float32) {
-	t.gain.Store(math.Float32bits(gain))
+	t.proc.gain.Store(math.Float32bits(gain))
+}
+
+// SetNoiseSuppression removes the noise of what is captured, as it would be sent, if on.
+func (t *MicTest) SetNoiseSuppression(on bool) {
+	t.proc.denoise.Store(on)
+}
+
+// SetAutoGain evens out how loud what is captured is, as it would be sent, if on.
+func (t *MicTest) SetAutoGain(on bool) {
+	t.proc.autoGain.Store(on)
 }
 
 // SetOutputVolume plays back volume times as loud.
@@ -88,18 +100,27 @@ func (t *MicTest) Stop() {
 	defer t.mu.Unlock()
 
 	setDevice(&t.playback, false, malgo.Playback, "", nil)
+	t.proc.close()
 }
 
 // captured measures what the microphone captured and keeps it to be played back. It is what the capture device calls.
 func (t *MicTest) captured(_, input []byte) {
-	gain := math.Float32frombits(t.gain.Load())
-	peak := 0
-	pcm := make([]byte, len(input))
 	for i := 0; i+1 < len(input); i += 2 {
-		sample := amplify(int16(binary.LittleEndian.Uint16(input[i:])), gain)
-		binary.LittleEndian.PutUint16(pcm[i:], uint16(sample))
+		t.pending = append(t.pending, int16(binary.LittleEndian.Uint16(input[i:])))
+	}
+	n := len(t.pending) / blockSamples * blockSamples
+	if n == 0 {
+		return
+	}
+	samples := t.pending[:n]
+	t.proc.process(samples)
+	peak := 0
+	pcm := make([]byte, 2*n)
+	for i, sample := range samples {
+		binary.LittleEndian.PutUint16(pcm[2*i:], uint16(sample))
 		peak = max(peak, int(sample), -int(sample))
 	}
+	t.pending = append(t.pending[:0], t.pending[n:]...)
 
 	t.level.Store(math.Float64bits(levelOf(peak)))
 

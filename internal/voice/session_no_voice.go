@@ -29,6 +29,14 @@ func (*Session) SetInputVolume(float32)            {}
 func (*Session) SetOutputVolume(float32)           {}
 func (*Session) SetPushToTalk(bool)                {}
 func (*Session) SetTalking(bool)                   {}
+func (*Session) SetNoiseSuppression(bool)          {}
+func (*Session) SetAutoGain(bool)                  {}
+
+// Effects plays nothing.
+type Effects struct{}
+
+func NewEffects() *Effects                     { return new(Effects) }
+func (*Effects) Play([]int16, string, float32) {}
 
 // SilentLevel is the level of silence, in dB.
 const SilentLevel = -100
@@ -38,12 +46,14 @@ type MicTest struct{}
 
 func StartMicTest(string) (*MicTest, error) { return nil, errNoVoice }
 
-func (*MicTest) SetInputVolume(float32)  {}
-func (*MicTest) SetOutputVolume(float32) {}
-func (*MicTest) Level() float64          { return SilentLevel }
-func (*MicTest) Echo(string, bool) error { return errNoVoice }
-func (*MicTest) Echoing() bool           { return false }
-func (*MicTest) Stop()                   {}
+func (*MicTest) SetInputVolume(float32)   {}
+func (*MicTest) SetOutputVolume(float32)  {}
+func (*MicTest) Level() float64           { return SilentLevel }
+func (*MicTest) Echo(string, bool) error  { return errNoVoice }
+func (*MicTest) Echoing() bool            { return false }
+func (*MicTest) Stop()                    {}
+func (*MicTest) SetNoiseSuppression(bool) {}
+func (*MicTest) SetAutoGain(bool)         {}
 
 // Devices finds no device.
 func Devices() (inputs, outputs []Device, err error) { return nil, nil, errNoVoice }

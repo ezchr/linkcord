@@ -21,6 +21,7 @@ import (
 	"github.com/ayn2op/arikawa/v3/voice"
 	"github.com/ayn2op/arikawa/v3/voice/udp"
 	"github.com/ayn2op/arikawa/v3/voice/voicegateway"
+	"github.com/disgoorg/godave"
 	"github.com/gen2brain/malgo"
 	dave "github.com/thomas-vilte/dave-go/session"
 	"github.com/tphakala/go-opus/opus"
@@ -139,8 +140,9 @@ type Session struct {
 	state *state.State
 	// threshold is how loud a sample of the microphone must be for what is said to be sent.
 	threshold atomic.Int64
-	// gain is how many times as loud what the microphone captures is sent, and volume how many times as loud everyone is played, as the bits of a float32.
-	gain, volume atomic.Uint32
+	// proc readies what the microphone captures to be sent, and volume is how many times as loud everyone is played, as the bits of a float32.
+	proc   *processor
+	volume atomic.Uint32
 	// pushToTalk sends what the microphone captures only while talking, which a key held reports, rather than when it is loud enough.
 	pushToTalk, talking atomic.Bool
 	// updates is sent to when the status or who is speaking changes.
@@ -164,12 +166,21 @@ type Session struct {
 	speakers map[uint32]*speaker
 	// volumes are how loud the users not played as they are sent are played, 1 being as they are sent.
 	volumes map[discord.UserID]float32
+
+	// e2ee encrypts end to end in the voice channel joined, made anew by
+	// each voice server; it is kept for the log.
+	e2ee atomic.Pointer[dave.Session]
+	// sent counts the voice packets sent since the last report, and failed
+	// those that could not be; failedAt is when one last failed to be logged.
+	sent, failed atomic.Uint64
+	failedAt     time.Time
 }
 
 // New returns a Session that sends what the microphone captures louder than sensitivity, in dB.
 func New(state *state.State, sensitivity float64) *Session {
 	s := &Session{
 		state:    state,
+		proc:     newProcessor(),
 		updates:  make(chan struct{}, 1),
 		mic:      make(chan []byte, 4),
 		speaking: make(map[discord.UserID]bool),
@@ -191,7 +202,17 @@ func (s *Session) SetSensitivity(sensitivity float64) {
 
 // SetInputVolume sends what the microphone captures gain times as loud: 0 silences it, and 2 is twice as loud.
 func (s *Session) SetInputVolume(gain float32) {
-	s.gain.Store(math.Float32bits(gain))
+	s.proc.gain.Store(math.Float32bits(gain))
+}
+
+// SetNoiseSuppression removes the noise around what is said, such as of fans and keyboards, if on.
+func (s *Session) SetNoiseSuppression(on bool) {
+	s.proc.denoise.Store(on)
+}
+
+// SetAutoGain evens out how loud what is said is sent, if on. Whether on or not, it is kept from clipping.
+func (s *Session) SetAutoGain(on bool) {
+	s.proc.autoGain.Store(on)
 }
 
 // SetOutputVolume plays everyone volume times as loud, on top of how loud each is played.
@@ -387,12 +408,17 @@ func (s *Session) Join(channelID discord.ChannelID) (err error) {
 			return err
 		}
 
-		session.DAVE = dave.CreateFunc()
+		session.DAVE = func(logger *slog.Logger, userID godave.UserID, callbacks godave.Callbacks) godave.Session {
+			e2ee := dave.New(userID, callbacks, dave.WithLogger(logger))
+			s.e2ee.Store(e2ee)
+			return e2ee
+		}
 		session.AddHandler(func(event *ws.BackgroundErrorEvent) { slog.Debug("voice gateway error", "err", event.Err) })
 		s.session.Store(session)
 
 		go s.receive(session)
 		go s.send(session)
+		go s.report()
 	}
 
 	if err := s.setDevices(true, false); err != nil {
@@ -505,9 +531,26 @@ func (s *Session) mix(output, _ []byte) {
 
 // receive buffers what each user says in the voice channels that session joins.
 func (s *Session) receive(session *voice.Session) {
+	var (
+		// heard is when what was said could last be decrypted, and failed how
+		// many packets could not since; healed is when the voice channel was
+		// last joined again for it.
+		heard  = time.Now()
+		failed int
+		healed time.Time
+	)
 	for {
 		packet, err := session.ReadPacket()
 		if errors.Is(err, udp.ErrDecryptionFailed) {
+			failed++
+			// Nothing anyone says can be decrypted any more, as when the keys
+			// of the call changed, someone joining, without this end
+			// following: joining again gets the keys anew.
+			if failed >= 150 && time.Since(heard) > 5*time.Second && time.Since(healed) > time.Minute {
+				healed, failed = time.Now(), 0
+				slog.Warn("nothing said in the voice channel can be decrypted; joining it again", "err", err)
+				go s.rejoin()
+			}
 			continue
 		}
 
@@ -532,12 +575,58 @@ func (s *Session) receive(session *voice.Session) {
 		user := session.User(packet.SSRC())
 		speaker.user = user
 		s.stateMu.Unlock()
+		heard, failed = time.Now(), 0
 
 		if err := speaker.write(packet.Sequence(), packet.Opus); err != nil {
 			slog.Debug("failed to decode voice packet", "err", err, "ssrc", packet.SSRC())
 		}
 
 		s.setSpeaking(user, string(packet.Opus) != voice.Silence)
+	}
+}
+
+// rejoin leaves the voice channel joined and joins it again, muted and
+// deafened as the user was, which gets new keys from Discord.
+func (s *Session) rejoin() {
+	status := s.Status()
+	if !status.Joined {
+		return
+	}
+	s.mu.Lock()
+	muted, deafened := s.capture == nil, s.playback == nil
+	s.mu.Unlock()
+
+	if err := s.Leave(); err != nil {
+		slog.Warn("could not leave the voice channel to join it again", "err", err)
+	}
+	if err := s.Join(status.ChannelID); err != nil {
+		slog.Warn("could not join the voice channel again", "err", err)
+		return
+	}
+	if !muted {
+		s.Toggle(false)
+	}
+	if deafened {
+		s.Toggle(true)
+	}
+}
+
+// report logs, every minute in a voice channel, what was sent and how it
+// was encrypted, which tells why the others would not hear the user.
+func (s *Session) report() {
+	for range time.Tick(time.Minute) {
+		sent, failed := s.sent.Swap(0), s.failed.Swap(0)
+		if !s.Status().Joined {
+			continue
+		}
+		args := []any{"sent", sent, "failed", failed}
+		if e2ee := s.e2ee.Load(); e2ee != nil {
+			st, stats := e2ee.State(), e2ee.Stats()
+			args = append(args, "dave_ready", st.Ready, "dave_epoch", st.EpochID, "dave_version", st.ProtocolVersion,
+				"degraded_since", st.DegradedSince, "passthrough", stats.PassthroughFrames, "encrypt_failures", stats.EncryptFailures,
+				"decrypt_failures", stats.DecryptFailures, "recoveries", stats.RecoveryAttempts)
+		}
+		slog.Info("voice stats", args...)
 	}
 }
 
@@ -563,9 +652,14 @@ func (s *Session) send(session *voice.Session) {
 	for captured := range s.mic {
 		for pcm = append(pcm, captured...); len(pcm) >= frameBytes; pcm = pcm[frameBytes:] {
 			quiet++
-			gain, threshold := math.Float32frombits(s.gain.Load()), int(s.threshold.Load())
+			threshold := int(s.threshold.Load())
 			for i := range samples {
-				samples[i] = amplify(int16(binary.LittleEndian.Uint16(pcm[2*i:])), gain)
+				samples[i] = int16(binary.LittleEndian.Uint16(pcm[2*i:]))
+			}
+			// Made as loud as chosen, without noise and evened out, before it
+			// is told whether loud enough to send.
+			s.proc.process(samples)
+			for i := range samples {
 				if int(samples[i]) >= threshold || -int(samples[i]) >= threshold {
 					quiet = 0
 				}
@@ -592,8 +686,17 @@ func (s *Session) send(session *voice.Session) {
 				_, err = session.Write(silence)
 			}
 
-			if err != nil {
-				slog.Debug("failed to send voice packet", "err", err)
+			switch {
+			case err != nil:
+				s.failed.Add(1)
+				// What stops what is said from being sent is logged, at most
+				// once a minute.
+				if time.Since(s.failedAt) > time.Minute {
+					s.failedAt = time.Now()
+					slog.Warn("failed to send voice packet", "err", err)
+				}
+			case quiet < hangover+5:
+				s.sent.Add(1)
 			}
 
 			if me != nil {

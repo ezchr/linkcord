@@ -15,6 +15,7 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"github.com/ezchr/linkcord/internal/dcsound"
 	"github.com/ezchr/linkcord/internal/hotkey"
 	"github.com/ezchr/linkcord/internal/voice"
 	"golang.org/x/exp/shiny/materialdesign/icons"
@@ -58,6 +59,8 @@ type settingsView struct {
 	level          float64
 	checkBtn       widget.Clickable
 	vadBtn, pttBtn widget.Clickable
+	nsBtn, agcBtn  widget.Clickable
+	soundsBtn      widget.Clickable
 	keybindsLink   widget.Clickable
 
 	// Keybinds: recording is the action whose keys are being recorded.
@@ -278,6 +281,21 @@ func (c *chatView) updateSettings(gtx layout.Context) {
 			u.saveVoiceSettings()
 		}
 	}
+	if s.nsBtn.Clicked(gtx) {
+		settings.NoNoiseSuppression = !settings.NoNoiseSuppression
+		u.applyVoiceSettings()
+		u.saveVoiceSettings()
+	}
+	if s.soundsBtn.Clicked(gtx) {
+		settings.NoSounds = !settings.NoSounds
+		u.saveVoiceSettings()
+		u.playSound(dcsound.Unmute)
+	}
+	if s.agcBtn.Clicked(gtx) {
+		settings.NoAutoGain = !settings.NoAutoGain
+		u.applyVoiceSettings()
+		u.saveVoiceSettings()
+	}
 	if s.keybindsLink.Clicked(gtx) {
 		c.showSettingsPage(pageKeybinds)
 	}
@@ -474,7 +492,8 @@ func (c *chatView) layoutSettingsPage(gtx layout.Context) layout.Dimensions {
 	rows = append(rows, layout.Spacer{Height: unit.Dp(80)}.Layout)
 	return listLayout(gtx, th, &s.list, len(rows), func(gtx layout.Context, i int) layout.Dimensions {
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
-		return rows[i](gtx)
+		// Clear of the scroll bar.
+		return layout.Inset{Right: unit.Dp(14)}.Layout(gtx, rows[i])
 	})
 }
 
@@ -583,6 +602,20 @@ func (c *chatView) voiceSettingsRows() []layout.Widget {
 		})
 	}
 	rows = append(rows,
+		func(gtx layout.Context) layout.Dimensions { return settingsDivider(gtx, 24) },
+		settingsHeading(th, "VOICE PROCESSING"),
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &s.nsBtn, "Noise Suppression", "Removes the noise around what you say, such as fans, keyboards and traffic.", !settings.NoNoiseSuppression)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &s.agcBtn, "Automatic Gain Control", "Evens out how loud you are, raising a quiet microphone and lowering a loud one.", !settings.NoAutoGain)
+		},
+		func(gtx layout.Context) layout.Dimensions { return settingsDivider(gtx, 24) },
+		settingsHeading(th, "SOUNDS"),
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &s.soundsBtn, "Play Discord's Sounds", "Of muting and deafening, of people joining and leaving your voice channel and your stream, and of new messages.", !settings.NoSounds)
+		},
 		func(gtx layout.Context) layout.Dimensions { return settingsDivider(gtx, 24) },
 		settingsHeading(th, "INPUT MODE"),
 		func(gtx layout.Context) layout.Dimensions {
@@ -755,17 +788,7 @@ func (c *chatView) advancedRows() []layout.Widget {
 	th := u.th
 	s := &c.settings
 	rows := []layout.Widget{func(gtx layout.Context) layout.Dimensions {
-		return s.perfBtn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			pointer.CursorPointer.Add(gtx.Ops)
-			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-				layout.Flexed(1, stacked(
-					label(th, 16, colorHeader, "Performance Mode").Layout,
-					label(th, 14, colorMuted, "Shows still pictures in place of animated GIF and APNG previews, which uses less CPU and memory.").Layout,
-				)),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return switchToggle(gtx, u.images.lowPower) }),
-			)
-		})
+		return switchRow(gtx, th, &s.perfBtn, "Performance Mode", "Shows still pictures in place of animated GIF and APNG previews, which uses less CPU and memory.", u.images.lowPower)
 	}}
 	if s.perfErr != "" {
 		rows = append(rows, func(gtx layout.Context) layout.Dimensions {
@@ -832,6 +855,22 @@ func radioRow(gtx layout.Context, th *material.Theme, click *widget.Clickable, t
 				})
 			})
 		})
+	})
+}
+
+// switchRow is a setting that is on or off: its name and what it does, and
+// a switch at the right, which click turns.
+func switchRow(gtx layout.Context, th *material.Theme, click *widget.Clickable, name, about string, on bool) layout.Dimensions {
+	return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		pointer.CursorPointer.Add(gtx.Ops)
+		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+			layout.Flexed(1, stacked(
+				label(th, 16, colorHeader, name).Layout,
+				label(th, 14, colorMuted, about).Layout,
+			)),
+			layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return switchToggle(gtx, on) }),
+		)
 	})
 }
 

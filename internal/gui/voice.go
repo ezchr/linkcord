@@ -20,6 +20,7 @@ import (
 	"gioui.org/widget"
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/ningen/v3"
+	"github.com/ezchr/linkcord/internal/dcsound"
 	"github.com/ezchr/linkcord/internal/golive"
 	"github.com/ezchr/linkcord/internal/hotkey"
 	"github.com/ezchr/linkcord/internal/voice"
@@ -49,6 +50,13 @@ type voiceState struct {
 	// that watches keys, and keys watches the keybinds.
 	talker atomic.Pointer[voice.Session]
 	keys   *hotkey.Watcher
+
+	// sounds are Discord's sounds, played by effects, made on first use;
+	// viewersHeard is how many watched the stream when last looked at, to
+	// hear who starts and stops.
+	sounds       *dcsound.Library
+	effects      *voice.Effects
+	viewersHeard int
 
 	// muted and deafened are what the user chose with the buttons, which also
 	// apply to the next call joined.
@@ -116,6 +124,13 @@ type voiceSettings struct {
 	// PushToTalk sends what the microphone captures only while the key of
 	// push_to_talk is held.
 	PushToTalk bool `json:"push_to_talk,omitempty"`
+	// NoNoiseSuppression and NoAutoGain turn off the noise suppression and
+	// the automatic gain control of the microphone, on by default as in
+	// Discord.
+	NoNoiseSuppression bool `json:"no_noise_suppression,omitempty"`
+	NoAutoGain         bool `json:"no_auto_gain,omitempty"`
+	// NoSounds turns off Discord's sounds, such as of muting.
+	NoSounds bool `json:"no_sounds,omitempty"`
 	// Keybinds are the keys of each action of keybindActions, which act in
 	// any window.
 	Keybinds map[string]hotkey.Combo `json:"keybinds,omitempty"`
@@ -154,10 +169,14 @@ func (u *ui) applyVoiceSettings() {
 		vs.SetOutputVolume(s.outputVolume())
 		vs.SetSensitivity(s.sensitivity())
 		vs.SetPushToTalk(s.PushToTalk)
+		vs.SetNoiseSuppression(!s.NoNoiseSuppression)
+		vs.SetAutoGain(!s.NoAutoGain)
 	}
 	if c := u.chat; c != nil && c.settings.test != nil {
 		c.settings.test.SetInputVolume(s.inputVolume())
 		c.settings.test.SetOutputVolume(s.outputVolume())
+		c.settings.test.SetNoiseSuppression(!s.NoNoiseSuppression)
+		c.settings.test.SetAutoGain(!s.NoAutoGain)
 	}
 }
 
@@ -189,6 +208,15 @@ func (u *ui) applyKeybinds() {
 			if s := v.talker.Load(); s != nil {
 				s.SetTalking(on)
 			}
+			u.post(func() {
+				if u.voiceSettings().PushToTalk && u.voiceStatus().Joined && !v.muted {
+					if on {
+						u.playSound(dcsound.PTTStart)
+					} else {
+						u.playSound(dcsound.PTTStop)
+					}
+				}
+			})
 		}
 	}
 	var binds []hotkey.Bind
@@ -465,12 +493,22 @@ func (c *chatView) joinVoice(ch discord.Channel) {
 		}
 		if err != nil {
 			u.post(func() { u.voiceFailed("Could not join "+ch.Name, err) })
+			return
 		}
+		u.post(func() {
+			u.playSound(dcsound.UserJoin)
+			if c := u.chat; c != nil {
+				c.trackCallers()
+			}
+		})
 	}()
 }
 
 // leaveVoice leaves the voice channel the user is in, if any.
 func (u *ui) leaveVoice() {
+	if u.voiceChannel().IsValid() {
+		u.playSound(dcsound.Disconnect)
+	}
 	u.stopStream()
 	// A stream is watched from the voice channel it is in.
 	if u.chat != nil {
@@ -504,6 +542,16 @@ func (u *ui) toggleVoice(deafen bool) {
 			v.deafened = false
 		}
 	}
+	switch {
+	case deafen && v.deafened:
+		u.playSound(dcsound.Deafen)
+	case deafen:
+		u.playSound(dcsound.Undeafen)
+	case v.muted:
+		u.playSound(dcsound.Mute)
+	default:
+		u.playSound(dcsound.Unmute)
+	}
 	if s := v.session; s != nil && s.Status().Joined {
 		go func() {
 			if err := s.Toggle(deafen); err != nil {
@@ -535,6 +583,7 @@ func (c *chatView) demoVoice(ch discord.Channel) {
 // updateVoice handles the voice buttons.
 func (u *ui) updateVoice(gtx layout.Context) {
 	v := &u.voice
+	u.viewerSounds()
 	if v.muteBtn.Clicked(gtx) {
 		u.toggleVoice(false)
 		u.syncDemoVoice()

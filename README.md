@@ -24,7 +24,9 @@ Linkcord was created for people on Windows 7 who can no longer run the official 
 | Voice join/leave, mute/deafen, connection status, and speaking indicators | Verification in a real voice call |
 | Call view with a card for everyone in the channel, full screen, invite links, soundboard, and microphone/speaker choice; a click on a card shows it big | Camera and activities |
 | Screen sharing (Go Live) of a screen, games in full screen included, or a window, end-to-end encrypted, with its sound, a button to turn the sound on and off, quality choice, and who is watching | Watching other people's streams |
-| Settings: microphone and speakers, input and output volume, a microphone test that plays your voice back, voice activity sensitivity or push to talk, keybinds to talk, mute and deafen that work in any window, and Performance Mode | Settings beyond voice |
+| Settings: microphone and speakers, input and output volume, a microphone test that plays your voice back, noise suppression, automatic gain control, voice activity sensitivity or push to talk, keybinds to talk, mute and deafen that work in any window, Discord's sounds, and Performance Mode | Settings beyond voice |
+| Discord's own sounds: muting, deafening, joining and leaving, people joining and leaving your voice channel and your stream, push to talk, and messages | |
+| Voice channels show their status under their name, and their chat and menu beside it | Editing channels |
 | Right-click menu on voice members: per-user volume and mute, notes, friends, blocking, roles, nicknames, server mute/deafen, move, disconnect, timeout, kick, and ban, as permissions allow | Ignore, apps, and moderator view |
 | React, reply, edit, copy, delete, and inline reaction controls | |
 | Selecting text in messages and embeds with the mouse (double click for a word, triple for all), copied with Ctrl+C or the right-click menu | Selecting across several messages |
@@ -140,6 +142,12 @@ Screen sharing encodes with Cisco's OpenH264 2.6.0, which is not in the executab
 
 The gear beside the microphone and headset buttons opens the settings; Escape or the round button closes them. Voice & Video has the microphone and speakers, their volumes from 0 to 200%, a microphone test, and the input mode: voice activity, with a sensitivity dragged over the level of the microphone, or push to talk. Keybinds sets the keys to talk, mute and deafen; they work in any window, even while Linkcord is hidden, by reading the state of the keys rather than taking them, so other programs still get them, and on Windows 7. Mouse side buttons can be keybinds too. The choices are saved in `voice.json` beside the log. The demo does not save them.
 
+What the microphone captures is made as loud as the input volume says, cleared of noise by Xiph's RNNoise, evened out by an automatic gain control, and kept from clipping by a limiter, in blocks of 10 ms; the microphone test plays it back as it is sent. Noise suppression and the gain control are on by default, as in Discord.
+
+Discord's sounds are downloaded from discord.com, as its web app does, the first time Linkcord starts, and kept in `%LOCALAPPDATA%\linkcord\sounds`. `internal/dcsound` names their files; should Discord change them, it finds them again in the web app's script.
+
+In a voice channel, the log says every minute how many voice packets were sent and how they were encrypted (`voice stats`). When nothing anyone says can be decrypted for five seconds, as when the keys of the call changed without Linkcord following, Linkcord joins the channel again. If the window stops answering for 20 seconds, what every part of Linkcord was doing is written to `freeze.txt` beside the log.
+
 ## Test without an account
 
 | Environment variable | Purpose |
@@ -213,7 +221,8 @@ When merging upstream discordo changes, replace `github.com/ayn2op/discordo` mod
 
 - **Gio v0.10.3:** checks for Windows APIs unavailable on Windows 7 and falls back to classic mouse messages. Direct3D hardware failures fall back to WARP.
 - **gioui.org/x v0.10.3:** draws image glyphs in rich text so color emoji remain visible; also supports the project's rich-text span callback, and reports where every span and its letters are laid out, for selecting text.
-- **Arikawa (ayn2op fork, 2026-10-12):** users carry their avatar decoration, nameplate and server tag (`avatar_decoration_data`, `collectibles`, `primary_guild`), which Discord sends with every user and Arikawa dropped.
+- **Arikawa (ayn2op fork, 2026-10-12):** users carry their avatar decoration, nameplate and server tag (`avatar_decoration_data`, `collectibles`, `primary_guild`), which Discord sends with every user and Arikawa dropped. A voice session tells every voice server it is moved to that it speaks, as it told the first; otherwise, after Discord moves a call to another server, nobody hears the user.
+- **RNNoise 0.1.1:** vendored unchanged in `third_party/rnnoise`, with its trained model and an empty `config.h`, for noise suppression.
 - **dave-go v0.5.1:** adds end-to-end encryption of H264 frames laid out as libdave does, taking a fresh nonce for every retry, for screen sharing. Upstream encrypts Opus only.
 
 ## Fonts and color emoji
@@ -252,4 +261,4 @@ Refreshing a Discord web-build number can update client metadata. Actual API, ga
 
 Linkcord is **GPL-3.0**, inherited from discordo; see `LICENSE`. Distributing the executable requires making its corresponding source available under that license.
 
-Gio uses MIT/Unlicense terms. The OpenH264 headers in `third_party/openh264` are BSD-2-Clause; see the `LICENSE` beside them. Noto Color Emoji uses the SIL Open Font License 1.1; see `internal/gui/fonts/OFL.txt`.
+Gio uses MIT/Unlicense terms. RNNoise, in `third_party/rnnoise`, is BSD-3-Clause; see the `COPYING` beside it. The OpenH264 headers in `third_party/openh264` are BSD-2-Clause; see the `LICENSE` beside them. Noto Color Emoji uses the SIL Open Font License 1.1; see `internal/gui/fonts/OFL.txt`.

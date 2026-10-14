@@ -98,6 +98,10 @@ type Session struct {
 	gateway  *voicegateway.Gateway
 	gwCancel context.CancelFunc
 	gwDone   <-chan struct{}
+	// speaking is what Speaking told Discord last, told every new voice
+	// gateway again: one that Discord moves the call to knows nothing of it,
+	// and the others hear nothing until it does.
+	speaking voicegateway.SpeakingFlag
 
 	WSTimeout      time.Duration // global WSTimeout
 	WSMaxRetry     int           // 2
@@ -438,6 +442,12 @@ func (s *Session) reconnectCtx(ctx context.Context) error {
 	// Start dispatching.
 	s.gwDone = ophandler.Loop(gwch, s.Handler)
 
+	if s.speaking != 0 {
+		if err := s.gateway.Speaking(ctx, s.speaking); err != nil {
+			ws.WSDebug("Voice could not tell the new gateway it speaks:", err)
+		}
+	}
+
 	ws.WSDebug("Voice reconnectCtx finished with no error")
 
 	return nil
@@ -514,6 +524,7 @@ func (s *Session) spinGateway(ctx context.Context, gwch <-chan ws.Op) error {
 func (s *Session) Speaking(ctx context.Context, flag voicegateway.SpeakingFlag) error {
 	s.mut.Lock()
 	gateway := s.gateway
+	s.speaking = flag
 	s.mut.Unlock()
 
 	if err := gateway.Speaking(ctx, flag); err != nil && flag != 0 {

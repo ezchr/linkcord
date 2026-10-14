@@ -17,6 +17,7 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"github.com/ayn2op/arikawa/v3/discord"
+	"github.com/ezchr/linkcord/internal/dcsound"
 	"github.com/ezchr/linkcord/internal/golive"
 	"golang.org/x/exp/shiny/materialdesign/icons"
 )
@@ -40,7 +41,10 @@ type streamPicker struct {
 	height  int
 	fps     int
 
-	sound         widget.Clickable
+	sound widget.Clickable
+	// backdrop is the dark area around the window, which a click closes it
+	// from.
+	backdrop      widget.Clickable
 	tabs          [2]widget.Clickable
 	cards         []widget.Clickable
 	heights, fpss []widget.Clickable
@@ -122,7 +126,7 @@ func (sp *streamPicker) shown() []int {
 
 func (c *chatView) updateStreamPicker(gtx layout.Context) {
 	sp := &c.u.voice.picker
-	if sp.close.Clicked(gtx) {
+	if sp.close.Clicked(gtx) || sp.backdrop.Clicked(gtx) {
 		sp.open = false
 		return
 	}
@@ -171,7 +175,11 @@ func (c *chatView) layoutStreamPicker(gtx layout.Context) {
 	}
 	th := c.u.th
 	size := gtx.Constraints.Max
-	paint.FillShape(gtx.Ops, withAlpha(rgb(0x000000), 0xb0), clip.Rect{Max: size}.Op())
+	// Clicking outside the window closes it.
+	sp.backdrop.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		paint.FillShape(gtx.Ops, withAlpha(rgb(0x000000), 0xb0), clip.Rect{Max: size}.Op())
+		return layout.Dimensions{Size: size}
+	})
 	w := min(gtx.Dp(640), size.X-gtx.Dp(32))
 	cgtx := gtx
 	cgtx.Constraints = layout.Constraints{Min: image.Pt(w, 0), Max: image.Pt(w, size.Y-gtx.Dp(40))}
@@ -437,6 +445,7 @@ func (c *chatView) startStream(src golive.Source, q golive.Quality) {
 		u.post(func() {
 			if v.stream != nil && v.stream == s {
 				v.stream = nil
+				u.playSound(dcsound.StreamEnded)
 				if err != nil {
 					u.voiceInfo("Your stream ended: " + err.Error())
 				}
@@ -460,6 +469,7 @@ func (c *chatView) startStream(src golive.Source, q golive.Quality) {
 			}
 			s = started
 			v.stream = started
+			u.playSound(dcsound.StreamStarted)
 			u.voiceInfo("You are live")
 		})
 	}()
@@ -491,6 +501,7 @@ func (u *ui) stopStream() {
 	v := &u.voice
 	if s := v.stream; s != nil {
 		v.stream = nil
+		u.playSound(dcsound.StreamEnded)
 		go s.Stop()
 	}
 	if v.demoStream != nil {

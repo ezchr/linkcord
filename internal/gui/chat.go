@@ -15,6 +15,7 @@ import (
 
 	"gioui.org/app"
 	"gioui.org/io/clipboard"
+	"gioui.org/io/event"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -227,6 +228,19 @@ type chatView struct {
 	sel textSelection
 	// settings is the screen of the user's settings, while open.
 	settings settingsView
+	// callers are who is in the voice channel callersOf, the user's, to hear
+	// who joins and leaves it.
+	callers   map[discord.UserID]bool
+	callersOf discord.ChannelID
+	// voiceStatuses are what the voice channels say they are about, under
+	// their names; voiceChatBtns open their text chat, and voiceGearBtns
+	// their menu.
+	voiceStatuses map[discord.ChannelID]string
+	voiceChatBtns map[discord.ChannelID]*widget.Clickable
+	voiceGearBtns map[discord.ChannelID]*widget.Clickable
+	// pressTag is what was last pressed, at pressAt, for double clicks.
+	pressTag event.Tag
+	pressAt  time.Duration
 }
 
 // msgClickKey is the avatar (part 0) or the name (part 1) of a message.
@@ -308,7 +322,11 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 	c.messageList.ScrollToEnd = true
 	c.composer.Submit = true
 
-	c.stopEvents = st.AddChanHandler(c.events)
+	stopChan, stopStatus := st.AddChanHandler(c.events), c.watchVoiceStatus()
+	c.stopEvents = func() {
+		stopChan()
+		stopStatus()
+	}
 	go c.pump()
 	return c
 }
@@ -467,6 +485,7 @@ func (c *chatView) selectGuild(id discord.GuildID) {
 	}
 	c.guild.popup = popupNone
 	c.loadEvents(id)
+	c.requestVoiceStatus(id)
 	c.rebuildRows()
 	if chID, ok := c.lastChannel[id]; ok {
 		for _, r := range c.rows {
@@ -939,8 +958,10 @@ func (c *chatView) apply(ev gateway.Event) {
 		c.rebuildRows()
 		// The members found while typing @ arrive this way.
 		c.rebuildMentions()
-	case *gateway.ChannelCreateEvent, *gateway.ChannelUpdateEvent, *gateway.ChannelDeleteEvent,
-		*gateway.VoiceStateUpdateEvent:
+	case *gateway.VoiceStateUpdateEvent:
+		c.voiceSounds(ev)
+		c.rebuildRows()
+	case *gateway.ChannelCreateEvent, *gateway.ChannelUpdateEvent, *gateway.ChannelDeleteEvent:
 		c.rebuildRows()
 	}
 	// Read states, member names and the rest are read while laying out, so
@@ -982,6 +1003,18 @@ func (c *chatView) update(gtx layout.Context) {
 			c.openCall(r.ch)
 		}
 		break
+	}
+	for id, cl := range c.voiceChatBtns {
+		if cl.Clicked(gtx) {
+			if ch, err := c.st.Cabinet.Channel(id); err == nil {
+				c.selectChannel(*ch)
+			}
+		}
+	}
+	for id, cl := range c.voiceGearBtns {
+		if cl.Clicked(gtx) {
+			c.openVoiceChannelMenu(id)
+		}
 	}
 	for id, cl := range c.voiceClicks {
 		if cl.Clicked(gtx) {
@@ -1333,7 +1366,45 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 				}
 			}),
 			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-			layout.Flexed(1, oneLine(name).Layout),
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				// A voice channel says under its name what it is about.
+				status := c.voiceStatuses[r.ch.ID]
+				if r.kind != rowVoice || status == "" {
+					return oneLine(name).Layout(gtx)
+				}
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(oneLine(name).Layout),
+					layout.Rigid(oneLine(label(th, 12, colorMuted, status)).Layout),
+				)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				// A voice channel's chat and menu, as Discord shows them.
+				if r.kind != rowVoice || !(hovered || selected || inVoice) {
+					return layout.Dimensions{}
+				}
+				small := func(cl *widget.Clickable, ic *widget.Icon) layout.FlexChild {
+					return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							pointer.CursorPointer.Add(gtx.Ops)
+							col := colorMuted
+							if cl.Hovered() {
+								col = colorHeader
+							}
+							return layout.Inset{Left: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return icon(gtx, ic, 16, col)
+							})
+						})
+					})
+				}
+				if c.voiceChatBtns == nil {
+					c.voiceChatBtns = make(map[discord.ChannelID]*widget.Clickable)
+					c.voiceGearBtns = make(map[discord.ChannelID]*widget.Clickable)
+				}
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					small(clickOf(c.voiceChatBtns, r.ch.ID), iconHome),
+					small(clickOf(c.voiceGearBtns, r.ch.ID), iconSettings),
+				)
+			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				if unread != ningen.ChannelMentioned {
 					return layout.Dimensions{}

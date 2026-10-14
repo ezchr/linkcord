@@ -114,6 +114,9 @@ type ui struct {
 	// goroutine before the next frame.
 	mu      sync.Mutex
 	pending []func()
+	// pendingSince is when the oldest work pending was posted, zero while
+	// none is, for the freeze watchdog.
+	pendingSince time.Time
 
 	screen  screen
 	login   *loginView
@@ -165,6 +168,9 @@ func newUI(w *app.Window) *ui {
 // call from any goroutine.
 func (u *ui) post(f func()) {
 	u.mu.Lock()
+	if len(u.pending) == 0 {
+		u.pendingSince = time.Now()
+	}
 	u.pending = append(u.pending, f)
 	u.mu.Unlock()
 	u.win.Invalidate()
@@ -173,7 +179,7 @@ func (u *ui) post(f func()) {
 func (u *ui) runPending() {
 	u.mu.Lock()
 	pending := u.pending
-	u.pending = nil
+	u.pending, u.pendingSince = nil, time.Time{}
 	u.mu.Unlock()
 	for _, f := range pending {
 		f()
@@ -185,7 +191,10 @@ func (u *ui) loop() error {
 	defer stopProfile()
 	stopResumeWatchdog := u.startResumeWatchdog()
 	defer stopResumeWatchdog()
+	stopFreezeWatchdog := u.startFreezeWatchdog()
+	defer stopFreezeWatchdog()
 	u.applyKeybinds()
+	u.soundLibrary()
 	var ops op.Ops
 	for {
 		switch e := u.win.Event().(type) {
@@ -234,6 +243,9 @@ func (u *ui) loop() error {
 			u.runPending()
 			pending := time.Since(start)
 			gtx := app.NewContext(&ops, e)
+			if u.images != nil {
+				u.images.newFrame()
+			}
 			u.layout(gtx)
 			laid := time.Since(start)
 			e.Frame(gtx.Ops)
