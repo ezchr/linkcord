@@ -132,7 +132,21 @@ var joinVariants = []joinVariant{
 // StartWatching starts watching the stream of p.StreamerID.
 func StartWatching(ctx context.Context, p WatchParams) (*Watch, error) {
 	var errs []error
-	for _, v := range joinVariants {
+	key := StreamKey(p.GuildID, p.ChannelID, p.StreamerID)
+	// Leaving the stream: after a refused join Discord still counts the user
+	// as watching, and answers no new ask to watch until they leave.
+	leave := func() {
+		p.Main.SendGateway(context.Background(), &streamDeleteCommand{StreamKey: key})
+	}
+	for i, v := range joinVariants {
+		if i > 0 {
+			leave()
+			select {
+			case <-time.After(1500 * time.Millisecond):
+			case <-ctx.Done():
+				return nil, errors.Join(append(errs, ctx.Err())...)
+			}
+		}
 		w, err := startWatching(ctx, p, v)
 		if err == nil {
 			w.log.Info("joined the stream", "variant", v.name)
@@ -146,6 +160,7 @@ func StartWatching(ctx context.Context, p WatchParams) (*Watch, error) {
 			break
 		}
 	}
+	leave()
 	return nil, errors.Join(errs...)
 }
 
