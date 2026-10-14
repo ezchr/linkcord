@@ -391,6 +391,11 @@ func (w *Watch) follow(early chan ws.Op) {
 				w.videoSSRC = ssrc
 				w.mu.Unlock()
 				w.sendWants(context.Background(), ssrc)
+				// The first keyframe is asked for as soon as it can be.
+				if w.frames.Load() == 0 {
+					w.lastPLI.Store(0)
+					w.requestKeyframe()
+				}
 				w.log.Info("stream video found", "ssrc", ssrc)
 			}
 		}
@@ -655,7 +660,9 @@ func (w *Watch) startDecoder(sw, sh int) error {
 	if ow != sw || oh != sh {
 		args = append(args, "-vf", fmt.Sprintf("scale=%d:%d:flags=bicubic", ow, oh))
 	}
-	args = append(args, "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1")
+	// Raw H264 has no timestamps: FFmpeg would take it as 25 FPS and drop
+	// the pictures that come sooner, which live is all of them.
+	args = append(args, "-fps_mode", "passthrough", "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1")
 	cmd := exec.Command(w.p.FFmpeg, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 	in, err := cmd.StdinPipe()
@@ -714,23 +721,37 @@ func (w *Watch) startDecoder(sw, sh int) error {
 func (w *Watch) requestKeyframe() {
 	now := time.Now().UnixNano()
 	last := w.lastPLI.Load()
-	if now-last < int64(500*time.Millisecond) || !w.lastPLI.CompareAndSwap(last, now) {
+	if now-last < int64(500*time.Millisecond) {
 		return
 	}
-	w.sendPLI()
+	// Counted only once sent: before the streamer's video is known, nothing
+	// can be asked for.
+	if w.sendPLI() {
+		w.lastPLI.CompareAndSwap(last, now)
+	}
 }
 
 // askKeyframes asks for a whole picture until one decodes, and logs how
 // the stream goes every 5 seconds, which the FPS shown comes from.
 func (w *Watch) askKeyframes() {
-	t := time.NewTicker(time.Second)
+	// Every 250 ms until the first picture, then every second.
+	t := time.NewTicker(250 * time.Millisecond)
 	defer t.Stop()
 	var lastFrames int64
+	var quarter int
 	tick := 0
 	for {
 		frames := w.frames.Load()
 		if frames == 0 {
 			w.requestKeyframe()
+		}
+		if quarter++; quarter%4 != 0 {
+			select {
+			case <-t.C:
+				continue
+			case <-w.done:
+				return
+			}
 		}
 		w.mu.Lock()
 		w.fps = int(frames - lastFrames)
@@ -756,12 +777,13 @@ func (w *Watch) Info() (width, height, fps int) {
 	return w.srcW, w.srcH, w.fps
 }
 
-// sendPLI sends an RTCP picture loss indication for the streamer's video.
-func (w *Watch) sendPLI() {
+// sendPLI sends an RTCP picture loss indication for the streamer's video,
+// reporting whether it could.
+func (w *Watch) sendPLI() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.videoSSRC == 0 || w.aead == nil {
-		return
+		return false
 	}
 	header := make([]byte, 8)
 	header[0], header[1] = 0x81, 206
@@ -772,7 +794,8 @@ func (w *Watch) sendPLI() {
 	binary.BigEndian.PutUint32(w.nonce[:4], binary.BigEndian.Uint32(w.nonce[:4])+1)
 	pkt := w.aead.Seal(append([]byte(nil), header...), w.nonce[:w.aead.NonceSize()], media, header)
 	pkt = append(pkt, w.nonce[:4]...)
-	w.udp.Write(pkt)
+	_, err := w.udp.Write(pkt)
+	return err == nil
 }
 
 // Frame is the latest picture, or nil before the first.

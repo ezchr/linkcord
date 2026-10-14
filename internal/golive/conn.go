@@ -175,6 +175,10 @@ func dial(ctx context.Context, endpoint string, id identifyCommand, channelID ui
 	c.dave.SetChannelID(godave.ChannelID(channelID))
 	c.identify.MaxDAVEProtocolVersion = c.dave.MaxSupportedProtocolVersion()
 	url := "wss://" + strings.TrimSuffix(endpoint, ":80") + "/?v=" + voicegateway.Version
+	// A local stream server, as the loopback test runs, is plain ws.
+	if strings.HasPrefix(endpoint, "ws://") {
+		url = endpoint + "/?v=" + voicegateway.Version
+	}
 	c.gw = ws.NewGateway(ws.NewWebsocket(ws.NewCodec(unmarshalers), url), &voicegateway.DefaultGatewayOpts)
 	return c, c.gw.Connect(ctx, (*connHandler)(c))
 }
