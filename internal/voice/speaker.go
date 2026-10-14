@@ -33,10 +33,8 @@ type speaker struct {
 
 	mu      sync.Mutex
 	decoder *opus.Decoder
-	// sides plays sound sent on one side only on both.
-	sides sideState
-	pcm   []int16
-	buf   []byte
+	pcm     []int16
+	buf     []byte
 	// playing is whether the cushion was buffered and what is left of it is being played.
 	playing bool
 	// seq is the sequence number of the last packet, and last when it arrived.
@@ -66,8 +64,6 @@ func (s *speaker) decode(packet []byte) error {
 	if err != nil {
 		return err
 	}
-
-	s.sides.fillSilentSide(pcm[:n*channels])
 
 	for _, sample := range pcm[:n*channels] {
 		s.buf = binary.LittleEndian.AppendUint16(s.buf, uint16(sample))
@@ -130,64 +126,4 @@ func (s *speaker) mix(output []byte, volume float32) {
 
 	s.buf = s.buf[n:]
 	s.playing = len(s.buf) > 0
-}
-
-// sideState follows which side of someone's sound is silent, slowly, so that the choice
-// does not flip from one 20 ms frame to the next, which crackles.
-type sideState struct {
-	left, right float64 // the sides' loudness, averaged over about a second
-	copyFrom    int     // 0 when both sides play as sent, 1 to copy the left, 2 the right
-}
-
-// fillSilentSide plays a sound sent on one side only on both sides, as when someone's
-// microphone gives sound on the left alone: the silent side gets a copy of the other.
-// Nothing is mixed, so stereo sound is left as it is.
-func (st *sideState) fillSilentSide(pcm []int16) {
-	var left, right int64
-	for i := 0; i+1 < len(pcm); i += 2 {
-		left += abs64(int64(pcm[i]))
-		right += abs64(int64(pcm[i+1]))
-	}
-	frames := float64(max(len(pcm)/2, 1))
-	l, r := float64(left)/frames, float64(right)/frames
-	// Only frames with sound teach which side is silent; pauses change nothing.
-	if l > 50 || r > 50 {
-		const k = 0.05 // about a second of 20 ms frames
-		st.left += k * (l - st.left)
-		st.right += k * (r - st.right)
-	}
-	// A side is silent under 1% of the other, and stays so until over 5%.
-	switch st.copyFrom {
-	case 0:
-		if st.right*100 < st.left && st.left > 50 {
-			st.copyFrom = 1
-		} else if st.left*100 < st.right && st.right > 50 {
-			st.copyFrom = 2
-		}
-	case 1:
-		if st.right*20 > st.left {
-			st.copyFrom = 0
-		}
-	case 2:
-		if st.left*20 > st.right {
-			st.copyFrom = 0
-		}
-	}
-	switch st.copyFrom {
-	case 1:
-		for i := 0; i+1 < len(pcm); i += 2 {
-			pcm[i+1] = pcm[i]
-		}
-	case 2:
-		for i := 0; i+1 < len(pcm); i += 2 {
-			pcm[i] = pcm[i+1]
-		}
-	}
-}
-
-func abs64(v int64) int64 {
-	if v < 0 {
-		return -v
-	}
-	return v
 }
