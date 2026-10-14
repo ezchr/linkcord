@@ -55,20 +55,23 @@ type profileData struct {
 		// ThemeColors are the profile's two colors, top and bottom, which
 		// its card fades between.
 		ThemeColors []int `json:"theme_colors"`
+		// ProfileEffect is the animation over the card, if any.
+		ProfileEffect *struct {
+			ID string `json:"id"`
+		} `json:"profile_effect"`
 	} `json:"user_profile"`
-	Badges []struct {
-		ID          string `json:"id"`
-		Description string `json:"description"`
-		Icon        string `json:"icon"`
-	} `json:"badges"`
+	Badges []profileBadge `json:"badges"`
 	GuildMember *struct {
 		JoinedAt discord.Timestamp `json:"joined_at"`
 	} `json:"guild_member"`
 	GuildMemberProfile *struct {
 		Bio         string `json:"bio"`
 		Pronouns    string `json:"pronouns"`
-		Banner      string `json:"banner"`
-		ThemeColors []int  `json:"theme_colors"`
+		Banner        string `json:"banner"`
+		ThemeColors   []int  `json:"theme_colors"`
+		ProfileEffect *struct {
+			ID string `json:"id"`
+		} `json:"profile_effect"`
 	} `json:"guild_member_profile"`
 	// The servers and friends the user and the one shown have in common.
 	MutualGuilds []struct {
@@ -121,6 +124,11 @@ type profileView struct {
 	backdrop widget.Clickable
 	// avatarBtn opens the avatar big in the viewer.
 	avatarBtn widget.Clickable
+	// badgeClicks are the badges, openBadge the one clicked open, and
+	// badgeLink its link.
+	badgeClicks map[string]*widget.Clickable
+	openBadge   string
+	badgeLink   widget.Clickable
 	// opened is when the card opened.
 	opened time.Time
 	// bannerBtn shows the banner, bannerURL, big, as the avatar.
@@ -202,6 +210,10 @@ func (c *chatView) demoProfile(user discord.User) *profileData {
 	d.User.User = user
 	d.UserProfile.Bio = "Just a demo profile."
 	d.UserProfile.ThemeColors = []int{0xc4163d, 0x3b3b3b}
+	d.Badges = []profileBadge{
+		{ID: "hypesquad_house_3", Description: "HypeSquad Balance", Icon: "3aa41de486fa12454c3761e8e223442e", Link: "https://discord.com/settings/hypesquad-online"},
+		{ID: "legacy_username", Description: "Originally known as " + user.Username + "#0001", Icon: "6de6d34650760ba5551a79732e98ed60"},
+	}
 	if guilds, _ := c.st.Cabinet.Guilds(); len(guilds) > 0 {
 		for _, g := range guilds[:min(len(guilds), 3)] {
 			d.MutualGuilds = append(d.MutualGuilds, struct {
@@ -454,6 +466,19 @@ func (c *chatView) layoutCard(gtx layout.Context, p *profileView) layout.Dimensi
 	}
 	solid(gtx, p, dims)
 	call.Add(gtx.Ops)
+	// The profile effect plays over the whole card, as on Discord.
+	if d := p.data; d != nil {
+		id := ""
+		if d.UserProfile.ProfileEffect != nil {
+			id = d.UserProfile.ProfileEffect.ID
+		}
+		if gm := d.GuildMemberProfile; gm != nil && gm.ProfileEffect != nil && p.guildID.IsValid() {
+			id = gm.ProfileEffect.ID
+		}
+		if id != "" {
+			c.layoutProfileEffect(gtx, c.profileEffect(id), dims.Size, p.opened)
+		}
+	}
 	return dims
 }
 
@@ -556,7 +581,7 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 			ring := image.Rect(x, y, x+avatarPx+2*ringPx, y+avatarPx+2*ringPx)
 			paint.FillShape(gtx.Ops, ringColor, clip.Ellipse(ring).Op(gtx.Ops))
 			t := op.Offset(image.Pt(x+ringPx, y+ringPx)).Push(gtx.Ops)
-			c.avatarStatus(gtx, user, p.guildID, avatarSize, ringColor)
+			c.layoutCardAvatar(gtx, p, user, avatarSize, ringColor)
 			// A click on the avatar shows it big, to look at or save.
 			p.avatarBtn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				defer clip.Ellipse(image.Rect(0, 0, avatarPx, avatarPx)).Push(gtx.Ops).Pop()
@@ -649,7 +674,7 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 				for _, b := range d.Badges {
 					row = append(row, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return c.u.picture(gtx, "https://cdn.discordapp.com/badge-icons/"+b.Icon+".png", 20, colorPopup, "", 0)
+							return c.layoutBadge(gtx, p, b)
 						})
 					}))
 				}
@@ -657,6 +682,12 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx, row...)
 		}),
 	)
+	// The badge clicked, with what it means.
+	if d := p.data; d != nil && p.openBadge != "" {
+		children = append(children, section(func(gtx layout.Context) layout.Dimensions {
+			return c.layoutOpenBadge(gtx, p, d.Badges)
+		}))
+	}
 
 	// Friends and servers in common, which open their lists.
 	if d := p.data; d != nil && !p.self {
