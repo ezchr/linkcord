@@ -156,7 +156,9 @@ try {
         if ([IO.File]::Exists($healthy)) {
             if ([IO.File]::ReadAllText($healthy).Trim() -eq $version) { $acknowledged = $true; break }
         }
-        if ($child.HasExited) { break }
+        # The started copy may hand over to the installed one and exit at
+        # once; the installed copy reports through the same file, so its
+        # exit is no failure. Only the deadline is.
         Start-Sleep -Milliseconds 100
     }
     if (-not $acknowledged) { throw 'The updated client did not acknowledge a successful startup.' }

@@ -149,6 +149,9 @@ func (u *ui) checkStartup(ctx context.Context, buildCache string) {
 					if err == nil {
 						u.post(func() {
 							u.startup.done = true
+							// Really exit, not hide to the tray: the installer
+							// waits for this process to end.
+							u.quitting.Store(true)
 							u.win.Perform(system.ActionClose)
 						})
 						return
