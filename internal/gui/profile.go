@@ -1,11 +1,13 @@
 package gui
 
 import (
+	"cmp"
 	"fmt"
 	"image"
 	"io"
 	"log/slog"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -821,6 +823,17 @@ func (c *chatView) layoutVoiceCard(p *profileView, id discord.UserID) layout.Wid
 			there = append(there, vs)
 		}
 	}
+	// The same ones every frame, whoever the profile is of first: the voice
+	// states come in no order, and the pictures changed each frame.
+	slices.SortFunc(there, func(a, b discord.VoiceState) int {
+		if (a.UserID == id) != (b.UserID == id) {
+			if a.UserID == id {
+				return -1
+			}
+			return 1
+		}
+		return cmp.Compare(a.UserID, b.UserID)
+	})
 	status := c.voiceStatuses[ch.ID]
 	joined := c.u.voiceChannel() == ch.ID
 	// Their stream, if they share their screen, as Discord shows it.
