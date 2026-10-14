@@ -85,6 +85,8 @@ func (u *ui) hearSound(name string) {
 func (c *chatView) trackCallers() {
 	status := c.u.voiceStatus()
 	c.callersOf, c.callers = status.ChannelID, make(map[discord.UserID]bool)
+	// A new channel starts its own history.
+	c.voiceLog.entries = nil
 	c.liveCallers = make(map[discord.UserID]bool)
 	ch, err := c.st.Cabinet.Channel(status.ChannelID)
 	if err != nil {
@@ -129,6 +131,7 @@ func (c *chatView) voiceSounds(ev *gateway.VoiceStateUpdateEvent) {
 	if in == c.callers[ev.UserID] {
 		return
 	}
+	c.noteVoiceLog(ev.UserID, in)
 	if in {
 		c.callers[ev.UserID] = true
 		c.u.playSound(dcsound.UserJoin)

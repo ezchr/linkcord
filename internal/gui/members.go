@@ -297,7 +297,16 @@ func (c *chatView) memberItem(gtx layout.Context, m *discord.Member, w func(gtx 
 				if col := m.User.Collectibles; col != nil && col.Nameplate != nil && col.Nameplate.Asset != "" {
 					// One size for every width: the image is loaded once and
 					// scaled, so that resizing the pane does not reload it.
-					if img := c.u.images.frame(gtx, col.Nameplate.URL(), gtx.Dp(480)); img != nil {
+					// It moves under the pointer, as on Discord, from the
+					// still picture until the moving one is ready.
+					var img *paint.ImageOp
+					if hovered {
+						img = c.u.images.frame(gtx, col.Nameplate.VideoURL()+"#"+gifVideoFragment, gtx.Dp(480))
+					}
+					if img == nil {
+						img = c.u.images.frame(gtx, col.Nameplate.URL(), gtx.Dp(480))
+					}
+					if img != nil {
 						st := rr.Push(gtx.Ops)
 						igtx := gtx
 						igtx.Constraints = layout.Exact(size)

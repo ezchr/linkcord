@@ -2,6 +2,7 @@ package gui
 
 import (
 	"image"
+	"log/slog"
 	"math"
 	"slices"
 	"time"
@@ -256,6 +257,7 @@ func (c *chatView) callChannel(ch discord.Channel, video bool) {
 // noteCall keeps who is in the call of a direct message or group, as the
 // call's events tell it.
 func (c *chatView) noteCall(cl call) {
+	slog.Info("call", "channel", cl.ChannelID, "ringing", len(cl.Ringing), "in_call", len(cl.VoiceStates))
 	if c.dmCalls == nil {
 		c.dmCalls = make(map[discord.ChannelID][]discord.UserID)
 	}
@@ -280,6 +282,7 @@ func (c *chatView) noteCallVoice(vs discord.VoiceState) {
 	if vs.GuildID.IsValid() {
 		return
 	}
+	slog.Info("call voice state", "channel", vs.ChannelID, "user", vs.UserID)
 	if c.dmCalls == nil {
 		c.dmCalls = make(map[discord.ChannelID][]discord.UserID)
 	}

@@ -79,6 +79,12 @@ func (n Nameplate) URL() string {
 	return "https://cdn.discordapp.com/assets/collectibles/" + n.Asset + "static.png"
 }
 
+// VideoURL returns the nameplate moving, a short looping video, which
+// Discord plays under the pointer.
+func (n Nameplate) VideoURL() string {
+	return "https://cdn.discordapp.com/assets/collectibles/" + n.Asset + "asset.webm"
+}
+
 // PrimaryGuild is the tag of a server that a user wears by their name.
 type PrimaryGuild struct {
 	GuildID GuildID `json:"identity_guild_id,omitempty"`

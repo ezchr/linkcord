@@ -172,6 +172,8 @@ type chatView struct {
 	guildOrder []discord.GuildID
 	// tagCard is the card of a server tag clicked, tagClicks the tags.
 	tagCard   *tagCard
+	// voiceLog is who joined and left the voice channel the user is in.
+	voiceLog voiceLog
 	// mediaDrags follow the pictures of the chat being dragged out.
 	mediaDrags map[string]*mediaDrag
 	// activityBtns are the buttons of the activities shown on profiles.
@@ -1296,6 +1298,12 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 	if c.tagCard != nil {
 		c.layoutTagCard(gtx)
 	}
+	if l := &c.voiceLog; l.open && l.panelW > 0 {
+		pgtx := gtx
+		w := l.panelW - gtx.Dp(16)
+		pgtx.Constraints = layout.Constraints{Min: image.Pt(w, 0), Max: image.Pt(w, gtx.Dp(240))}
+		drawAbove(gtx, pgtx, image.Pt(gtx.Dp(72)+gtx.Dp(8), gtx.Constraints.Max.Y-l.panelH-gtx.Dp(6)), l, c.layoutVoiceLog)
+	}
 	if c.imgEdit != nil {
 		c.layoutImageEditor(gtx)
 	}
@@ -1490,7 +1498,12 @@ func (c *chatView) layoutChannels(gtx layout.Context) layout.Dimensions {
 			c.channelDropArea(gtx)
 			return dims
 		}),
-		layout.Rigid(c.layoutUserPanel),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			d := c.layoutUserPanel(gtx)
+			// The voice history opens above it, as wide as the channels.
+			c.voiceLog.panelH, c.voiceLog.panelW = d.Size.Y, d.Size.X
+			return d
+		}),
 	)
 }
 
@@ -1829,6 +1842,7 @@ func (c *chatView) layoutUserPanel(gtx layout.Context) layout.Dimensions {
 					}),
 					// Logging out is in the menu of the user's own profile,
 					// away from the voice buttons, where it is easy to hit.
+					layout.Rigid(c.layoutVoiceLogButton),
 					layout.Rigid(c.u.layoutVoiceButtons),
 				)
 			})
