@@ -144,9 +144,11 @@ func (c *chatView) layoutStreamInfo(gtx layout.Context) {
 	})
 }
 
-// layoutWatchedCard fills a card with the watched stream, or offers to
-// watch it: as on Discord, a stream is only received once asked for.
-func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, size image.Point, radius int) bool {
+// layoutWatchedCard fills a card with the watched stream and reports true,
+// or offers to watch it: as on Discord, a stream is only received once
+// asked for. The button to watch it is returned to be drawn over the
+// avatar's card, at y, under the avatar.
+func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, size image.Point, radius, y int) (bool, func()) {
 	if frame := c.watchedFrame(vs.UserID); frame != nil {
 		defer clip.UniformRRect(image.Rectangle{Max: size}, radius).Push(gtx.Ops).Pop()
 		paint.FillShape(gtx.Ops, rgb(0x000000), clip.Rect{Max: size}.Op())
@@ -156,7 +158,7 @@ func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, 
 		scale := min(float32(size.X)/float32(b.X), float32(size.Y)/float32(b.Y)) / gtx.Metric.PxPerDp
 		widget.Image{Src: *frame, Fit: widget.Contain, Scale: scale}.Layout(igtx)
 		c.layoutStreamInfo(gtx)
-		return true
+		return true, nil
 	}
 	if c.watch.buttons == nil {
 		c.watch.buttons = make(map[discord.UserID]*widget.Clickable)
@@ -173,8 +175,9 @@ func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, 
 	if c.watching(vs.UserID) {
 		text = "Loading stream…"
 	}
-	// The button sits in the middle of the card, clear of the name and
-	// "LIVE" at the bottom left.
+	// The button sits under the avatar, in the middle, clear of the name and
+	// "LIVE" at the bottom left; drawn after the avatar, over it if the card
+	// is small.
 	macro := op.Record(gtx.Ops)
 	bgtx := gtx
 	bgtx.Constraints.Min = image.Point{}
@@ -190,8 +193,10 @@ func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, 
 		})
 	})
 	call := macro.Stop()
-	t := op.Offset(image.Pt((size.X-bd.Size.X)/2, (size.Y-bd.Size.Y)/2)).Push(gtx.Ops)
-	call.Add(gtx.Ops)
-	t.Pop()
-	return false
+	at := image.Pt((size.X-bd.Size.X)/2, max(min(y, size.Y-bd.Size.Y-gtx.Dp(36)), 0))
+	return false, func() {
+		t := op.Offset(at).Push(gtx.Ops)
+		call.Add(gtx.Ops)
+		t.Pop()
+	}
 }

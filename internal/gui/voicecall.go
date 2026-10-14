@@ -400,9 +400,14 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 			return layout.Dimensions{Size: size}
 		}
 	}
-	// Someone else's stream: shown once watched, as on Discord.
+	px := min(size.Y*2/5, gtx.Dp(96), size.X*2/5)
+	// Someone else's stream: shown once watched, as on Discord, with a
+	// button to watch it under their avatar until then.
+	var watchBtn func()
 	if vs.UserID != c.me.ID && vs.SelfStream {
-		if c.layoutWatchedCard(gtx, vs, size, radius) {
+		shown, btn := c.layoutWatchedCard(gtx, vs, size, radius, (size.Y+px)/2+gtx.Dp(12))
+		watchBtn = btn
+		if shown {
 			gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(30 * time.Millisecond)})
 			c.layoutCardName(gtx, vs, name, size, true)
 			if rightClicked(gtx, c.rightTag("card"+vs.UserID.String()), size) {
@@ -414,7 +419,6 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 		// They stopped sharing.
 		c.stopWatching()
 	}
-	px := min(size.Y*2/5, gtx.Dp(96), size.X*2/5)
 	dp := unit.Dp(float32(px) / gtx.Metric.PxPerDp)
 	center := op.Offset(image.Pt((size.X-px)/2, (size.Y-px)/2)).Push(gtx.Ops)
 	if speaking {
@@ -423,6 +427,9 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 	}
 	c.u.picture(gtx, c.voiceAvatarURL(guildID, vs), dp, colorFor(uint64(vs.UserID)), name, -1)
 	center.Pop()
+	if watchBtn != nil {
+		watchBtn()
+	}
 
 	c.layoutCardName(gtx, vs, name, size, vs.SelfStream)
 

@@ -718,6 +718,9 @@ const maxWatchW, maxWatchH = 1920, 1080
 // startDecoder runs FFmpeg, which takes the pictures as H264 and gives them
 // as RGBA as fast as they come, at the stream's size up to the bound. One
 // already running is stopped.
+// oldFFmpeg is set once FFmpeg turned out to be older than 5.1.
+var oldFFmpeg atomic.Bool
+
 func (w *Watch) startDecoder(sw, sh int) error {
 	ow, oh := sw, sh
 	if ow > maxWatchW || oh > maxWatchH {
@@ -731,8 +734,13 @@ func (w *Watch) startDecoder(sw, sh int) error {
 		args = append(args, "-vf", fmt.Sprintf("scale=%d:%d:flags=bicubic", ow, oh))
 	}
 	// Raw H264 has no timestamps: FFmpeg would take it as 25 FPS and drop
-	// the pictures that come sooner, which live is all of them.
-	args = append(args, "-fps_mode", "passthrough", "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1")
+	// the pictures that come sooner, which live is all of them. FFmpeg
+	// before 5.1 calls -fps_mode -vsync.
+	mode := "-fps_mode"
+	if oldFFmpeg.Load() {
+		mode = "-vsync"
+	}
+	args = append(args, mode, "passthrough", "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1")
 	cmd := exec.Command(w.p.FFmpeg, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 	in, err := cmd.StdinPipe()
@@ -765,6 +773,20 @@ func (w *Watch) startDecoder(sw, sh int) error {
 			if _, err := io.ReadFull(out, img.Pix); err != nil {
 				if msg := strings.TrimSpace(stderr.String()); msg != "" {
 					w.log.Info("decoder stopped", "ffmpeg", msg)
+					// An FFmpeg too old for -fps_mode is started again with
+					// -vsync, from a keyframe asked for at once.
+					if strings.Contains(msg, "fps_mode") && !oldFFmpeg.Swap(true) {
+						w.mu.Lock()
+						current := w.decoder == cmd
+						w.mu.Unlock()
+						if current {
+							if err := w.startDecoder(sw, sh); err != nil {
+								w.log.Warn("could not start the decoder", "err", err)
+							}
+							w.lastPLI.Store(0)
+							w.requestKeyframe()
+						}
+					}
 				}
 				return
 			}
