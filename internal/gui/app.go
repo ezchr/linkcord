@@ -163,7 +163,16 @@ func newUI(w *app.Window) *ui {
 	// The colors chosen are set before anything takes its own copy of them.
 	appearance := loadAppearance()
 	applyAppearance(appearance)
+	_, statErr := os.Stat(appSettingsPath())
+	firstRun := errors.Is(statErr, os.ErrNotExist)
 	settings := loadAppSettings()
+	// The first time, Linkcord speaks the language Windows is in; the
+	// choice is kept, and can be changed in the settings. Who used it
+	// before keeps English.
+	if settings.Language == "" && firstRun && os.Getenv(demoEnvVar) != "1" {
+		settings.Language = systemLanguage()
+		saveAppSettingsFile(settings)
+	}
 	uiLang = settings.Language
 	u := &ui{win: w, th: newThemeFont(settings.Font), focused: true, appearance: appearance, app: settings}
 	u.images = newImages(u)

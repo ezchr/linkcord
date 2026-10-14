@@ -34,7 +34,8 @@ type appSettings struct {
 	// keep running there.
 	StartMinimized bool `json:"start_minimized,omitempty"`
 	QuitOnClose    bool `json:"quit_on_close,omitempty"`
-	// Language is the interface's language: "" English, "es" Spanish.
+	// Language is the interface's language: "en" English, "es" Spanish,
+	// "" not chosen yet, which takes Windows' language.
 	Language string `json:"language,omitempty"`
 	// HideMuted are the servers whose muted channels are hidden.
 	HideMuted []discord.GuildID `json:"hide_muted,omitempty"`
@@ -89,15 +90,18 @@ func (u *ui) saveAppSettings() {
 	if c := u.chat; c != nil && c.demo {
 		return
 	}
-	data, err := json.Marshal(u.app)
+	go saveAppSettingsFile(u.app)
+}
+
+// saveAppSettingsFile writes the settings to app.json.
+func saveAppSettingsFile(a appSettings) {
+	data, err := json.Marshal(a)
 	if err != nil {
 		return
 	}
-	go func() {
-		if err := os.WriteFile(appSettingsPath(), data, 0o600); err != nil {
-			slog.Warn("could not save the settings", "err", err)
-		}
-	}()
+	if err := os.WriteFile(appSettingsPath(), data, 0o600); err != nil {
+		slog.Warn("could not save the settings", "err", err)
+	}
 }
 
 func (a appSettings) zoom() float32 {
@@ -224,7 +228,7 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 			setStartWithWindows(true, u.app.StartMinimized)
 		}
 	}
-	for i, lang := range []string{"", "es"} {
+	for i, lang := range []string{"en", "es"} {
 		if g.langs[i].Clicked(gtx) && u.app.Language != lang {
 			u.app.Language, uiLang = lang, lang
 			u.saveAppSettings()
@@ -464,7 +468,7 @@ func (c *chatView) generalRows() []layout.Widget {
 		bold(label(th, 12, colorMuted, "LANGUAGE · IDIOMA")).Layout,
 		layout.Spacer{Height: unit.Dp(6)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
-			return radioRow(gtx, th, &g.langs[0], "English", u.app.Language == "")
+			return radioRow(gtx, th, &g.langs[0], "English", u.app.Language != "es")
 		},
 		func(gtx layout.Context) layout.Dimensions {
 			return radioRow(gtx, th, &g.langs[1], "Español", u.app.Language == "es")
