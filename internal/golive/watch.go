@@ -86,6 +86,10 @@ type Watch struct {
 	videoGeneration                               atomic.Uint64
 	audio                                         *streamAudio
 	done                                          chan struct{}
+
+	// tw keeps which packets arrived when, for transport feedback; guarded
+	// by mu.
+	tw *twcc
 }
 
 // streamWatchCommand is Op 20: it asks to watch a stream.
@@ -346,6 +350,7 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 	go w.follow(early)
 	go w.receive()
 	go w.askKeyframes()
+	go w.transportFeedback()
 	return w, nil
 }
 
@@ -506,10 +511,12 @@ func (w *Watch) open(pkt []byte) (header []byte, payload []byte, err error) {
 	n := 12 + 4*int(pkt[0]&0x0F)
 	ext := pkt[0]&0x10 != 0
 	extWords := 0
+	var profile uint16
 	if ext {
 		if len(pkt) < n+4 {
 			return nil, nil, errors.New("short extension")
 		}
+		profile = binary.BigEndian.Uint16(pkt[n:])
 		extWords = int(binary.BigEndian.Uint16(pkt[n+2:]))
 		n += 4
 	}
@@ -524,6 +531,14 @@ func (w *Watch) open(pkt []byte) (header []byte, payload []byte, err error) {
 	}
 	if len(plain) < 4*extWords {
 		return nil, nil, errors.New("short extension body")
+	}
+	// Every packet counts for transport feedback.
+	if ext {
+		w.mu.Lock()
+		if w.tw != nil {
+			w.tw.observe(profile, plain[:4*extWords], time.Now())
+		}
+		w.mu.Unlock()
 	}
 	payload = plain[4*extWords:]
 	// RTP padding belongs to the transport, not the H264 picture or its
@@ -666,6 +681,8 @@ func (w *Watch) receive() {
 		}
 		pt := pkt[1] & 0x7F
 		if pt != payloadH264 && pt != payloadH264RTX && pt != payloadOpus {
+			// Its arrival is told back all the same.
+			w.open(pkt)
 			continue
 		}
 		hdr, payload, err := w.open(pkt)
@@ -1005,6 +1022,47 @@ func hasIDR(pic []byte) bool {
 		}
 	}
 	return false
+}
+
+// transportFeedback tells the stream server every 100 ms which packets
+// arrived when, without which the streamer lowers the stream to nothing.
+func (w *Watch) transportFeedback() {
+	w.mu.Lock()
+	w.tw = newTWCC()
+	w.mu.Unlock()
+	t := time.NewTicker(twccEvery)
+	defer t.Stop()
+	start, told := time.Now(), false
+	for {
+		select {
+		case <-t.C:
+		case <-w.done:
+			return
+		}
+		w.mu.Lock()
+		if !told && w.tw.id != 0 {
+			told = true
+			w.log.Info("transport feedback", "extension", w.tw.id)
+		} else if !told && time.Since(start) > 10*time.Second {
+			told = true
+			ids := make([]int, 0, len(w.tw.last))
+			for id := range w.tw.last {
+				ids = append(ids, id)
+			}
+			w.log.Warn("no transport-wide sequence number found", "two_byte_extensions", ids)
+		}
+		if w.videoSSRC == 0 || w.aead == nil {
+			w.mu.Unlock()
+			continue
+		}
+		if pkt := w.tw.feedback(w.ourSSRC, w.videoSSRC); pkt != nil {
+			header := pkt[:8]
+			binary.BigEndian.PutUint32(w.nonce[:4], binary.BigEndian.Uint32(w.nonce[:4])+1)
+			sealed := w.aead.Seal(append([]byte(nil), header...), w.nonce[:w.aead.NonceSize()], pkt[8:], header)
+			w.udp.Write(append(sealed, w.nonce[:4]...))
+		}
+		w.mu.Unlock()
+	}
 }
 
 // maxBitrate is what the viewer says it can take, in bits a second: servers
