@@ -84,6 +84,7 @@ func (u *ui) hearSound(name string) {
 func (c *chatView) trackCallers() {
 	status := c.u.voiceStatus()
 	c.callersOf, c.callers = status.ChannelID, make(map[discord.UserID]bool)
+	c.liveCallers = make(map[discord.UserID]bool)
 	ch, err := c.st.Cabinet.Channel(status.ChannelID)
 	if err != nil {
 		return
@@ -92,12 +93,14 @@ func (c *chatView) trackCallers() {
 	for _, vs := range states {
 		if vs.ChannelID == status.ChannelID {
 			c.callers[vs.UserID] = true
+			c.liveCallers[vs.UserID] = vs.SelfStream
 		}
 	}
 }
 
 // voiceSounds plays the sound of someone joining or leaving the voice
-// channel the user is in, as Discord does.
+// channel the user is in, or starting or stopping to stream in it, as
+// Discord does.
 func (c *chatView) voiceSounds(ev *gateway.VoiceStateUpdateEvent) {
 	status := c.u.voiceStatus()
 	if !status.Joined {
@@ -112,6 +115,16 @@ func (c *chatView) voiceSounds(ev *gateway.VoiceStateUpdateEvent) {
 		return
 	}
 	in := ev.ChannelID == status.ChannelID
+	// Someone in the channel starting or stopping to stream is heard too.
+	live := in && ev.SelfStream
+	if was := c.liveCallers[ev.UserID]; live != was && in == c.callers[ev.UserID] {
+		if live {
+			c.u.playSound(dcsound.StreamStarted)
+		} else {
+			c.u.playSound(dcsound.StreamEnded)
+		}
+	}
+	c.liveCallers[ev.UserID] = live
 	if in == c.callers[ev.UserID] {
 		return
 	}

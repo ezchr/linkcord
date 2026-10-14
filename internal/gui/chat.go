@@ -232,6 +232,8 @@ type chatView struct {
 	// who joins and leaves it.
 	callers   map[discord.UserID]bool
 	callersOf discord.ChannelID
+	// liveCallers are who of them stream.
+	liveCallers map[discord.UserID]bool
 	// voiceStatuses are what the voice channels say they are about, under
 	// their names; voiceChatBtns open their text chat, and voiceGearBtns
 	// their menu.
