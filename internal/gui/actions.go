@@ -759,7 +759,7 @@ func (c *chatView) layoutEmoji(gtx layout.Context, e discord.Emoji, size unit.Dp
 		return c.u.picture(gtx, url, size, colorSidebar, ":"+e.Name+":", 0)
 	}
 	if u := twemojiURL(e.Name, int(size)); isEmoji(e.Name) && !c.u.images.failed(u, gtx.Dp(size)) {
-		return c.u.picture(gtx, u, size, colorT{}, "", 0)
+		return c.twemoji(gtx, u, size)
 	}
 	return label(c.u.th, unit.Sp(float32(size)*0.85), colorHeader, e.Name).Layout(gtx)
 }

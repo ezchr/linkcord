@@ -1,16 +1,10 @@
 package gui
 
 import (
-	"image"
+	"slices"
 	"strings"
 
-	"gioui.org/io/key"
-	"gioui.org/io/pointer"
 	"gioui.org/layout"
-	"gioui.org/op/clip"
-	"gioui.org/op/paint"
-	"gioui.org/text"
-	"gioui.org/unit"
 	"gioui.org/widget"
 	"github.com/ayn2op/arikawa/v3/discord"
 )
@@ -131,6 +125,8 @@ type emojiCell struct {
 	text  string // the emoji, or the markup of a custom emoji
 	name  string
 	url   string // of a custom emoji
+	// locked is an emoji the user cannot send without Nitro.
+	locked bool
 	click widget.Clickable
 }
 
@@ -145,12 +141,34 @@ type emojiPicker struct {
 	// react is the message the picked emoji reacts to; with none, the emoji
 	// goes in the box to write.
 	react discord.MessageID
+
+	// tab is the page shown: GIFs, stickers or emoji.
+	tab  int
+	tabs [3]widget.Clickable
+	// rail is the column of servers and categories, which jumps to them.
+	rail       widget.List
+	railClicks map[string]*widget.Clickable
+	jump       string
+	// hoverPic is the picture of the emoji under the pointer.
+	hoverPic string
+
+	gifs     gifPage
+	stickers stickerPage
 }
 
+const (
+	tabGIFs = iota
+	tabStickers
+	tabEmoji
+)
+
 func newEmojiPicker() *emojiPicker {
-	p := &emojiPicker{cells: make(map[string]*emojiCell)}
+	p := &emojiPicker{cells: make(map[string]*emojiCell), railClicks: make(map[string]*widget.Clickable), tab: tabEmoji}
 	p.search.SingleLine = true
 	p.list.Axis = layout.Vertical
+	p.rail.Axis = layout.Vertical
+	p.gifs.list.Axis = layout.Vertical
+	p.stickers.list.Axis = layout.Vertical
 	return p
 }
 
@@ -167,6 +185,9 @@ func (p *emojiPicker) cell(key, txt, name, url string) *emojiCell {
 type emojiSection struct {
 	title string
 	cells []*emojiCell
+	// icon is the server's picture, or emoji the category's first emoji,
+	// shown in the rail.
+	icon, emoji string
 }
 
 // sections returns the groups of emoji that match the search: the custom
@@ -174,8 +195,18 @@ type emojiSection struct {
 func (c *chatView) emojiSections(p *emojiPicker) []emojiSection {
 	q := strings.ToLower(strings.TrimSpace(p.search.Text()))
 	var out []emojiSection
-	if ch := c.selChannel; ch != nil && ch.GuildID.IsValid() {
-		emojis, _ := c.st.Cabinet.Emojis(ch.GuildID)
+	var here discord.GuildID
+	if ch := c.selChannel; ch != nil {
+		here = ch.GuildID
+	}
+	guilds := slices.Clone(c.guildOrder)
+	if here.IsValid() {
+		guilds = append([]discord.GuildID{here}, slices.DeleteFunc(guilds, func(id discord.GuildID) bool { return id == here })...)
+	}
+	for _, gid := range guilds {
+		emojis, _ := c.st.Cabinet.Emojis(gid)
+		// Without Nitro, only this server's still emoji can be used.
+		locked := c.me.Nitro == discord.NoUserNitro && gid != here
 		var cells []*emojiCell
 		for _, e := range emojis {
 			if q != "" && !strings.Contains(strings.ToLower(e.Name), q) {
@@ -186,14 +217,16 @@ func (c *chatView) emojiSections(p *emojiPicker) []emojiSection {
 				markup = "<a:" + e.Name + ":" + e.ID.String() + ">"
 			}
 			url := "https://cdn.discordapp.com/emojis/" + e.ID.String() + ".png?size=48"
-			cells = append(cells, p.cell(markup, markup+" ", ":"+e.Name+":", url))
+			cl := p.cell(markup, markup+" ", ":"+e.Name+":", url)
+			cl.locked = locked || (e.Animated && c.me.Nitro == discord.NoUserNitro)
+			cells = append(cells, cl)
 		}
 		if len(cells) > 0 {
-			name := "This server"
-			if g, err := c.st.Cabinet.Guild(ch.GuildID); err == nil {
-				name = g.Name
+			sec := emojiSection{title: "Server", cells: cells}
+			if g, err := c.st.Cabinet.Guild(gid); err == nil {
+				sec.title, sec.icon = g.Name, cdnSize(g.IconURLWithType(discord.PNGImage))
 			}
-			out = append(out, emojiSection{name, cells})
+			out = append(out, sec)
 		}
 	}
 	for _, cat := range emojiCategories {
@@ -207,128 +240,8 @@ func (c *chatView) emojiSections(p *emojiPicker) []emojiSection {
 			cells = append(cells, p.cell(emoji, emoji, ":"+name+":", ""))
 		}
 		if len(cells) > 0 {
-			out = append(out, emojiSection{cat.name, cells})
+			out = append(out, emojiSection{title: cat.name, cells: cells, emoji: cat.entries[0][:strings.Index(cat.entries[0], " ")]})
 		}
 	}
 	return out
-}
-
-func (c *chatView) layoutEmojiPicker(gtx layout.Context) layout.Dimensions {
-	th := c.u.th
-	p := c.comp.emoji
-	if !p.focused {
-		gtx.Execute(key.FocusCmd{Tag: &p.search})
-		p.focused = true
-	}
-	for {
-		if _, ok := p.search.Update(gtx); !ok {
-			break
-		}
-	}
-	// Escape closes the picker.
-	for {
-		ev, ok := gtx.Event(key.Filter{Focus: &p.search, Name: key.NameEscape})
-		if !ok {
-			break
-		}
-		if e, ok := ev.(key.Event); ok && e.State == key.Press {
-			c.comp.emoji = nil
-			gtxFocus(c)
-			return layout.Dimensions{Size: gtx.Constraints.Max}
-		}
-	}
-
-	sections := c.emojiSections(p)
-	cellPx := gtx.Dp(40)
-	size := gtx.Constraints.Max
-	paint.FillShape(gtx.Ops, colorPanel, clip.UniformRRect(image.Rectangle{Max: size}, gtx.Dp(8)).Op(gtx.Ops))
-	perRow := max((size.X-gtx.Dp(16))/cellPx, 1)
-
-	// Each section is a title and rows of cells, flattened for the list.
-	type row struct {
-		title string
-		cells []*emojiCell
-	}
-	var rows []row
-	for _, s := range sections {
-		rows = append(rows, row{title: s.title})
-		for i := 0; i < len(s.cells); i += perRow {
-			rows = append(rows, row{cells: s.cells[i:min(i+perRow, len(s.cells))]})
-		}
-	}
-	for _, r := range rows {
-		for _, cl := range r.cells {
-			if cl.click.Clicked(gtx) {
-				if id := p.react; id.IsValid() {
-					e := emojiOfCell(cl)
-					c.u.post(func() { c.toggleReaction(id, e) })
-				} else {
-					c.insertText(cl.text)
-				}
-				c.comp.emoji = nil
-				return layout.Dimensions{Size: size}
-			}
-			if cl.click.Hovered() {
-				p.hovered = cl.text
-				if cl.url != "" {
-					p.hovered = cl.name
-				} else {
-					p.hovered = cl.text + "  " + cl.name
-				}
-			}
-		}
-	}
-
-	return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return textField(gtx, th, &p.search, "Search emoji (for example: laugh, heart, fire)")
-			}),
-			layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				if len(rows) == 0 {
-					return layout.Center.Layout(gtx, label(th, 14, colorMuted, "No matching emoji.").Layout)
-				}
-				return listLayout(gtx, th, &p.list, len(rows), func(gtx layout.Context, i int) layout.Dimensions {
-					r := rows[i]
-					if r.title != "" {
-						return layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(4), Left: unit.Dp(4)}.Layout(gtx,
-							oneLine(bold(label(th, 12, colorMuted, strings.ToUpper(r.title)))).Layout)
-					}
-					var cells []layout.FlexChild
-					for _, cl := range r.cells {
-						cells = append(cells, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return cl.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								pointer.CursorPointer.Add(gtx.Ops)
-								sz := image.Pt(cellPx, cellPx)
-								if cl.click.Hovered() {
-									paint.FillShape(gtx.Ops, colorSelected, clip.UniformRRect(image.Rectangle{Max: sz}, gtx.Dp(4)).Op(gtx.Ops))
-								}
-								gtx.Constraints = layout.Exact(sz)
-								return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									if cl.url != "" {
-										return c.u.picture(gtx, cl.url, 28, colorPanel, cl.name, 0)
-									}
-									if u := twemojiURL(cl.text, 28); isEmoji(cl.text) && !c.u.images.failed(u, gtx.Dp(28)) {
-										return c.u.picture(gtx, u, 28, colorT{}, "", 0)
-									}
-									l := label(th, 22, colorHeader, cl.text)
-									l.Alignment = text.Middle
-									l.MaxLines = 1
-									return l.Layout(gtx)
-								})
-							})
-						}))
-					}
-					return layout.Flex{}.Layout(gtx, cells...)
-				})
-			}),
-			// The emoji under the pointer, with its name.
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				h := gtx.Dp(28)
-				gtx.Constraints = layout.Exact(image.Pt(gtx.Constraints.Max.X, h))
-				return vcenter(gtx, oneLine(label(th, 13, colorText, p.hovered)).Layout)
-			}),
-		)
-	})
 }

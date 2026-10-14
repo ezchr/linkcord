@@ -96,6 +96,8 @@ type chatView struct {
 	// mediaBytes is the file size of the attachments drawn, by URL, which
 	// the fullscreen viewer tells.
 	mediaBytes map[string]uint64
+	// stickers are the servers' stickers, for the picker.
+	stickers guildStickers
 	// friends is the friends page and the message requests of the direct
 	// messages.
 	friends friendsState

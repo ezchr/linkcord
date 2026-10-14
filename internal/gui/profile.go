@@ -87,6 +87,10 @@ type profileView struct {
 	backdrop widget.Clickable
 	// avatarBtn opens the avatar big in the viewer.
 	avatarBtn        widget.Clickable
+	// bannerBtn shows the banner, bannerURL, big, as the avatar.
+	bannerBtn widget.Clickable
+	bannerURL string
+	bannerW   int
 	closeBtn         widget.Clickable
 	message          widget.Clickable
 	copyID           widget.Clickable
@@ -152,6 +156,11 @@ func (c *chatView) updateProfile(gtx layout.Context) {
 	}
 	if p.avatarBtn.Clicked(gtx) {
 		c.openAvatar(p.user, p.guildID)
+	}
+	if p.bannerBtn.Clicked(gtx) && p.bannerURL != "" {
+		// Discord's banners are 680×240 at their smallest.
+		big := p.bannerURL + "?size=2048"
+		c.openViewer("", big, 2048, 723, big, p.bannerURL, p.bannerW)
 	}
 	if p.copyID.Clicked(gtx) {
 		gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(p.user.ID.String()))})
@@ -361,6 +370,14 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 				st := clip.Rect{Max: image.Pt(width, bannerH)}.Push(gtx.Ops)
 				widget.Image{Src: *img, Fit: widget.Cover}.Layout(bgtx)
 				st.Pop()
+			}
+			p.bannerURL, p.bannerW = bannerURL, width
+			if bannerURL != "" {
+				// A click on the banner shows it big, to look at or save.
+				p.bannerBtn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					return layout.Dimensions{Size: image.Pt(width, bannerH)}
+				})
 			}
 			// The avatar sits on the edge of the banner, in a ring of the
 			// card's color.

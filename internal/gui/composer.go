@@ -64,6 +64,8 @@ type composerState struct {
 	files     []*pendingFile
 	attachBtn widget.Clickable
 	emojiBtn  widget.Clickable
+	// stickerBtn and gifBtn open the picker on its tab.
+	stickerBtn, gifBtn widget.Clickable
 	sending   bool
 	// emojiBackdrop closes the emoji picker when clicked.
 	emojiBackdrop widget.Clickable
@@ -190,11 +192,18 @@ func (c *chatView) updateComposer(gtx layout.Context) {
 	if cs.attachBtn.Clicked(gtx) {
 		c.attachFiles()
 	}
-	if cs.emojiBtn.Clicked(gtx) {
-		if cs.emoji == nil {
+	for tab, btn := range map[int]*widget.Clickable{tabEmoji: &cs.emojiBtn, tabStickers: &cs.stickerBtn, tabGIFs: &cs.gifBtn} {
+		if !btn.Clicked(gtx) {
+			continue
+		}
+		switch {
+		case cs.emoji == nil:
 			cs.emoji = newEmojiPicker()
+			cs.emoji.tab = tab
 			cs.mentionOn = false
-		} else {
+		case cs.emoji.tab != tab:
+			cs.emoji.tab = tab
+		default:
 			cs.emoji = nil
 		}
 	}
@@ -526,11 +535,13 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 										})
 									}),
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										col := colorMuted
-										if cs.emoji != nil {
-											col = colorYellow
-										}
-										return iconButton(gtx, &cs.emojiBtn, iconEmoji, col, colorYellow)
+										return pickerButton(gtx, &cs.gifBtn, cs.emoji != nil && cs.emoji.tab == tabGIFs, c.gifGlyph)
+									}),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return pickerButton(gtx, &cs.stickerBtn, cs.emoji != nil && cs.emoji.tab == tabStickers, stickerGlyph)
+									}),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return pickerButton(gtx, &cs.emojiBtn, cs.emoji != nil && cs.emoji.tab == tabEmoji, emojiGlyph)
 									}),
 								)
 							})
@@ -801,7 +812,7 @@ func (c *chatView) layoutComposerPopups(gtx layout.Context) {
 		cs.emojiBackdrop.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Dimensions{Size: size}
 		})
-		w, h := min(gtx.Dp(400), cs.paneW-gtx.Dp(32)), min(gtx.Dp(420), bottom-gtx.Dp(60))
+		w, h := min(gtx.Dp(460), cs.paneW-gtx.Dp(32)), min(gtx.Dp(480), bottom-gtx.Dp(60))
 		pgtx := gtx
 		pgtx.Constraints = layout.Exact(image.Pt(w, h))
 		drawAbove(gtx, pgtx, image.Pt(cs.paneX+cs.paneW-gtx.Dp(16)-w, bottom-gtx.Dp(8)), cs.emoji, c.layoutEmojiPicker)
