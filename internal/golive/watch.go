@@ -339,7 +339,9 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 	if w.p.FFmpeg == "" {
 		return nil, errors.New("golive: FFmpeg is needed to watch streams")
 	}
-	w.decodeQueue = make(chan pictureJob, 4)
+	// Two seconds of pictures: a short stall of the decoder must not cost a
+	// keyframe, which makes the streamer's picture blurry for a while.
+	w.decodeQueue = make(chan pictureJob, 120)
 	if audio, err := newStreamAudio(w); err != nil {
 		w.log.Warn("stream audio unavailable", "err", err)
 	} else {
@@ -924,8 +926,14 @@ func (w *Watch) startDecoder(sw, sh int) error {
 				w.requestKeyframe()
 			}
 		}()
-		for {
-			img := image.NewRGBA(image.Rect(0, 0, ow, oh))
+		// A few pictures are used in turn instead of a new one each time,
+		// which at 1080p60 is 500 MB a second for the collector.
+		var ring [4]*image.RGBA
+		for i := 0; ; i = (i + 1) % len(ring) {
+			if ring[i] == nil {
+				ring[i] = image.NewRGBA(image.Rect(0, 0, ow, oh))
+			}
+			img := ring[i]
 			if _, err := io.ReadFull(out, img.Pix); err != nil {
 				return
 			}
