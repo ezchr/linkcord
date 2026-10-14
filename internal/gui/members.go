@@ -290,7 +290,9 @@ func (c *chatView) memberItem(gtx layout.Context, m *discord.Member, w func(gtx 
 				size := image.Pt(gtx.Constraints.Max.X, gtx.Constraints.Min.Y)
 				rr := clip.UniformRRect(image.Rectangle{Max: size}, gtx.Dp(4))
 				if col := m.User.Collectibles; col != nil && col.Nameplate != nil && col.Nameplate.Asset != "" {
-					if img := c.u.images.frame(gtx, col.Nameplate.URL(), size.X); img != nil {
+					// One size for every width: the image is loaded once and
+					// scaled, so that resizing the pane does not reload it.
+					if img := c.u.images.frame(gtx, col.Nameplate.URL(), gtx.Dp(480)); img != nil {
 						st := rr.Push(gtx.Ops)
 						igtx := gtx
 						igtx.Constraints = layout.Exact(size)
