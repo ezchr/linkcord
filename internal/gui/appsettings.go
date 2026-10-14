@@ -35,6 +35,8 @@ type appSettings struct {
 	QuitOnClose    bool `json:"quit_on_close,omitempty"`
 	// HideMuted are the servers whose muted channels are hidden.
 	HideMuted []discord.GuildID `json:"hide_muted,omitempty"`
+	// SearchHistory are the last searches, the newest first.
+	SearchHistory []string `json:"search_history,omitempty"`
 }
 
 func appSettingsPath() string {

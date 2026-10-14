@@ -97,6 +97,9 @@ func (c *chatView) chatHeader(gtx layout.Context, title string) layout.Dimension
 				})
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return vcenter(gtx, c.layoutSearchBox)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				if ch.Type != discord.GroupDM && !ch.GuildID.IsValid() {
 					return layout.Dimensions{}
 				}

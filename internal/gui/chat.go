@@ -110,6 +110,8 @@ type chatView struct {
 	// makes a channel from it.
 	gmenu      guildMenu
 	newChannel createChannel
+	// search finds messages of the server or conversation open.
+	search searchView
 
 	// detached is set while older messages show in place of the newest,
 	// after a jump; flashID is lit until flashUntil.
@@ -1155,6 +1157,8 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 		c.layoutOverlays(gtx)
 		return dims
 	}
+	// Before the results are drawn, which takes their clicks.
+	c.updateSearch(gtx)
 	channels, members, showMembers := c.paneWidths(gtx)
 	serverWidth := min(gtx.Dp(72), gtx.Constraints.Max.X)
 	messageX := serverWidth + channels
@@ -1169,6 +1173,15 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 			c.comp.paneX, c.comp.paneW = messageX, gtx.Constraints.Max.X
 			return pane(gtx, colorChat, gtx.Constraints.Max.X, c.layoutMessages)
 		}),
+	}
+	// The results of a search take the members' place.
+	searching := c.search.open && c.selChannel != nil
+	if searching {
+		showMembers = false
+		w := min(gtx.Dp(420), max(gtx.Constraints.Max.X-messageX-gtx.Dp(320), gtx.Dp(260)))
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return pane(gtx, colorSidebar, w, c.layoutSearchResults)
+		}))
 	}
 	if showMembers {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1212,6 +1225,7 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 	if c.newChannel.open {
 		c.layoutCreateChannel(gtx)
 	}
+	c.layoutSearchMenu(gtx)
 	if c.u.voice.picker.open {
 		c.layoutStreamPicker(gtx)
 	}
