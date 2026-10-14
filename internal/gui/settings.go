@@ -508,8 +508,8 @@ func (c *chatView) layoutSettingsSidebar(gtx layout.Context) layout.Dimensions {
 				fmt.Sprintf("Discord %d", discordhttp.CurrentClientBuildNumber()),
 				"Linkcord " + version.Version,
 			}
-			if w := windowsVersion(); w != "" {
-				lines = append(lines, "Windows "+w)
+			if w := windowsName(); w != "" {
+				lines = append(lines, w)
 			}
 			var rows []layout.FlexChild
 			for _, l := range lines {
