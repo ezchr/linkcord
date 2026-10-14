@@ -61,12 +61,14 @@ type mentionItem struct {
 // composerState is the box to write messages, with its attachments, its
 // emoji picker and its list of mentions.
 type composerState struct {
-	files     []*pendingFile
+	files []*pendingFile
+	// voice is the voice message being recorded.
+	voice     voiceRecording
 	attachBtn widget.Clickable
 	emojiBtn  widget.Clickable
 	// stickerBtn and gifBtn open the picker on its tab.
 	stickerBtn, gifBtn widget.Clickable
-	sending   bool
+	sending            bool
 	// emojiBackdrop closes the emoji picker when clicked.
 	emojiBackdrop widget.Clickable
 
@@ -189,6 +191,7 @@ func (c *chatView) updateComposer(gtx layout.Context) {
 		gtx.Execute(key.FocusCmd{Tag: &c.composer})
 		c.focusComposer = false
 	}
+	c.updateVoiceRecording(gtx)
 	if cs.attachBtn.Clicked(gtx) {
 		c.attachFiles()
 	}
@@ -518,6 +521,10 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 									}),
 									layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 									layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+										// A voice message records in place of the text.
+										if cs.voice.rec != nil || cs.voice.sending {
+											return c.layoutVoiceRecording(gtx)
+										}
 										return layout.Inset{Top: unit.Dp(12), Bottom: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 											// Long messages grow the box up to a limit, then scroll.
 											gtx.Constraints.Max.Y = min(gtx.Constraints.Max.Y, gtx.Dp(200))
@@ -540,6 +547,14 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 											call.Add(gtx.Ops)
 											return d
 										})
+									}),
+									// With nothing written, a voice message can be
+									// recorded, as on Discord's phones.
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										if cs.voice.rec != nil || cs.voice.sending || c.composer.Len() > 0 || len(cs.files) > 0 {
+											return layout.Dimensions{}
+										}
+										return iconButton(gtx, &cs.voice.mic, iconMic, colorMuted, colorHeader)
 									}),
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 										return pickerButton(gtx, &cs.gifBtn, cs.emoji != nil && cs.emoji.tab == tabGIFs, c.gifGlyph)

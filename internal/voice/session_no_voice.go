@@ -88,3 +88,21 @@ func (*Player) Play(discord.AttachmentID, []byte) error   { return errNoVoice }
 func (*Player) Seek(time.Duration) error                  { return nil }
 
 func (*Session) SetMuteDeafen(bool, bool) error { return nil }
+
+// Recorder records nothing.
+type Recorder struct{}
+
+// RecordOptions are how what is recorded is processed.
+type RecordOptions struct {
+	Input          string
+	Gain, Strength float32
+	Denoise, AGC   bool
+}
+
+func StartRecorder(RecordOptions) (*Recorder, error) { return nil, errNoVoice }
+func (*Recorder) Elapsed() time.Duration             { return 0 }
+func (*Recorder) Level() float32                     { return 0 }
+func (*Recorder) Stop() []int16                      { return nil }
+
+// VoiceMessage makes nothing.
+func VoiceMessage([]int16) ([]byte, float64, []byte, error) { return nil, 0, nil, errNoVoice }
