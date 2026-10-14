@@ -55,6 +55,8 @@ type appSettings struct {
 	// StreamClipMinutes is how much of the stream watched is kept for
 	// clips, none when zero; ten minutes at most, as streams are big.
 	StreamClipMinutes int `json:"stream_clip_minutes,omitempty"`
+	// SoundboardMuted are those whose soundboard sounds are not played.
+	SoundboardMuted []discord.UserID `json:"soundboard_muted,omitempty"`
 }
 
 func appSettingsPath() string {

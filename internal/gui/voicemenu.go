@@ -195,6 +195,15 @@ func (c *chatView) userMenuItems() []menuItem {
 				menuItem{sep: true},
 				menuItem{w: c.layoutVolumeItem},
 				menuItem{text: "Mute", check: checked(u.voiceSettings().Muted[id]), act: stay(func() { u.toggleLocalMute(id) })},
+				menuItem{text: "Mute Soundboard", check: checked(slices.Contains(u.app.SoundboardMuted, id)), act: stay(func() {
+					a := &u.app
+					muted := slices.Contains(a.SoundboardMuted, id)
+					a.SoundboardMuted = slices.DeleteFunc(a.SoundboardMuted, func(x discord.UserID) bool { return x == id })
+					if !muted {
+						a.SoundboardMuted = append(a.SoundboardMuted, id)
+					}
+					u.saveAppSettings()
+				})},
 			)
 			// The sound of their stream, when it is watched.
 			if w := c.watch.w; w != nil && c.watch.streamer == id {

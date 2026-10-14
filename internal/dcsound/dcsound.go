@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	"github.com/hajimehoshi/go-mp3"
+	"github.com/tphakala/go-opus/oggopus"
 )
 
 // The sounds that Linkcord plays, by their name in Discord's web app.
@@ -235,6 +236,34 @@ func (l *Library) lookLocked(ctx context.Context) error {
 	}
 	slog.Info("found Discord's sounds in its web app", "sounds", len(found))
 	return nil
+}
+
+// DecodeSound decodes a sound, MP3 or Ogg Opus as Discord's soundboard
+// keeps them, to 48 kHz stereo samples.
+func DecodeSound(data []byte) ([]int16, error) {
+	if !bytes.HasPrefix(data, []byte("OggS")) {
+		return decode(data)
+	}
+	d, err := oggopus.NewDecoder(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	raw, err := io.ReadAll(d)
+	if err != nil && len(raw) == 0 {
+		return nil, err
+	}
+	pcm := make([]int16, len(raw)/2)
+	for i := range pcm {
+		pcm[i] = int16(binary.LittleEndian.Uint16(raw[2*i:]))
+	}
+	if d.Info().Channels == 1 {
+		stereo := make([]int16, 2*len(pcm))
+		for i, v := range pcm {
+			stereo[2*i], stereo[2*i+1] = v, v
+		}
+		pcm = stereo
+	}
+	return pcm, nil
 }
 
 // decode decodes an MP3 to 48 kHz stereo samples.

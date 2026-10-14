@@ -386,11 +386,13 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 	c.composer.Submit = true
 
 	stopChan, stopStatus, stopPolls, stopMine := st.AddChanHandler(c.events), c.watchVoiceStatus(), c.watchPolls(), c.watchMyPresence()
+	stopSounds := c.watchSoundboard()
 	c.stopEvents = func() {
 		stopChan()
 		stopStatus()
 		stopPolls()
 		stopMine()
+		stopSounds()
 	}
 	go c.pump()
 	return c
