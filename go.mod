@@ -54,7 +54,9 @@ require (
 	github.com/dchest/jsmin v1.0.0 // indirect
 	github.com/disgoorg/godave v0.3.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.8.4 // indirect
+	github.com/dsnet/compress v0.0.0-20171208185109-cc9eb1d7ad76 // indirect
 	github.com/ebitengine/purego v0.11.1 // indirect
+	github.com/gabstv/go-bsdiff v1.0.5 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
 	github.com/godbus/dbus/v5 v5.2.3 // indirect

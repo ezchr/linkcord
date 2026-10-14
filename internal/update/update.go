@@ -2,6 +2,7 @@
 package update
 
 import (
+	"log/slog"
 	"context"
 	"crypto/sha256"
 	"debug/pe"
@@ -299,6 +300,45 @@ func pruneStages(dir string, keep int) {
 	}
 }
 
+// fetchFull downloads the release's executable to staged and verifies it.
+func (m *Manager) fetchFull(ctx context.Context, asset Asset, expected []byte, staged string, progress func(int)) error {
+	f, err := os.OpenFile(staged, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+	if err != nil {
+		return err
+	}
+	hash := sha256.New()
+	counter := &progressWriter{size: asset.Size, last: -1, progress: progress}
+	n, copyErr := m.download(ctx, asset, io.MultiWriter(f, hash, counter))
+	closeErr := f.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if n != asset.Size || !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), hex.EncodeToString(expected)) {
+		return errors.New("download size or SHA-256 verification failed")
+	}
+	return nil
+}
+
+// download writes a release asset to w, at most its size.
+func (m *Manager) download(ctx context.Context, asset Asset, w io.Writer) (int64, error) {
+	req, err := m.request(ctx, "/releases/assets/"+strconv.FormatInt(asset.ID, 10), "application/octet-stream")
+	if err != nil {
+		return 0, err
+	}
+	resp, err := m.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("asset download returned HTTP %d", resp.StatusCode)
+	}
+	return io.Copy(w, io.LimitReader(resp.Body, asset.Size+1))
+}
+
 // Prepare downloads the update into its own folder, on the executable's
 // drive. The installed file is untouched until handoff.
 func (m *Manager) Prepare(ctx context.Context, release *Release, target string, progress func(int)) (plan *Plan, err error) {
@@ -331,34 +371,17 @@ func (m *Manager) Prepare(ctx context.Context, release *Release, target string, 
 		}
 	}()
 	staged := filepath.Join(stageDir, "download.exe")
-	req, err := m.request(ctx, "/releases/assets/"+strconv.FormatInt(asset.ID, 10), "application/octet-stream")
-	if err != nil {
-		return nil, err
-	}
-	resp, err := m.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("asset download returned HTTP %d", resp.StatusCode)
-	}
-	f, err := os.OpenFile(staged, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
-	if err != nil {
-		return nil, err
-	}
-	hash := sha256.New()
-	counter := &progressWriter{size: asset.Size, last: -1, progress: progress}
-	n, copyErr := io.Copy(io.MultiWriter(f, hash, counter), io.LimitReader(resp.Body, asset.Size+1))
-	closeErr := f.Close()
-	if copyErr != nil {
-		return nil, copyErr
-	}
-	if closeErr != nil {
-		return nil, closeErr
-	}
-	if n != asset.Size || !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), hex.EncodeToString(expected)) {
-		return nil, errors.New("download size or SHA-256 verification failed")
+	// A patch from the version running is a small part of the whole file;
+	// what it makes must still be the release's exact executable, or the
+	// whole file is downloaded instead.
+	if err := m.fetchPatch(ctx, release, target, asset, expected, staged, progress); err != nil {
+		if !errors.Is(err, errNoPatch) {
+			slog.Info("update patch unusable; downloading the whole executable", "err", err)
+		}
+		os.Remove(staged)
+		if err := m.fetchFull(ctx, asset, expected, staged, progress); err != nil {
+			return nil, err
+		}
 	}
 	exe, err := pe.Open(staged)
 	if err != nil {

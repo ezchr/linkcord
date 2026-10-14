@@ -77,6 +77,8 @@ Discord's current web-client build number is fetched from its login page, cached
 
 For newer stable GitHub releases, Linkcord downloads the `linkcord.exe` asset, verifies its size and GitHub SHA-256 digest, and checks that it is a Windows AMD64 executable. A hidden PowerShell helper waits for the current process to exit, replaces the file, and starts the new client. The new client must acknowledge its version after its first GUI frame; otherwise the helper restores the previous executable. A failed startup is recorded so the same release and digest do not cause a restart loop.
 
+When the release also carries `linkcord-<running version>.patch`, Linkcord downloads only that patch, a small fraction of the executable, and applies it to the running copy. The result must match the release's `linkcord.exe` size and SHA-256 exactly; otherwise, as when no patch fits the version running, the whole executable is downloaded instead.
+
 Replacement requires write access to the executable's folder. A release without a digest or with an invalid asset leaves the installed version in place. Each update is staged in its own folder in `%LOCALAPPDATA%\linkcord\updates`, out of the executable's folder, with the download, the executable it replaced and a log; the folders of the last three updates are kept and older ones removed. A copy on another drive than that folder stages beside itself, since a file can only be replaced from the same drive.
 
 The repository is currently private. Release checks use `LINKCORD_GITHUB_TOKEN`, if set, or the current GitHub CLI sign-in when `gh` is installed. The GitHub account must have access to `ezchr/linkcord`. Public releases require no GitHub credential. GitHub and Discord credentials are separate; neither is embedded in the executable, release cache, or helper script.
@@ -96,7 +98,14 @@ Development builds identify themselves as `v1.4.2-dev`; they cannot downgrade to
 .\build-linkcord.ps1 -Version v1.4.2 -Out ..\linkcord.exe
 ```
 
-Publish that executable as `linkcord.exe` on the matching stable release. The helper checks the restarted application's embedded version against the release tag. A fresh build uploaded under an incorrect tag will not acknowledge startup.
+Publish that executable as `linkcord.exe` on the matching stable release, with a patch from the previous release so that its users download only what changed:
+
+```powershell
+gh release download vPREVIOUS -p linkcord.exe -D prev
+go run ./cmd/linkcord-patch prev\linkcord.exe ..\linkcord.exe linkcord-vPREVIOUS.patch
+```
+
+Upload `linkcord-vPREVIOUS.patch` beside `linkcord.exe`. The tool checks that the patch reproduces the new executable exactly before writing it. The helper checks the restarted application's embedded version against the release tag. A fresh build uploaded under an incorrect tag will not acknowledge startup.
 
 If a fixed asset is uploaded under the same tag with a new digest, it can be tried again. The failure record is `%LOCALAPPDATA%\linkcord\updates\failed-version`; release metadata is cached in the same folder.
 
