@@ -627,10 +627,12 @@ func mediaURL(proxy, original string, w, h int) string {
 	return parsed.String()
 }
 
-// layoutMedia shows a picture of w×h pixels at most 400×300, which opens
+// layoutMedia shows a picture of w×h pixels at most 550×350, which opens
 // openURL in the browser when clicked.
 func (c *chatView) layoutMedia(gtx layout.Context, proxy, original string, w, h int, openURL string) layout.Dimensions {
-	maxW, maxH := min(gtx.Constraints.Max.X, gtx.Dp(400)), gtx.Dp(300)
+	// As wide as the message allows, up to Discord's 550×350, so that wide
+	// screenshots can be read.
+	maxW, maxH := min(gtx.Constraints.Max.X, gtx.Dp(550)), gtx.Dp(350)
 	if w <= 0 || h <= 0 {
 		w, h = 400, 300
 	}
@@ -662,7 +664,9 @@ func (c *chatView) layoutMedia(gtx layout.Context, proxy, original string, w, h 
 				return layout.Dimensions{Size: size}
 			}
 			gtx.Constraints = layout.Exact(size)
-			return widget.Image{Src: *img, Fit: widget.Cover}.Layout(gtx)
+			d := widget.Image{Src: *img, Fit: widget.Cover}.Layout(gtx)
+			c.mediaDragArea(gtx, openURL, size)
+			return d
 		})
 	})
 }

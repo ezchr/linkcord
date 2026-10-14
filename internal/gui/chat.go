@@ -172,6 +172,8 @@ type chatView struct {
 	guildOrder []discord.GuildID
 	// tagCard is the card of a server tag clicked, tagClicks the tags.
 	tagCard   *tagCard
+	// mediaDrags follow the pictures of the chat being dragged out.
+	mediaDrags map[string]*mediaDrag
 	// activityBtns are the buttons of the activities shown on profiles.
 	activityBtns map[activityButtonKey]*widget.Clickable
 	// imgEdit is the editor of a picture to send, while open.

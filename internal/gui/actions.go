@@ -34,8 +34,6 @@ var (
 	iconDelete = mustIcon(icons.ActionDelete)
 )
 
-// colorMessageHover is the background of the message under the pointer.
-var colorMessageHover = rgb(0x2e3035)
 
 type actionKind int
 
@@ -230,7 +228,9 @@ func (c *chatView) layoutWithActions(gtx layout.Context, m discord.Message, w la
 		paint.FillShape(gtx.Ops, colorMentioned, clip.Rect{Max: image.Pt(gtx.Dp(2), dims.Size.Y)}.Op())
 	}
 	if over || a.editing == m.ID {
-		paint.FillShape(gtx.Ops, colorMessageHover, clip.Rect{Max: dims.Size}.Op())
+		// A faint veil of the text's color, which suits every theme, as
+		// Discord's barely lighter row.
+		paint.FillShape(gtx.Ops, withAlpha(colorHeader, 0x0a), clip.Rect{Max: dims.Size}.Op())
 	}
 	if c.flashing(m.ID) {
 		paint.FillShape(gtx.Ops, withAlpha(colorAccent, 0x30), clip.Rect{Max: dims.Size}.Op())

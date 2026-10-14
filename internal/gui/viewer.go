@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"strings"
 	"time"
 
 	"gioui.org/f32"
@@ -52,6 +53,12 @@ type imageViewer struct {
 	imgRect        image.Rectangle
 	closeBtn       widget.Clickable
 	openBtn        widget.Clickable
+	// copyBtn copies the picture, GIF or video; dragOut is set once it is
+	// being dragged to another window, and fetched once its file is asked
+	// for, to be ready to drag.
+	copyBtn  widget.Clickable
+	dragOut  bool
+	fetched  bool
 	zoomIn         widget.Clickable
 	zoomOut        widget.Clickable
 	focusRequested bool
@@ -104,6 +111,13 @@ func (c *chatView) layoutVisualViewer(gtx layout.Context, v *imageViewer, frame 
 	// Saved to the Downloads folder, not opened in the browser.
 	if v.openBtn.Clicked(gtx) {
 		c.saveFile(v.openURL, "")
+	}
+	if v.copyBtn.Clicked(gtx) {
+		c.copyMedia(v.openURL)
+	}
+	if !v.fetched && strings.HasPrefix(v.openURL, "http") {
+		v.fetched = true
+		go mediaTemp(v.openURL)
 	}
 	if v.zoomIn.Clicked(gtx) {
 		v.zoomAt(v.zoom*1.5, f32.Point{})
@@ -159,6 +173,7 @@ func (c *chatView) layoutVisualViewer(gtx layout.Context, v *imageViewer, frame 
 				if ev.Buttons != pointer.ButtonPrimary {
 					continue
 				}
+				v.dragOut = false
 				v.dragging, v.moved = true, false
 				v.dragFrom, v.panFrom = ev.Position, v.pan
 			case pointer.Drag:
@@ -168,6 +183,12 @@ func (c *chatView) layoutVisualViewer(gtx layout.Context, v *imageViewer, frame 
 				d := ev.Position.Sub(v.dragFrom)
 				if d.X*d.X+d.Y*d.Y > 16 {
 					v.moved = true
+				}
+				// Not zoomed in, dragging takes the file to another window.
+				if v.moved && v.zoom <= 1 && !v.dragOut && v.dragFrom.Round().In(v.imgRect) {
+					v.dragOut = true
+					v.dragging = false
+					c.dragMedia(v.openURL)
 				}
 				if v.zoom > 1 {
 					v.pan = v.panFrom.Add(d)
@@ -263,6 +284,9 @@ func (c *chatView) layoutVisualViewer(gtx layout.Context, v *imageViewer, frame 
 							}
 						}
 						return iconButton(gtx, &v.openBtn, ic, colorText, colorHeader)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return iconButton(gtx, &v.copyBtn, iconCopy, colorText, colorHeader)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return iconButton(gtx, &v.closeBtn, iconClose, colorText, colorHeader)

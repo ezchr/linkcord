@@ -136,6 +136,13 @@ type imageEditor struct {
 	selB      f32.Point
 	selecting bool
 	hasSel    bool
+	// cropDrag is what a drag in crop mode does: a corner it moves (0 to
+	// 3), cropMove to move the box, or cropNew for a new box; grab is
+	// where it started.
+	cropDrag int
+	grab     f32.Point
+	grabA    f32.Point
+	grabB    f32.Point
 	// imgRect is where the picture is drawn, and its scale.
 	imgRect image.Rectangle
 	k       float32
@@ -150,6 +157,11 @@ type imageEditor struct {
 const (
 	toolDraw = iota
 	toolCrop
+)
+
+const (
+	cropMove = 4 + iota
+	cropNew
 )
 
 var penColors = []colorT{rgb(0xffffff), rgb(0x000000), rgb(0xf23f43), rgb(0xf0b232), rgb(0x23a55a), rgb(0x5865f2)}
@@ -188,7 +200,7 @@ func (e *imageEditor) set(img *image.NRGBA) {
 	}
 	e.img = img
 	e.op = paint.NewImageOp(img)
-	e.hasSel = false
+	e.frameAll()
 }
 
 func rotateRight(src *image.NRGBA) *image.NRGBA {
@@ -310,8 +322,9 @@ func (c *chatView) layoutImageEditor(gtx layout.Context) {
 	}
 	// The buttons.
 	for i := range e.toolBtns {
-		if e.toolBtns[i].Clicked(gtx) {
-			e.tool, e.hasSel = i, false
+		if e.toolBtns[i].Clicked(gtx) && e.tool != i {
+			e.tool = i
+			e.frameAll()
 		}
 	}
 	for i := range e.penBtns {
@@ -325,36 +338,31 @@ func (c *chatView) layoutImageEditor(gtx layout.Context) {
 	if e.flip.Clicked(gtx) {
 		e.set(flipHorizontal(e.img))
 	}
-	if e.undoBtn.Clicked(gtx) && len(e.undo) > 0 {
-		e.img = e.undo[len(e.undo)-1]
-		e.undo = e.undo[:len(e.undo)-1]
-		e.op = paint.NewImageOp(e.img)
-		e.hasSel = false
+	if e.undoBtn.Clicked(gtx) {
+		e.undoLast()
 	}
 	if e.reset.Clicked(gtx) && len(e.undo) > 0 {
 		e.set(e.undo[0])
 		e.undo = nil
 	}
-	if e.crop.Clicked(gtx) && e.hasSel {
-		a, b := e.selA, e.selB
-		r := image.Rect(int(min(a.X, b.X)), int(min(a.Y, b.Y)), int(max(a.X, b.X)), int(max(a.Y, b.Y)))
-		if r.Dx() > 2 && r.Dy() > 2 {
-			e.set(cropTo(e.img, r))
-		}
-		e.hasSel = false
+	if e.crop.Clicked(gtx) {
+		e.applyCrop()
 	}
 	if e.cancel.Clicked(gtx) {
 		c.closeImageEditor()
 		return
 	}
 	if e.save.Clicked(gtx) {
+		// A crop framed but not applied is what is meant.
+		e.applyCrop()
 		c.saveImageEditor()
 		if c.imgEdit == nil {
 			return
 		}
 	}
 	for {
-		ev, ok := gtx.Event(key.Filter{Focus: e, Name: key.NameEscape}, key.Filter{Focus: e, Name: "Z", Required: key.ModShortcut})
+		// Whatever has the focus, as the editor covers everything.
+		ev, ok := gtx.Event(key.Filter{Name: key.NameEscape}, key.Filter{Name: key.NameReturn}, key.Filter{Name: key.NameEnter}, key.Filter{Name: "Z", Required: key.ModShortcut})
 		if !ok {
 			break
 		}
@@ -363,11 +371,11 @@ func (c *chatView) layoutImageEditor(gtx layout.Context) {
 				c.closeImageEditor()
 				return
 			}
-			if len(e.undo) > 0 {
-				e.img = e.undo[len(e.undo)-1]
-				e.undo = e.undo[:len(e.undo)-1]
-				e.op = paint.NewImageOp(e.img)
+			if ke.Name == key.NameReturn || ke.Name == key.NameEnter {
+				e.applyCrop()
+				continue
 			}
+			e.undoLast()
 		}
 	}
 	// Drawing and cropping, on the picture.
@@ -386,21 +394,26 @@ func (c *chatView) layoutImageEditor(gtx layout.Context) {
 			if e.tool == toolDraw {
 				e.stroke = []f32.Point{p}
 			} else {
-				e.selA, e.selB, e.selecting, e.hasSel = p, p, true, false
+				e.startCropDrag(p, float32(gtx.Dp(16))/e.k)
 			}
 		case pointer.Drag:
 			if e.tool == toolDraw && e.stroke != nil {
 				e.stroke = append(e.stroke, p)
 			} else if e.selecting {
-				e.selB = p
+				e.moveCropDrag(p)
 			}
 		case pointer.Release, pointer.Cancel:
 			if e.tool == toolDraw && len(e.stroke) > 0 {
 				e.set(drawStroke(e.img, e.stroke, e.penWidth(), penColors[e.pen]))
 				e.stroke = nil
 			} else if e.selecting {
-				e.selB, e.selecting = p, false
-				e.hasSel = math.Abs(float64(e.selA.X-e.selB.X)) > 2 && math.Abs(float64(e.selA.Y-e.selB.Y)) > 2
+				e.moveCropDrag(p)
+				e.selecting = false
+				e.normalize()
+				e.hasSel = e.selB.X-e.selA.X > 2 && e.selB.Y-e.selA.Y > 2
+				if !e.hasSel {
+					e.frameAll()
+				}
 			}
 		}
 	}
@@ -449,6 +462,16 @@ func (c *chatView) layoutImageEditor(gtx layout.Context) {
 			paint.FillShape(gtx.Ops, withAlpha(rgb(0x000000), 0x90), clip.Rect(o.Intersect(image.Rect(0, 0, dw, dh))).Op())
 		}
 		paint.FillShape(gtx.Ops, colorHeader, clip.Stroke{Path: clip.Rect(r).Path(), Width: float32(gtx.Dp(2))}.Op())
+		// Thirds, and a handle at each corner, to drag.
+		for i := 1; i < 3; i++ {
+			x, y := r.Min.X+r.Dx()*i/3, r.Min.Y+r.Dy()*i/3
+			paint.FillShape(gtx.Ops, withAlpha(colorHeader, 0x60), clip.Rect{Min: image.Pt(x, r.Min.Y), Max: image.Pt(x+1, r.Max.Y)}.Op())
+			paint.FillShape(gtx.Ops, withAlpha(colorHeader, 0x60), clip.Rect{Min: image.Pt(r.Min.X, y), Max: image.Pt(r.Max.X, y+1)}.Op())
+		}
+		h := gtx.Dp(6)
+		for _, pt := range []image.Point{r.Min, {r.Max.X, r.Min.Y}, {r.Min.X, r.Max.Y}, r.Max} {
+			paint.FillShape(gtx.Ops, colorHeader, clip.Rect{Min: pt.Sub(image.Pt(h, h)), Max: pt.Add(image.Pt(h, h))}.Op())
+		}
 	}
 	area = clip.Rect{Max: image.Pt(dw, dh)}.Push(gtx.Ops)
 	if e.tool == toolDraw {
@@ -527,4 +550,91 @@ func (c *chatView) layoutImageEditor(gtx layout.Context) {
 		label(th, 13, colorRed, e.err).Layout(gtx)
 		t.Pop()
 	}
+}
+
+// frameAll frames the whole picture for cropping.
+func (e *imageEditor) frameAll() {
+	b := e.img.Bounds()
+	e.selA, e.selB = f32.Pt(0, 0), f32.Pt(float32(b.Dx()), float32(b.Dy()))
+	e.hasSel, e.selecting = e.tool == toolCrop, false
+}
+
+// normalize puts selA at the top left of the box and selB at the bottom
+// right, inside the picture.
+func (e *imageEditor) normalize() {
+	b := e.img.Bounds()
+	clamp := func(p f32.Point) f32.Point {
+		return f32.Pt(min(max(p.X, 0), float32(b.Dx())), min(max(p.Y, 0), float32(b.Dy())))
+	}
+	a, c := clamp(e.selA), clamp(e.selB)
+	e.selA, e.selB = f32.Pt(min(a.X, c.X), min(a.Y, c.Y)), f32.Pt(max(a.X, c.X), max(a.Y, c.Y))
+}
+
+// startCropDrag starts a drag at p, in the picture's pixels: on a corner
+// of the box, near enough, it moves that corner; inside, the whole box;
+// elsewhere it draws a new one.
+func (e *imageEditor) startCropDrag(p f32.Point, near float32) {
+	e.selecting, e.grab, e.grabA, e.grabB = true, p, e.selA, e.selB
+	if e.hasSel {
+		corners := []f32.Point{e.selA, {X: e.selB.X, Y: e.selA.Y}, {X: e.selA.X, Y: e.selB.Y}, e.selB}
+		for i, c := range corners {
+			if math.Abs(float64(p.X-c.X)) <= float64(near) && math.Abs(float64(p.Y-c.Y)) <= float64(near) {
+				e.cropDrag = i
+				return
+			}
+		}
+		if p.X > e.selA.X && p.X < e.selB.X && p.Y > e.selA.Y && p.Y < e.selB.Y {
+			e.cropDrag = cropMove
+			return
+		}
+	}
+	e.cropDrag = cropNew
+	e.selA, e.selB, e.hasSel = p, p, true
+}
+
+func (e *imageEditor) moveCropDrag(p f32.Point) {
+	switch e.cropDrag {
+	case 0:
+		e.selA = p
+	case 1:
+		e.selB.X, e.selA.Y = p.X, p.Y
+	case 2:
+		e.selA.X, e.selB.Y = p.X, p.Y
+	case 3:
+		e.selB = p
+	case cropMove:
+		// Moved whole, kept inside the picture.
+		b := e.img.Bounds()
+		d := p.Sub(e.grab)
+		w, h := e.grabB.X-e.grabA.X, e.grabB.Y-e.grabA.Y
+		x := min(max(e.grabA.X+d.X, 0), float32(b.Dx())-w)
+		y := min(max(e.grabA.Y+d.Y, 0), float32(b.Dy())-h)
+		e.selA, e.selB = f32.Pt(x, y), f32.Pt(x+w, y+h)
+	default:
+		e.selB = p
+	}
+}
+
+// applyCrop crops to the box, if it frames less than the whole picture.
+func (e *imageEditor) applyCrop() {
+	if e.tool != toolCrop || !e.hasSel || e.selecting {
+		return
+	}
+	e.normalize()
+	r := image.Rect(int(e.selA.X+0.5), int(e.selA.Y+0.5), int(e.selB.X+0.5), int(e.selB.Y+0.5))
+	if r.Dx() > 2 && r.Dy() > 2 && r != e.img.Bounds() {
+		e.set(cropTo(e.img, r))
+	}
+	e.frameAll()
+}
+
+// undoLast takes back the last change, by the button or Ctrl+Z.
+func (e *imageEditor) undoLast() {
+	if len(e.undo) == 0 {
+		return
+	}
+	e.img = e.undo[len(e.undo)-1]
+	e.undo = e.undo[:len(e.undo)-1]
+	e.op = paint.NewImageOp(e.img)
+	e.frameAll()
 }
