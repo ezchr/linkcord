@@ -205,6 +205,15 @@ func (c *chatView) layoutVisualViewer(gtx layout.Context, v *imageViewer, frame 
 	// The size that fits the window, never larger than the picture.
 	margin := min(gtx.Dp(64), max(min(size.X, size.Y)/4, 0))
 	w, h := float32(max(v.w, 1)), float32(max(v.h, 1))
+	img := frame(gtx)
+	// The picture's own shape, once loaded, rather than what Discord says,
+	// which a photo turned on its side, as phones keep them, does not match:
+	// drawn to that, it would be stretched.
+	if img != nil {
+		if s := img.Size(); s.X > 0 && s.Y > 0 {
+			h = w * float32(s.Y) / float32(s.X)
+		}
+	}
 	fit := min(float32(max(size.X-2*margin, 1))/w, float32(max(size.Y-2*margin, 1))/h, float32(gtx.Dp(1)))
 	dw, dh := w*fit*v.zoom, h*fit*v.zoom
 	// Keep the picture from leaving the window when panning.
@@ -214,7 +223,6 @@ func (c *chatView) layoutVisualViewer(gtx layout.Context, v *imageViewer, frame 
 	pos := center.Add(v.pan).Sub(f32.Pt(dw/2, dh/2))
 	v.imgRect = image.Rectangle{Min: pos.Round(), Max: pos.Add(f32.Pt(dw, dh)).Round()}
 
-	img := frame(gtx)
 	if img != nil {
 		t := op.Offset(v.imgRect.Min).Push(gtx.Ops)
 		igtx := gtx

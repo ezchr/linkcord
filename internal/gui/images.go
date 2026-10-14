@@ -325,7 +325,8 @@ func decodeScaled(data []byte, size int) (image.Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	return scale(src, size), nil
+	// Photos kept on their side are turned as they say.
+	return scale(orient(src, exifOrientation(data)), size), nil
 }
 
 func isGIF(data []byte) bool {
