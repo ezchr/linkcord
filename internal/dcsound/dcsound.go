@@ -39,6 +39,8 @@ const (
 	StreamUserJoined = "stream_user_joined"
 	StreamUserLeft   = "stream_user_left"
 	Message          = "message1"
+	// CallRinging is the ring of a call to the user, found in the web app.
+	CallRinging = "call_ringing"
 )
 
 // assets are the files of the sounds on discord.com/assets, as Discord's web
@@ -60,6 +62,7 @@ var assets = map[string]string{
 	StreamUserJoined: "3d2af2764581bb2e.mp3",
 	StreamUserLeft:   "24ae9dc0184bd570.mp3",
 	Message:          "3ed22d14f3c30bc4.mp3",
+	CallRinging:      "c2a7111bb44b8da0.mp3",
 }
 
 const (

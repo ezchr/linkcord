@@ -314,6 +314,12 @@ func (u *ui) startDemo() {
 	u.chat.load(ready)
 	u.chat.selectGuild(guild.ID)
 	u.screen = screenChat
+	// Ana calls, to see the incoming call, with LINKCORD_DEMO_CALL.
+	if os.Getenv("LINKCORD_DEMO_CALL") != "" {
+		time.AfterFunc(2*time.Second, func() {
+			u.post(func() { u.chat.callRings(call{ChannelID: dm.ID, Ringing: []discord.UserID{me.ID}}) })
+		})
+	}
 }
 
 // demoFormID is the button of the demo whose bot answers with a form.

@@ -46,6 +46,7 @@ func (u *ui) playSound(name string) bool {
 // names Discord gives them.
 var soundChoices = []struct{ name, label string }{
 	{dcsound.Message, "Message"},
+	{dcsound.CallRinging, "Incoming Ring"},
 	{dcsound.Mute, "Mute"},
 	{dcsound.Unmute, "Unmute"},
 	{dcsound.Deafen, "Deafen"},

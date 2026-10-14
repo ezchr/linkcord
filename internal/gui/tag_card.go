@@ -214,9 +214,9 @@ func (c *chatView) layoutTagCard(gtx layout.Context) {
 	call := macro.Stop()
 	pos := image.Pt((size.X-cardW)/2, (size.Y-dims.Size.Y)/2)
 	st := op.Offset(pos).Push(gtx.Ops)
-	call.Add(gtx.Ops)
-	// Clicks on the card stay on it.
+	// Clicks on the card stay on it, under its button.
 	solid(gtx, &t.err, dims)
+	call.Add(gtx.Ops)
 	st.Pop()
 }
 

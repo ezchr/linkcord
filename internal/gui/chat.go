@@ -172,6 +172,8 @@ type chatView struct {
 	guildOrder []discord.GuildID
 	// tagCard is the card of a server tag clicked, tagClicks the tags.
 	tagCard   *tagCard
+	// incoming is the call ringing the user, nil when none does.
+	incoming *incomingCall
 	tagClicks map[discord.GuildID]*widget.Clickable
 	// folders are the server column's folders, openFolders those open, and
 	// drag a server or folder being moved.
@@ -391,7 +393,9 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 
 	stopChan, stopStatus, stopPolls, stopMine := st.AddChanHandler(c.events), c.watchVoiceStatus(), c.watchPolls(), c.watchMyPresence()
 	stopSounds, stopViewers := c.watchSoundboard(), c.watchViewers()
+	stopCalls := c.watchCalls()
 	c.stopEvents = func() {
+		stopCalls()
 		stopChan()
 		stopStatus()
 		stopPolls()
@@ -1272,6 +1276,9 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 	}
 	if c.tagCard != nil {
 		c.layoutTagCard(gtx)
+	}
+	if c.incoming != nil {
+		c.layoutIncomingCall(gtx)
 	}
 	if c.viewer != nil {
 		c.layoutViewer(gtx)
