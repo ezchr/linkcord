@@ -42,16 +42,7 @@ type gifPage struct {
 	loading       bool
 	started       bool
 	err           string
-	// source is the source of the results; sources are the buttons to
-	// choose one, and key and saveKey take a GIPHY key.
-	source  string
-	sources [3]widget.Clickable
-	key     widget.Editor
-	saveKey widget.Clickable
 }
-
-// gifSources are the GIF sources to choose from, by their setting.
-var gifSources = []struct{ id, name string }{{"", "Discord"}, {"tenor", "Tenor"}, {"giphy", "GIPHY"}}
 
 // stickerPage is the stickers tab.
 type stickerPage struct {
@@ -341,26 +332,10 @@ func (c *chatView) gifBody(gtx layout.Context, p *emojiPicker) (layout.Widget, b
 	if !g.started {
 		wait = 0
 	}
-	for i := range g.sources {
-		if g.sources[i].Clicked(gtx) && c.u.app.GIFSource != gifSources[i].id {
-			c.u.app.GIFSource = gifSources[i].id
-			c.u.saveAppSettings()
-			g.results, g.clicks = nil, nil
-		}
-	}
-	source := c.u.app.GIFSource
-	keyOf := c.u.app.gifKey(source)
-	if g.saveKey.Clicked(gtx) && strings.TrimSpace(g.key.Text()) != "" && keyOf != nil {
-		*keyOf = strings.TrimSpace(g.key.Text())
-		g.key.SetText("")
-		c.u.saveAppSettings()
-		g.started = false
-	}
-	needKey := keyOf != nil && *keyOf == ""
-	if (q != g.loaded || source != g.source || !g.started) && !g.loading && !needKey {
-		if gtx.Now.Sub(g.typedAt) >= wait || source != g.source {
+	if (q != g.loaded || !g.started) && !g.loading {
+		if gtx.Now.Sub(g.typedAt) >= wait {
 			g.started, g.loading, g.err = true, true, ""
-			go c.fetchGIFs(p, q, source)
+			go c.fetchGIFs(p, q)
 		} else {
 			gtx.Execute(op.InvalidateCmd{At: g.typedAt.Add(wait)})
 		}
@@ -378,29 +353,6 @@ func (c *chatView) gifBody(gtx layout.Context, p *emojiPicker) (layout.Widget, b
 		}
 	}
 	grid := func(gtx layout.Context) layout.Dimensions {
-		if needKey {
-			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(340))
-				g.key.SingleLine = true
-				return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(label(th, 13, colorText, map[string]string{
-						"giphy": "GIPHY needs your own API key, free at developers.giphy.com. It is kept on this computer only.",
-						"tenor": "Tenor needs your own API key, free from Google Cloud (Tenor API) at developers.google.com/tenor. It is kept on this computer only.",
-					}[source]).Layout),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return textField(gtx, th, &g.key, "API key") }),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return g.saveKey.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							pointer.CursorPointer.Add(gtx.Ops)
-							return rounded(gtx, colorAccent, 6, func(gtx layout.Context) layout.Dimensions {
-								return layout.Inset{Left: unit.Dp(14), Right: unit.Dp(14), Top: unit.Dp(6), Bottom: unit.Dp(6)}.Layout(gtx,
-									bold(label(th, 13, colorHeader, "Save")).Layout)
-							})
-						})
-					}))
-			})
-		}
 		if len(g.results) == 0 {
 			msg := "Loading GIFs…"
 			if g.err != "" {
@@ -440,31 +392,7 @@ func (c *chatView) gifBody(gtx layout.Context, p *emojiPicker) (layout.Widget, b
 			return layout.Flex{}.Layout(gtx, cells...)
 		})
 	}
-	return func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				var chips []layout.FlexChild
-				for i, src := range gifSources {
-					chips = append(chips, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Right: unit.Dp(6), Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return g.sources[i].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								pointer.CursorPointer.Add(gtx.Ops)
-								bg, fg := colorSidebar, colorMuted
-								if source == src.id {
-									bg, fg = colorAccent, colorHeader
-								}
-								return rounded(gtx, bg, 10, func(gtx layout.Context) layout.Dimensions {
-									return layout.Inset{Left: unit.Dp(10), Right: unit.Dp(10), Top: unit.Dp(3), Bottom: unit.Dp(3)}.Layout(gtx,
-										label(th, 12, fg, src.name).Layout)
-								})
-							})
-						})
-					}))
-				}
-				return layout.Flex{Alignment: layout.Middle}.Layout(gtx, chips...)
-			}),
-			layout.Flexed(1, grid))
-	}, false
+	return grid, false
 }
 
 // gifPreview is what the picker plays of a GIF: its MP4, made a GIF by the
@@ -480,20 +408,11 @@ func gifPreview(r gifResult) string {
 
 // fetchGIFs asks Discord for the GIFs of the search q, or trending ones.
 // Whatever provider is asked for, Discord gives Klipy's now.
-func (c *chatView) fetchGIFs(p *emojiPicker, q, source string) {
-	var res []gifResult
-	var err error
-	switch source {
-	case "giphy":
-		res, err = fetchGiphy(c.u.app.GiphyKey, q)
-	case "tenor":
-		res, err = fetchTenor(c.u.app.TenorKey, q)
-	default:
-		res, err = c.discordGIFs(q)
-	}
+func (c *chatView) fetchGIFs(p *emojiPicker, q string) {
+	res, err := c.discordGIFs(q)
 	c.u.post(func() {
 		g := &p.gifs
-		g.loading, g.loaded, g.source = false, q, source
+		g.loading, g.loaded = false, q
 		if err != nil {
 			g.err = "Could not load GIFs: " + err.Error()
 			g.results, g.clicks = nil, nil
