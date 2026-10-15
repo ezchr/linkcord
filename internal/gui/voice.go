@@ -119,9 +119,10 @@ type voiceSettings struct {
 	StreamFPS    int `json:"stream_fps,omitempty"`
 	// StreamMute streams without sound.
 	StreamMute bool `json:"stream_mute,omitempty"`
-	// StreamLinkcordOnly streams so that only Linkcord shows it, not
-	// Discord's own clients.
-	StreamLinkcordOnly bool `json:"stream_linkcord_only,omitempty"`
+	// StreamEveryone streams with what Discord's own clients wait for. It is
+	// off by default while that does not work yet: the stream then shows in
+	// Linkcord only.
+	StreamEveryone bool `json:"stream_everyone,omitempty"`
 	// InputVolume and OutputVolume are how many times as loud the
 	// microphone is sent and calls are played, from 0 to 2; nil is 1.
 	InputVolume  *float32 `json:"input_volume,omitempty"`
