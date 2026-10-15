@@ -481,6 +481,12 @@ func (c *chatView) nitroRows() []layout.Widget {
 			}),
 		)
 	}), layout.Spacer{Height: unit.Dp(16)}.Layout}
+	// What it lets the user send, which Linkcord holds them to.
+	rows = append(rows, settingsCard(stacked(
+		bold(label(th, 15, colorHeader, "What you can send")).Layout,
+		label(th, 14, colorMuted, fmt.Sprintf(tr("Files up to %s, or more in boosted servers · Messages up to %d characters; longer text is sent as message.txt"),
+			formatSize(uint64(nitroUpload(c.me.Nitro))), c.messageLimit())).Layout,
+	)), layout.Spacer{Height: unit.Dp(16)}.Layout)
 	rows = append(rows, b.subs.note(th)...)
 	if !b.subs.loaded {
 		return rows

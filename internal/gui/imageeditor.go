@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -301,8 +302,8 @@ func (c *chatView) saveImageEditor() {
 		e.err = "Could not save the picture"
 		return
 	}
-	if info.Size() > maxUpload {
-		e.err = "The picture is " + formatSize(uint64(info.Size())) + "; Discord only accepts files up to 10 MB without Nitro."
+	if limit := c.uploadLimit(); info.Size() > limit {
+		e.err = fmt.Sprintf(tr("The picture is %s; you can send files up to %s here."), formatSize(uint64(info.Size())), formatSize(uint64(limit)))
 		return
 	}
 	f := e.file

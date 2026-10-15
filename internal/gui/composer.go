@@ -38,9 +38,6 @@ var (
 	iconFile  = mustIcon(icons.EditorInsertDriveFile)
 )
 
-// maxUpload is the largest file Discord takes from accounts without Nitro.
-const maxUpload = 10 << 20
-
 // pendingFile is a file chosen to be sent with the next message.
 type pendingFile struct {
 	path, name string
@@ -120,8 +117,8 @@ func (c *chatView) attachPaths(paths []string) {
 		if err != nil || info.IsDir() {
 			continue
 		}
-		if info.Size() > maxUpload {
-			c.sendErr = fmt.Sprintf("\"%s\" is %s; Discord only accepts files up to 10 MB without Nitro.", filepath.Base(p), formatSize(uint64(info.Size())))
+		if limit := c.uploadLimit(); info.Size() > limit {
+			c.sendErr = fmt.Sprintf(tr("\"%s\" is %s; you can send files up to %s here."), filepath.Base(p), formatSize(uint64(info.Size())), formatSize(uint64(limit)))
 			continue
 		}
 		c.comp.files = append(c.comp.files, &pendingFile{path: p, name: filepath.Base(p), size: info.Size()})
@@ -703,12 +700,19 @@ func (c *chatView) send() {
 	if text == "" && len(cs.files) == 0 {
 		return
 	}
-	if n := utf8.RuneCountInString(text); n > 2000 {
-		c.sendErr = fmt.Sprintf("The message is too long (%d of 2000 characters).", n)
-		return
-	}
 	content := c.withMarkup(text)
 	files := cs.files
+	if utf8.RuneCountInString(text) > c.messageLimit() {
+		// Too long for a message, the text goes as message.txt, as Discord
+		// does with long text.
+		f, err := textAsFile(text)
+		if err != nil {
+			c.sendErr = tr("Could not keep the long text as a file: ") + err.Error()
+			return
+		}
+		content, files = "", append(slices.Clone(files), f)
+	}
+	kept := cs.files
 	reply, ping := c.act.replyTo, c.act.replyPing
 	c.act.replyTo = nil
 	c.composer.SetText("")
@@ -721,11 +725,15 @@ func (c *chatView) send() {
 
 	id := c.selChannel.ID
 	if c.demo {
-		c.messages = append(c.messages, discord.Message{
+		m := discord.Message{
 			ID: discord.MessageID(discord.NewSnowflake(time.Now())), ChannelID: id, GuildID: c.selChannel.GuildID,
 			Author: c.me, Content: content, Timestamp: discord.NewTimestamp(time.Now()),
 			ReferencedMessage: reply,
-		})
+		}
+		for _, f := range files {
+			m.Attachments = append(m.Attachments, discord.Attachment{Filename: f.name, Size: uint64(f.size), URL: discord.URL("file:///" + filepath.ToSlash(f.path))})
+		}
+		c.messages = append(c.messages, m)
 		return
 	}
 	cs.sending = len(files) > 0
@@ -770,7 +778,7 @@ func (c *chatView) send() {
 				c.composer.SetText(text)
 			}
 			if len(cs.files) == 0 {
-				cs.files = files
+				cs.files = kept
 			}
 			if c.act.replyTo == nil {
 				c.act.replyTo = reply

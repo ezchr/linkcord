@@ -492,6 +492,13 @@ func (c *chatView) pump() {
 					delete(c.inter.pending, ev.Nonce)
 					c.openModal(*ev)
 				})
+			case *gateway.UserUpdateEvent:
+				// The user's own, as when they get or lose Nitro.
+				c.u.post(func() {
+					if ev.ID == c.me.ID {
+						c.me = ev.User
+					}
+				})
 			case *gateway.RelationshipAddEvent, *gateway.RelationshipRemoveEvent:
 				// The gateway state keeps the friends; the lists read it
 				// while laying out.

@@ -500,8 +500,8 @@ func (c *chatView) saveEdit(id discord.MessageID) {
 	if text == m.Content {
 		return
 	}
-	if n := utf8.RuneCountInString(text); n > 2000 {
-		c.sendErr = fmt.Sprintf("The message is too long (%d of 2000 characters).", n)
+	if n, limit := utf8.RuneCountInString(text), c.messageLimit(); n > limit {
+		c.sendErr = fmt.Sprintf(tr("The message is too long (%d of %d characters)."), n, limit)
 		return
 	}
 	// Shown at once; the update from Discord confirms it.
