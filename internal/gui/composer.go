@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"image"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"gioui.org/io/clipboard"
 	"gioui.org/io/event"
 	"gioui.org/io/key"
+	"gioui.org/io/transfer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -90,6 +92,8 @@ type composerState struct {
 	mentions map[string]string
 
 	emoji *emojiPicker
+	// pasted receives the text of the clipboard pasted in the box.
+	pasted int
 
 	// The place of the box, for the popups drawn above it.
 	paneX, paneW, boxH int
@@ -131,7 +135,7 @@ var pasteDir = filepath.Join(os.TempDir(), "linkcord-paste")
 
 // paste handles Ctrl+V in the box: files copied in Explorer and pictures,
 // such as screenshots, become attachments; anything else is text, which the
-// box pastes as usual.
+// box pastes, but long text, attached as message.txt.
 func (c *chatView) paste(gtx layout.Context) {
 	clip, err := readClipboard()
 	if err != nil {
@@ -143,7 +147,7 @@ func (c *chatView) paste(gtx layout.Context) {
 	case len(clip.png) > 0:
 		c.attachPicture(clip.png)
 	default:
-		gtx.Execute(clipboard.ReadCmd{Tag: &c.composer})
+		gtx.Execute(clipboard.ReadCmd{Tag: &c.comp.pasted})
 	}
 }
 
@@ -177,6 +181,35 @@ func cleanPastes() {
 			os.RemoveAll(filepath.Join(pasteDir, e.Name()))
 		}
 	}
+}
+
+// pasteAsFile is how long pasted text must be, in characters, to be
+// attached as message.txt rather than put in the box.
+const pasteAsFile = 3000
+
+// pasteText puts text pasted in the box, or attaches it as message.txt when
+// long, so that the message can still be written, as Discord does.
+func (c *chatView) pasteText(e transfer.DataEvent) {
+	r := e.Open()
+	data, err := io.ReadAll(r)
+	r.Close()
+	if err != nil {
+		return
+	}
+	text := string(data)
+	if utf8.RuneCountInString(text) <= pasteAsFile {
+		if c.composer.Insert(text) != 0 {
+			c.sendTyping()
+		}
+		return
+	}
+	f, err := textAsFile(text)
+	if err != nil {
+		c.sendErr = tr("Could not keep the long text as a file: ") + err.Error()
+		return
+	}
+	c.comp.files = append(c.comp.files, f)
+	gtxFocus(c)
 }
 
 // gtxFocus asks for the box to get the keyboard focus on the next frame.
@@ -296,6 +329,16 @@ func (c *chatView) updateComposer(gtx layout.Context) {
 		}
 		if e, ok := ev.(key.Event); ok && e.State == key.Press {
 			c.paste(gtx)
+		}
+	}
+
+	for {
+		ev, ok := gtx.Event(transfer.TargetFilter{Target: &cs.pasted, Type: "application/text"})
+		if !ok {
+			break
+		}
+		if e, ok := ev.(transfer.DataEvent); ok {
+			c.pasteText(e)
 		}
 	}
 
