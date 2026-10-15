@@ -1021,6 +1021,7 @@ func (s *Session) commitProposalsLocked() error {
 	// If op 29 carries a DIFFERENT commit, restorePreCommitStateLocked() rolls back.
 	s.pendingCommitBytes = append([]byte(nil), commit...)
 	s.preCommitGroupState = preState
+	s.pendingFromSet = false
 
 	epochState, err := s.rebuildEpochStateLocked(s.groupID)
 	if err != nil {

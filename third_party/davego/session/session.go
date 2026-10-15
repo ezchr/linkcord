@@ -111,6 +111,11 @@ type Session struct {
 	// we restore preCommitState, clear pendingEpoch, and process the winner.
 	pendingCommitBytes  []byte
 	preCommitGroupState []byte
+	// pendingFrom is the transition whose commit or welcome gave
+	// pendingEpoch, when it is not this session's own commit, and
+	// pendingFromSet whether there is one.
+	pendingFrom    uint16
+	pendingFromSet bool
 
 	epochReady chan struct{}
 
@@ -778,7 +783,10 @@ func (s *Session) processAndCommitProposalBatchLocked(proposals []byte) {
 // transition must be aborted because the state restore or the commit processing
 // failed. Must be called with s.mu held.
 func (s *Session) reconcileCompetingCommitLocked(transitionID uint16, commitMessage []byte) bool {
-	if s.pendingEpoch != nil {
+	// Only a commit of this session's own can have lost: a pending epoch
+	// from another member's commit, or from a welcome, is built on, as it is
+	// what the group is at.
+	if s.pendingEpoch != nil && len(s.pendingCommitBytes) > 0 {
 		// Our commit lost; restore pre-commit state before processing the winner.
 		s.logger.Debug("OnDaveMLSPrepareCommitTransition: competing commit won, rolling back",
 			"transition_id", transitionID,
@@ -836,8 +844,15 @@ func (s *Session) OnDaveMLSPrepareCommitTransition(transitionID uint16, commitMe
 		s.logger.Debug("skipping commit re-processing: we were the committer", "transition_id", transitionID)
 		s.pendingCommitBytes = nil
 		s.preCommitGroupState = nil
+	} else if s.pendingEpoch != nil && len(s.pendingCommitBytes) == 0 && s.pendingFromSet && s.pendingFrom == transitionID {
+		// The epoch of this transition is had already, from its welcome,
+		// which a member just added gets beside the commit: processing the
+		// commit again would fail and reset the session.
+		s.logger.Debug("skipping commit of a transition already joined", "transition_id", transitionID)
 	} else if !s.reconcileCompetingCommitLocked(transitionID, commitMessage) {
 		return
+	} else {
+		s.pendingFrom, s.pendingFromSet = transitionID, true
 	}
 
 	// transition_id 0 is executed immediately and is not acknowledged; only send
@@ -867,7 +882,7 @@ func (s *Session) OnDaveMLSWelcome(transitionID uint16, welcomeMessage []byte) {
 	// arriving means Discord DS chose another member's commit over ours — our
 	// commit was rejected. Roll back our local state to the pre-commit snapshot
 	// so that joinPendingWelcomeLocked operates from the correct epoch.
-	if s.pendingEpoch != nil {
+	if s.pendingEpoch != nil && len(s.pendingCommitBytes) > 0 {
 		s.logger.Debug("OnDaveMLSWelcome: our commit was rejected by DS (Welcome received), rolling back",
 			"transition_id", transitionID)
 		if err := s.restorePreCommitStateLocked(); err != nil {
@@ -900,6 +915,7 @@ func (s *Session) OnDaveMLSWelcome(transitionID uint16, welcomeMessage []byte) {
 		return
 	}
 	s.stats.WelcomesJoined++
+	s.pendingFrom, s.pendingFromSet = transitionID, true
 	s.logger.Debug("OnDaveMLSWelcome: joined successfully",
 		"pending_epoch_set", s.pendingEpoch != nil,
 		"pending_epoch_id", func() uint64 {
