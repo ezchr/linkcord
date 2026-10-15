@@ -223,6 +223,7 @@ var keybindActions = []struct{ id, name, about string }{
 	{"push_to_talk", "Push to Talk", "Hold to talk, when the input mode is Push to Talk."},
 	{"toggle_mute", "Toggle Mute", "Mutes or unmutes your microphone."},
 	{"toggle_deafen", "Toggle Deafen", "Deafens or undeafens you."},
+	{"clip_minute", "Clip Last Minute", "Saves the last minute of the stream you watch, or of the voice channel."},
 }
 
 // applyKeybinds watches the keys chosen for each action, from any window,
@@ -266,6 +267,14 @@ func (u *ui) applyKeybinds() {
 			b.Down = toggle(false)
 		case "toggle_deafen":
 			b.Down = toggle(true)
+		case "clip_minute":
+			b.Down = func() {
+				u.post(func() {
+					if c := u.chat; c != nil {
+						c.clipLastMinute()
+					}
+				})
+			}
 		default:
 			continue
 		}

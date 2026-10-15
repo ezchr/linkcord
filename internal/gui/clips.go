@@ -460,3 +460,49 @@ func nameCol(i int) colorT {
 	}
 	return colorHeader
 }
+
+// clipLastMinute saves the last minute of the stream watched, or else of
+// the voice channel, as the keybind for it does.
+func (c *chatView) clipLastMinute() {
+	u := c.u
+	if c.watch.w != nil {
+		if u.app.StreamClipMinutes <= 0 {
+			u.voiceInfo("Turn on stream clips in Settings to clip streams")
+			return
+		}
+		c.saveStreamClip(time.Minute)
+		return
+	}
+	s := u.voice.session
+	if s == nil || !u.voiceStatus().Joined {
+		u.voiceInfo("Join a voice channel or watch a stream to clip it")
+		return
+	}
+	if s.ClipLength() <= 0 {
+		u.voiceInfo("Turn on voice clips in Settings to clip the voice channel")
+		return
+	}
+	u.voiceInfo("Saving the clip…")
+	go func() {
+		clips, err := s.Clip(nil, time.Minute)
+		u.post(func() {
+			if err != nil {
+				u.voiceFailed("Could not make the clip", err)
+				return
+			}
+			if len(clips) == 0 {
+				u.voiceInfo("Nobody said anything in the last minute")
+				return
+			}
+			t := clipTrack{name: "Everyone together", pcm: voice.Mix(clips)}
+			name := fmt.Sprintf("Linkcord clip %s - %s.wav", time.Now().Format("2006-01-02 15-04-05"), safeFileName(t.name))
+			p := freeName(filepath.Join(downloadsDir(), name))
+			if err := os.WriteFile(p, wavFile(t.pcm), 0o644); err != nil {
+				u.voiceFailed("Could not save the clip", err)
+				return
+			}
+			u.voiceInfo("Clip saved to " + filepath.Base(p))
+			showInFolder(p)
+		})
+	}()
+}
