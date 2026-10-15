@@ -179,7 +179,7 @@ func Start(ctx context.Context, p Params) (*Stream, error) {
 	var port uint16
 	s.med, ip, port, err = dialMedia(wait, fmt.Sprintf("%s:%d", r.IP, r.Port), r.SSRC)
 	if s.med != nil {
-		s.med.noExtension = p.LinkcordOnly
+		s.med.linkcordOnly = p.LinkcordOnly
 	}
 	if err != nil {
 		return nil, err
