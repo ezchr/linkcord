@@ -321,6 +321,17 @@ func (u *ui) startDemo() {
 	u.chat.load(ready)
 	u.chat.selectGuild(guild.ID)
 	u.screen = screenChat
+	// A message someone deleted, kept, with LINKCORD_DEMO_DELETED.
+	if os.Getenv("LINKCORD_DEMO_DELETED") != "" {
+		if msgs, err := cab.Messages(channels[0].ID); err == nil {
+			for _, m := range msgs {
+				if m.Author.ID == users[1].ID && m.Content != "" {
+					u.chat.deleted.record(m)
+					break
+				}
+			}
+		}
+	}
 	// Ana calls, to see the incoming call, with LINKCORD_DEMO_CALL.
 	if os.Getenv("LINKCORD_DEMO_CALL") != "" {
 		time.AfterFunc(2*time.Second, func() {

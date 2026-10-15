@@ -208,7 +208,7 @@ func (c *chatView) layoutWithActions(gtx layout.Context, m discord.Message, w la
 	over := a.hover == m.ID || a.barOver == m.ID
 	// A deleted message is gone from Discord: nothing can be done with it.
 	// Neither can one that only this user sees, which Discord never stored.
-	showBar := over && a.editing != m.ID && a.deleting == nil && !c.deleted.has(m.ID) && !isEphemeral(m)
+	showBar := over && a.editing != m.ID && a.deleting == nil && !isEphemeral(m)
 	if !showBar && a.barOver == m.ID {
 		// A toolbar that is not drawn gets no Leave; forget it.
 		a.barOver = 0
@@ -271,15 +271,15 @@ func (c *chatView) mentionsMe(m discord.Message) bool {
 // layoutToolbar draws the buttons of a message over its top right corner.
 func (c *chatView) layoutToolbar(gtx layout.Context, m discord.Message, row layout.Dimensions, tags *hoverTags) {
 	var kinds []actionKind
-	if c.canReact() {
+	// A message someone deleted, kept here, can be changed or taken away
+	// on this screen, whoever wrote it, but not reacted or replied to.
+	gone := c.deleted.has(m.ID)
+	if c.canReact() && !gone {
 		kinds = append(kinds, actReact)
 	}
-	if c.canSendHere() {
+	if c.canSendHere() && !gone {
 		kinds = append(kinds, actReply)
 	}
-	// A message someone deleted, kept here, can be changed or taken away
-	// on this screen, whoever wrote it.
-	gone := c.deleted.has(m.ID)
 	if m.Author.ID == c.me.ID || c.u.app.EditOthers || gone {
 		kinds = append(kinds, actEdit)
 	}
