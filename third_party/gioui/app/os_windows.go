@@ -227,6 +227,7 @@ func (w *window) init() error {
 		return err
 	}
 	w.hwnd = hwnd
+	acceptFiles(uintptr(hwnd))
 	return nil
 }
 
@@ -568,6 +569,9 @@ func windowProc(hwnd syscall.Handle, msg uint32, wParam, lParam uintptr) uintptr
 	case windows.WM_IME_ENDCOMPOSITION:
 		w.w.SetComposingRegion(key.Range{Start: -1, End: -1})
 		return windows.TRUE
+	case wmDropFiles:
+		filesDropped(wParam)
+		return 0
 	case windows.WM_COPYDATA:
 		data := (*windows.CopyDataStruct)(unsafe.Pointer(lParam))
 		switch data.DwData {

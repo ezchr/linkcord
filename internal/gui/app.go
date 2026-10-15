@@ -67,7 +67,16 @@ func Run() error {
 			app.Size(unit.Dp(1100), unit.Dp(680)),
 			app.MinSize(unit.Dp(720), unit.Dp(460)),
 		)
-		errc <- newUI(w).loop()
+		u := newUI(w)
+		// Files dropped on the window are attached, as Discord does.
+		app.FilesDropped = func(paths []string) {
+			u.post(func() {
+				if c := u.chat; c != nil {
+					c.attachPaths(paths)
+				}
+			})
+		}
+		errc <- u.loop()
 		os.Exit(0)
 	}()
 	app.Main()

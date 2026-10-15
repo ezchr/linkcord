@@ -28,6 +28,9 @@ var (
 	msSetClipboardData   = msUser32.NewProc("SetClipboardData")
 	msRegisterClipFormat = msUser32.NewProc("RegisterClipboardFormatW")
 	msGetForegroundWnd   = msUser32.NewProc("GetForegroundWindow")
+	msGetWindowThread    = msUser32.NewProc("GetWindowThreadProcessId")
+	msAttachThreadInput  = msUser32.NewProc("AttachThreadInput")
+	msGetCurrentThread   = msKernel.NewProc("GetCurrentThreadId")
 	msGlobalAlloc        = msKernel.NewProc("GlobalAlloc")
 	msGlobalLock         = msKernel.NewProc("GlobalLock")
 	msGlobalUnlock       = msKernel.NewProc("GlobalUnlock")
@@ -164,7 +167,19 @@ func dragFile(path string) error {
 		vtbl := *(*[3]uintptr)(unsafe.Add(nil, *(*uintptr)(unsafe.Add(nil, obj))))
 		syscall.SyscallN(vtbl[2], obj)
 	}()
+	// The drag runs on this thread, which shares the window's input, so that
+	// it sees the button held there: on its own, the button reads as up and
+	// the drag ends at once.
 	hwnd, _, _ := msGetForegroundWnd.Call()
+	if hwnd != 0 {
+		window, _, _ := msGetWindowThread.Call(hwnd, 0)
+		self, _, _ := msGetCurrentThread.Call()
+		if window != 0 && window != self {
+			if r, _, _ := msAttachThreadInput.Call(self, window, 1); r != 0 {
+				defer msAttachThreadInput.Call(self, window, 0)
+			}
+		}
+	}
 	var effect uint32
 	msSHDoDragDrop.Call(hwnd, obj, 0, msDropEffectCopy, uintptr(unsafe.Pointer(&effect)))
 	return nil
