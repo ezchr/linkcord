@@ -431,7 +431,15 @@ func (c *chatView) pump() {
 		case ev := <-c.events:
 			switch ev := ev.(type) {
 			case *gateway.ReadyEvent:
-				c.u.post(func() { c.u.onReady(c.st, ev) })
+				c.u.post(func() {
+					// Discord may give the session a new token as it
+					// connects, which the old one stops working for: kept,
+					// or the next start is signed out.
+					if ev.AuthToken != "" && ev.AuthToken != c.u.token {
+						c.u.tokenRefreshed(c.st, ev.AuthToken)
+					}
+					c.u.onReady(c.st, ev)
+				})
 			case *gateway.ResumedEvent:
 				c.u.post(func() {
 					if !c.closed && c.u.chat == c {

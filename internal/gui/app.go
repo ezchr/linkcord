@@ -220,8 +220,19 @@ func newUI(w *app.Window) *ui {
 	token := os.Getenv(tokenEnvVar)
 	if token == "" {
 		var err error
-		if token, err = auth.LoadToken(); err != nil {
+		// Right after Windows starts, its credentials may not be readable
+		// yet: tried again for a while rather than shown signed out.
+		for try := 0; ; try++ {
+			if token, err = auth.LoadToken(); err == nil || try == 20 {
+				break
+			}
+			slog.Warn("could not read the saved token yet", "err", err, "try", try)
+			time.Sleep(500 * time.Millisecond)
+		}
+		if err != nil {
 			slog.Error("failed to load token", "err", err)
+		} else if token == "" {
+			slog.Info("no saved token: signing in")
 		}
 	}
 	u.beginStartup(token)
@@ -382,6 +393,7 @@ func (u *ui) connect(token string) {
 			}
 			// A rejected token never works again.
 			if event, ok := errors.AsType[*ws.CloseEvent](err); ok && event.Code == closeCodeAuthenticationFailed {
+				slog.Warn("Discord rejected the saved token; signing out")
 				u.logout("Your session expired or the token is invalid. Sign in again.")
 				return
 			}
