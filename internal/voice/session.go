@@ -646,7 +646,7 @@ func (s *Session) receive(session *voice.Session) {
 			// following: joining again gets the keys anew. One person who
 			// cannot be decrypted is their client's doing, which joining
 			// again does not mend.
-			if failed >= 150 && time.Since(heard) > 5*time.Second && time.Since(healed) > time.Minute {
+			if failed >= 100 && time.Since(heard) > 5*time.Second && time.Since(healed) > time.Minute {
 				healed, failed = time.Now(), 0
 				slog.Warn("nothing said in the voice channel can be decrypted; joining it again", "err", err)
 				go s.rejoin()
@@ -659,8 +659,12 @@ func (s *Session) receive(session *voice.Session) {
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
-		heard, failed = time.Now(), 0
-		delete(logged, packet.SSRC())
+		// Silence is sent unencrypted, and tells nothing of whether the
+		// keys work: heard only by what was said.
+		if string(packet.Opus) != voice.Silence {
+			heard, failed = time.Now(), 0
+			delete(logged, packet.SSRC())
+		}
 
 		s.stateMu.Lock()
 		speaker := s.speakers[packet.SSRC()]
