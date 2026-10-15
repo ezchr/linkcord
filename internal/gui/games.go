@@ -163,32 +163,15 @@ func (c *chatView) watchGames() {
 		tick := time.NewTicker(15 * time.Second)
 		defer tick.Stop()
 		for {
-			found := make(map[string]*knownGame)
-			for _, exe := range runningExecutables() {
-				if g := list.match(exe); g != nil {
-					found[g.ID] = g
-				}
-			}
-			now := time.Now()
-			var ids []string
-			var games []playing
-			for id, g := range found {
-				if _, ok := since[id]; !ok {
-					since[id] = now
-				}
-				ids = append(ids, id)
-				games = append(games, playing{g, since[id]})
-			}
-			for id := range since {
-				if found[id] == nil {
-					delete(since, id)
-				}
+			games := scanGames(list, runningExecutables(), since, time.Now())
+			ids := make([]string, len(games))
+			for i, p := range games {
+				ids[i] = p.game.ID
 			}
 			slices.Sort(ids)
+			// A game closed changes them too, and is no longer shown.
 			if !slices.Equal(ids, last) {
 				last = ids
-				// The newest game first, as Discord shows it.
-				slices.SortFunc(games, func(a, b playing) int { return b.since.Compare(a.since) })
 				c.u.post(func() {
 					if c.closed {
 						return
@@ -204,6 +187,32 @@ func (c *chatView) watchGames() {
 			}
 		}
 	}()
+}
+
+// scanGames are the games of list among the executables running, the newest
+// first. since keeps when each started, and forgets those closed.
+func scanGames(list gameList, exes []string, since map[string]time.Time, now time.Time) []playing {
+	found := make(map[string]*knownGame)
+	for _, exe := range exes {
+		if g := list.match(exe); g != nil {
+			found[g.ID] = g
+		}
+	}
+	for id := range since {
+		if found[id] == nil {
+			delete(since, id)
+		}
+	}
+	var games []playing
+	for id, g := range found {
+		if _, ok := since[id]; !ok {
+			since[id] = now
+		}
+		games = append(games, playing{g, since[id]})
+	}
+	// The newest game first, as Discord shows it.
+	slices.SortFunc(games, func(a, b playing) int { return b.since.Compare(a.since) })
+	return games
 }
 
 // gameActivities are the games being played as activities as the gateway

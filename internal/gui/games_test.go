@@ -3,6 +3,7 @@ package gui
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 func TestGameMatch(t *testing.T) {
@@ -31,6 +32,32 @@ func TestGameMatch(t *testing.T) {
 		if got != want {
 			t.Errorf("%s: got game %q, want %q", exe, got, want)
 		}
+	}
+}
+
+func TestGameOpenedAndClosed(t *testing.T) {
+	list := indexGames([]knownGame{{ID: "1", Name: "Counter-Strike 2", Paths: []string{"cs2.exe"}}})
+	since := make(map[string]time.Time)
+	start := time.Unix(1000, 0)
+	if g := scanGames(list, []string{`C:\Windows\explorer.exe`}, since, start); len(g) != 0 {
+		t.Fatalf("nothing running, got %d games", len(g))
+	}
+	games := scanGames(list, []string{`D:\Steam\cs2.exe`}, since, start)
+	if len(games) != 1 || games[0].game.Name != "Counter-Strike 2" {
+		t.Fatalf("opened: got %v", games)
+	}
+	// Still running later: still played since it opened.
+	games = scanGames(list, []string{`D:\Steam\cs2.exe`}, since, start.Add(time.Minute))
+	if len(games) != 1 || !games[0].since.Equal(start) {
+		t.Fatalf("still running: got %v", games)
+	}
+	// Closed: no longer played, and opened again it starts anew.
+	if games = scanGames(list, nil, since, start.Add(2*time.Minute)); len(games) != 0 {
+		t.Fatalf("closed: still %d games", len(games))
+	}
+	games = scanGames(list, []string{`D:\Steam\cs2.exe`}, since, start.Add(3*time.Minute))
+	if len(games) != 1 || !games[0].since.Equal(start.Add(3*time.Minute)) {
+		t.Fatalf("opened again: got %v", games)
 	}
 }
 

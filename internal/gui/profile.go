@@ -1164,6 +1164,11 @@ func (c *chatView) layoutActivity(gtx layout.Context, a discord.Activity, userID
 	if a.Assets != nil {
 		img = activityImageURL(a, a.Assets.LargeImage)
 	}
+	if img == "" && a.Type == discord.GameActivity {
+		// A game without a picture of its own, as one Discord detects,
+		// shows its application's icon.
+		img = c.appIconURL(a.AppID)
+	}
 	// On a profile's colors the box lets them through.
 	bg := colorMenu
 	if p := c.profile; p != nil {
