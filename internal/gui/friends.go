@@ -161,13 +161,18 @@ func (c *chatView) relationships() []discord.Relationship {
 	if c.demo {
 		return c.friends.demoRels
 	}
-	var out []discord.Relationship
+	// Read at most every second: each frame read them all several times.
+	if c.rels != nil && time.Since(c.relsAt) < time.Second {
+		return c.rels
+	}
+	out := []discord.Relationship{}
 	c.st.RelationshipState.Each(func(id discord.UserID, _ discord.RelationshipType) bool {
 		if rel, ok := c.st.RelationshipState.FullRelationship(id); ok {
 			out = append(out, rel)
 		}
 		return false
 	})
+	c.rels, c.relsAt = out, time.Now()
 	return out
 }
 

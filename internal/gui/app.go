@@ -124,6 +124,8 @@ type ui struct {
 	// goroutine before the next frame.
 	mu      sync.Mutex
 	pending []func()
+	// soonPending is set while a frame is due for what postSoon posted.
+	soonPending atomic.Bool
 	// pendingSince is when the oldest work pending was posted, zero while
 	// none is, for the freeze watchdog.
 	pendingSince time.Time
@@ -193,6 +195,10 @@ func newUI(w *app.Window) *ui {
 			return
 		}
 		go func() {
+			// Fonts needed together, as names in their own fonts appearing
+			// with a list, are loaded with one rebuild, which reads every
+			// font again.
+			time.Sleep(300 * time.Millisecond)
 			sh := newShaper(u.app.Font)
 			u.post(func() {
 				u.th.Shaper = sh
@@ -237,6 +243,25 @@ func newUI(w *app.Window) *ui {
 	}
 	u.beginStartup(token)
 	return u
+}
+
+// postSoon runs f on the window's goroutine before a frame that comes
+// within half a second, rather than one at once: for what changes nothing
+// in view, such as messages of other channels, many of which come each
+// second in busy servers and each of which would redraw the window.
+func (u *ui) postSoon(f func()) {
+	u.mu.Lock()
+	if len(u.pending) == 0 {
+		u.pendingSince = time.Now()
+	}
+	u.pending = append(u.pending, f)
+	u.mu.Unlock()
+	if u.soonPending.CompareAndSwap(false, true) {
+		time.AfterFunc(500*time.Millisecond, func() {
+			u.soonPending.Store(false)
+			u.win.Invalidate()
+		})
+	}
 }
 
 // post runs f on the window's goroutine before the next frame. It is safe to

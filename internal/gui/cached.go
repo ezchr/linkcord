@@ -1,6 +1,8 @@
 package gui
 
 import (
+	"time"
+
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/state"
 	"github.com/ayn2op/ningen/v3"
@@ -36,8 +38,29 @@ func (c *chatView) can(chID discord.ChannelID, perms discord.Permissions) bool {
 }
 
 // cachedPerms are the user's permissions in a server channel, from the
-// cache; ok is false when something they depend on has not loaded yet.
+// cache; ok is false when something they depend on has not loaded yet. They
+// are worked out at most every second: each channel of the list asked each
+// frame, copying the channel, the server and its roles.
 func (c *chatView) cachedPerms(chID discord.ChannelID) (discord.Permissions, bool) {
+	if c.perms == nil {
+		c.perms = make(map[discord.ChannelID]cachedPerm)
+	}
+	if p, ok := c.perms[chID]; ok && time.Since(p.at) < time.Second {
+		return p.perms, p.ok
+	}
+	perms, ok := c.permsNow(chID)
+	c.perms[chID] = cachedPerm{at: time.Now(), perms: perms, ok: ok}
+	return perms, ok
+}
+
+// cachedPerm are permissions worked out at.
+type cachedPerm struct {
+	at    time.Time
+	perms discord.Permissions
+	ok    bool
+}
+
+func (c *chatView) permsNow(chID discord.ChannelID) (discord.Permissions, bool) {
 	ch, err := c.st.Cabinet.Channel(chID)
 	if err != nil || !ch.GuildID.IsValid() {
 		return 0, false
@@ -97,8 +120,40 @@ func (c *chatView) channelUnread(chID discord.ChannelID) ningen.UnreadIndication
 	return ningen.ChannelUnread
 }
 
+// guildBadge is what a server's icon shows of its channels, worked out at.
+type guildBadge struct {
+	at       time.Time
+	unread   ningen.UnreadIndication
+	mentions int
+}
+
+// guildBadgeFor is the unread mark and mentions of a server, worked out
+// again when something happens in it (see apply), or after 5 seconds: each
+// frame did it for every server, copying the channels of each, which in busy
+// servers redrawing often was most of the work of Linkcord.
+func (c *chatView) guildBadgeFor(guildID discord.GuildID) guildBadge {
+	if c.guildBadges == nil {
+		c.guildBadges = make(map[discord.GuildID]guildBadge)
+	}
+	if b, ok := c.guildBadges[guildID]; ok && time.Since(b.at) < 5*time.Second {
+		return b
+	}
+	b := guildBadge{at: time.Now(), unread: c.guildUnreadNow(guildID), mentions: c.guildMentionsNow(guildID)}
+	c.guildBadges[guildID] = b
+	return b
+}
+
 // guildUnread is ningen's GuildIsUnread from the cache.
 func (c *chatView) guildUnread(guildID discord.GuildID) ningen.UnreadIndication {
+	return c.guildBadgeFor(guildID).unread
+}
+
+// guildMentions is how many mentions wait in a server's channels.
+func (c *chatView) guildMentions(guildID discord.GuildID) int {
+	return c.guildBadgeFor(guildID).mentions
+}
+
+func (c *chatView) guildUnreadNow(guildID discord.GuildID) ningen.UnreadIndication {
 	chs, err := c.st.Cabinet.Channels(guildID)
 	if err != nil {
 		return ningen.ChannelRead
@@ -118,8 +173,7 @@ func (c *chatView) guildUnread(guildID discord.GuildID) ningen.UnreadIndication 
 	return ind
 }
 
-// guildMentions is how many mentions wait in a server's channels.
-func (c *chatView) guildMentions(guildID discord.GuildID) int {
+func (c *chatView) guildMentionsNow(guildID discord.GuildID) int {
 	chs, err := c.st.Cabinet.Channels(guildID)
 	if err != nil {
 		return 0

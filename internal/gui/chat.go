@@ -275,6 +275,15 @@ type chatView struct {
 	// presencePending reports whether a redraw for presence updates is
 	// already queued, so that busy servers do not flood the window.
 	presencePending atomic.Bool
+	// openChannel is the ID of the channel open, for the gateway's
+	// goroutine to tell what is in view.
+	openChannel atomic.Uint64
+	// guildBadges are the unread marks of servers, worked out lately; rels
+	// the relationships, read at relsAt.
+	guildBadges map[discord.GuildID]guildBadge
+	perms       map[discord.ChannelID]cachedPerm
+	rels        []discord.Relationship
+	relsAt      time.Time
 
 	// act is what can be done to messages: see actions.go.
 	act actionState
@@ -453,7 +462,7 @@ func (c *chatView) pump() {
 			case *authTokenRefreshEvent:
 				c.u.post(func() { c.u.tokenRefreshed(c.st, ev.Token) })
 			case *gateway.GuildMemberListUpdateEvent:
-				c.u.post(func() {
+				c.u.postSoon(func() {
 					if ch := c.selChannel; ch != nil && ch.GuildID == ev.GuildID && c.st.MemberState.ListID(ch) == ev.ID {
 						c.rebuildMembers()
 					}
@@ -462,7 +471,7 @@ func (c *chatView) pump() {
 				// Presences are read while laying out; one redraw at a time
 				// is enough for any number of updates.
 				if c.presencePending.CompareAndSwap(false, true) {
-					c.u.post(func() {
+					c.u.postSoon(func() {
 						c.presencePending.Store(false)
 						if ch := c.selChannel; ch != nil && ch.Type == discord.GroupDM {
 							c.rebuildMembers()
@@ -491,10 +500,67 @@ func (c *chatView) pump() {
 				*gateway.VoiceStateUpdateEvent, *gateway.GuildMembersChunkEvent,
 				*gateway.MessageReactionAddEvent, *gateway.MessageReactionRemoveEvent,
 				*gateway.MessageReactionRemoveAllEvent, *gateway.MessageReactionRemoveEmojiEvent:
-				c.u.post(func() { c.apply(ev) })
+				// What happens in a channel not open changes no more than
+				// its unread mark: it waits for a frame a little later.
+				if ch, ok := eventChannel(ev); ok && uint64(ch) != c.openChannel.Load() {
+					c.u.postSoon(func() { c.apply(ev) })
+				} else {
+					c.u.post(func() { c.apply(ev) })
+				}
 			}
 		}
 	}
+}
+
+// eventGuild is the server an event that changes unread marks happened in.
+func eventGuild(ev gateway.Event) (discord.GuildID, bool) {
+	var g discord.GuildID
+	switch ev := ev.(type) {
+	case *gateway.MessageCreateEvent:
+		g = ev.GuildID
+	case *gateway.MessageUpdateEvent:
+		g = ev.GuildID
+	case *gateway.MessageDeleteEvent:
+		g = ev.GuildID
+	case *read.UpdateEvent:
+		g = ev.GuildID
+	case *gateway.ChannelCreateEvent:
+		g = ev.GuildID
+	case *gateway.ChannelUpdateEvent:
+		g = ev.GuildID
+	case *gateway.ChannelDeleteEvent:
+		g = ev.GuildID
+	case *gateway.GuildCreateEvent:
+		g = ev.ID
+	case *gateway.GuildUpdateEvent:
+		g = ev.ID
+	}
+	return g, g.IsValid()
+}
+
+// eventChannel is the channel a message, typing or reaction event is of.
+func eventChannel(ev gateway.Event) (discord.ChannelID, bool) {
+	switch ev := ev.(type) {
+	case *gateway.MessageCreateEvent:
+		return ev.ChannelID, true
+	case *gateway.MessageUpdateEvent:
+		return ev.ChannelID, true
+	case *gateway.MessageDeleteEvent:
+		return ev.ChannelID, true
+	case *gateway.MessageDeleteBulkEvent:
+		return ev.ChannelID, true
+	case *gateway.TypingStartEvent:
+		return ev.ChannelID, true
+	case *gateway.MessageReactionAddEvent:
+		return ev.ChannelID, true
+	case *gateway.MessageReactionRemoveEvent:
+		return ev.ChannelID, true
+	case *gateway.MessageReactionRemoveAllEvent:
+		return ev.ChannelID, true
+	case *gateway.MessageReactionRemoveEmojiEvent:
+		return ev.ChannelID, true
+	}
+	return 0, false
 }
 
 func (c *chatView) close() {
@@ -1028,6 +1094,10 @@ func (c *chatView) apply(ev gateway.Event) {
 	}
 	sel := c.selChannel
 	defer c.recordRefreshEvent(ev)
+	// The unread mark of the server it happened in is worked out again.
+	if g, ok := eventGuild(ev); ok {
+		delete(c.guildBadges, g)
+	}
 	switch ev := ev.(type) {
 	case *gateway.MessageCreateEvent:
 		if sel != nil && ev.ChannelID == sel.ID {
@@ -1225,6 +1295,11 @@ func (c *chatView) update(gtx layout.Context) {
 }
 
 func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
+	if ch := c.selChannel; ch != nil {
+		c.openChannel.Store(uint64(ch.ID))
+	} else {
+		c.openChannel.Store(0)
+	}
 	c.trackPointer(gtx)
 	c.update(gtx)
 	c.updateUnreadKeys(gtx)
