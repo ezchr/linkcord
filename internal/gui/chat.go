@@ -1728,7 +1728,7 @@ func (c *chatView) layoutVoiceMember(gtx layout.Context, r channelRow, hovered b
 						return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
 					}
 					m := discord.Member{User: c.voiceUser(r)}
-					dims := c.layoutMemberName(gtx, &m, r.ch.GuildID, label(th, 14, col, r.label))
+					dims := c.layoutMemberName(gtx, &m, r.ch.GuildID, label(th, 14, col, r.label), false)
 					// The whole width, for what follows to stay at the right.
 					dims.Size.X = gtx.Constraints.Max.X
 					return dims
@@ -1834,6 +1834,7 @@ func (c *chatView) layoutUserPanel(gtx layout.Context) layout.Dimensions {
 											}
 											name := c.me.DisplayOrUsername()
 											col := colorHeader
+											roleColored := false
 											m := &discord.Member{User: c.me}
 											if guildID := c.selGuild; guildID.IsValid() {
 												if mm, err := c.st.Cabinet.Member(guildID, c.me.ID); err == nil {
@@ -1841,12 +1842,12 @@ func (c *chatView) layoutUserPanel(gtx layout.Context) layout.Dimensions {
 												}
 												name = c.memberName(guildID, c.me.ID, m)
 												if cl, ok := c.memberColor(guildID, c.me.ID); ok && cl != 0 && cl != discord.NullColor {
-													col = rgb(uint32(cl))
+													col, roleColored = rgb(uint32(cl)), true
 												}
 											}
 											return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													return c.layoutMemberName(gtx, m, c.selGuild, oneLine(bold(label(th, 14, col, name))))
+													return c.layoutMemberName(gtx, m, c.selGuild, oneLine(bold(label(th, 14, col, name))), roleColored)
 												}),
 												layout.Rigid(oneLine(label(th, 12, colorMuted, sub)).Layout),
 											)

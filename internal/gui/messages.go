@@ -267,9 +267,10 @@ func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
 	guildID := c.selChannel.GuildID
 	name := c.memberName(guildID, m.Author.ID, nil)
 	nameColor := colorHeader
+	roleColored := false
 	if guildID.IsValid() {
 		if col, ok := c.memberColor(guildID, m.Author.ID); ok && col != 0 && col != discord.NullColor {
-			nameColor = rgb(uint32(col))
+			nameColor, roleColored = rgb(uint32(col)), true
 		}
 	}
 
@@ -277,7 +278,7 @@ func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
 	// covers only the message.
 	return layout.Inset{Top: top - 2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		dims := c.layoutWithActions(gtx, m, func(gtx layout.Context) layout.Dimensions {
-			return c.layoutMessageBody(gtx, m, grouped, name, nameColor)
+			return c.layoutMessageBody(gtx, m, grouped, name, nameColor, roleColored)
 		})
 		// A double click on a message answers it.
 		if c.doubleClicked(gtx, c.rightTag("reply"+m.ID.String()), dims.Size) {
@@ -314,7 +315,7 @@ func (c *chatView) doubleClicked(gtx layout.Context, tag event.Tag, size image.P
 	return clicked
 }
 
-func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grouped bool, name string, nameColor colorT) layout.Dimensions {
+func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grouped bool, name string, nameColor colorT, roleColored bool) layout.Dimensions {
 	th := c.u.th
 	guildID := c.selChannel.GuildID
 	bottom := unit.Dp(2)
@@ -363,7 +364,7 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 								cl := c.msgClick(m.ID, 1)
 								return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 									pointer.CursorPointer.Add(gtx.Ops)
-									dims := styledName(gtx, oneLine(bold(label(th, 15, nameColor, name))), m.Author)
+									dims := styledName(gtx, oneLine(bold(label(th, 15, nameColor, name))), m.Author, roleColored)
 									if cl.Hovered() {
 										// Underline the name like a link.
 										paint.FillShape(gtx.Ops, nameColor, clip.Rect{Min: image.Pt(0, dims.Size.Y-gtx.Dp(2)), Max: image.Pt(dims.Size.X, dims.Size.Y-gtx.Dp(1))}.Op())

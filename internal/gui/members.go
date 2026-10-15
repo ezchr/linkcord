@@ -214,12 +214,13 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 		}
 		name := cmp.Or(m.Nick, m.User.DisplayOrUsername())
 		nameColor := colorText
+		roleColored := false
 		if guildID.IsValid() && !c.u.app.NoRoleColors {
 			if col, ok := state.MemberColor(m, func(id discord.RoleID) *discord.Role {
 				role, _ := c.st.Cabinet.Role(guildID, id)
 				return role
 			}); ok && col != 0 && col != discord.NullColor {
-				nameColor = rgb(uint32(col))
+				nameColor, roleColored = rgb(uint32(col)), true
 			}
 		}
 		offline := status == discord.OfflineStatus || status == discord.InvisibleStatus
@@ -254,7 +255,7 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 						col := nameColor
 						rows := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return c.layoutMemberName(gtx, m, guildID, label(th, 15, col, name))
+							return c.layoutMemberName(gtx, m, guildID, label(th, 15, col, name), roleColored)
 						})}
 						if !offline {
 							if line := activityLine(presence); line != "" {
@@ -331,7 +332,7 @@ func (c *chatView) memberItem(gtx layout.Context, m *discord.Member, w func(gtx 
 
 // layoutMemberName is the name of a member, cut short to leave room for the
 // tag of the server they wear and the gem of those who boost the server.
-func (c *chatView) layoutMemberName(gtx layout.Context, m *discord.Member, guildID discord.GuildID, name material.LabelStyle) layout.Dimensions {
+func (c *chatView) layoutMemberName(gtx layout.Context, m *discord.Member, guildID discord.GuildID, name material.LabelStyle, roleColored bool) layout.Dimensions {
 	var after []layout.Widget
 	// Bots are marked as in the chat, and who uses Linkcord with its logo.
 	if m.User.Bot {
@@ -368,7 +369,7 @@ func (c *chatView) layoutMemberName(gtx layout.Context, m *discord.Member, guild
 	ngtx.Constraints.Min = image.Point{}
 	ngtx.Constraints.Max.X = max(gtx.Constraints.Max.X-used, 0)
 	macro := op.Record(gtx.Ops)
-	ndims := styledName(ngtx, oneLine(name), m.User)
+	ndims := styledName(ngtx, oneLine(name), m.User, roleColored)
 	nameCall := macro.Stop()
 	height := ndims.Size.Y
 	for _, s := range sizes {

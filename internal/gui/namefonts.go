@@ -119,8 +119,9 @@ func nameFontLoaded(id int) bool { return fontsLoaded.Load()&needName(id) != 0 }
 
 // styledName draws l, a name, as user chose with Nitro: in their font, once
 // it is loaded, and in their colors, a gradient between the first two for
-// the gradient effect. Names without a style are drawn as they are.
-func styledName(gtx layout.Context, l material.LabelStyle, user discord.User) layout.Dimensions {
+// the gradient effect, unless roleColored: the color of their role in the
+// server wins, as on Discord. Names without a style are drawn as they are.
+func styledName(gtx layout.Context, l material.LabelStyle, user discord.User, roleColored bool) layout.Dimensions {
 	st := user.DisplayNameStyles
 	if st == nil {
 		return l.Layout(gtx)
@@ -131,7 +132,7 @@ func styledName(gtx layout.Context, l material.LabelStyle, user discord.User) la
 			l.Font = font.Font{Typeface: nameTypeface(st.FontID)}
 		}
 	}
-	if len(st.Colors) == 0 {
+	if len(st.Colors) == 0 || roleColored {
 		return l.Layout(gtx)
 	}
 	first := nameRGB(st.Colors[0], l.Color.A)
