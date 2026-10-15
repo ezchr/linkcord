@@ -510,7 +510,8 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 		}
 		// An animated banner, whose hash starts with a_, is a GIF, which moves.
 		ext := func(hash string) string {
-			if strings.HasPrefix(hash, "a_") {
+			// Performance Mode keeps it still.
+			if strings.HasPrefix(hash, "a_") && !c.u.images.lowPower {
 				return ".gif?size=600"
 			}
 			return ".png?size=600"
@@ -1368,7 +1369,7 @@ func (c *chatView) layoutSelfMenu(gtx layout.Context, p *profileView) layout.Dim
 					}
 					return dot(gtx, col, 10)
 				}, performanceText, colorText, false),
-				layout.Rigid(label(th, 11, colorMuted, "On uses still GIF/APNG previews.").Layout),
+				layout.Rigid(label(th, 11, colorMuted, "On keeps animations still and draws less often.").Layout),
 				item(&p.copyID, func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconCopy, 18, colorMuted) }, copyTxt, colorText, false),
 				item(&p.quit, func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconQuit, 18, colorMuted) }, "Quit "+appName, colorText, false),
 				item(&p.logout, func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconLogout, 18, colorRed) }, "Log out", colorRed, false),

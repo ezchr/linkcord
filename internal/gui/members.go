@@ -245,7 +245,7 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 						// The frame moves only under the pointer, as on
 						// Discord: a list of moving frames keeps redrawing.
 						if d := m.User.AvatarDecoration; d != nil && d.Asset != "" {
-							c.u.decoration(gtx, d.URL(hovered), dims.Size.X)
+							c.u.decoration(gtx, d.URL(hovered && !c.u.images.lowPower), dims.Size.X)
 						}
 						statusDot(gtx, status, dims.Size.X, bg)
 						return dims
@@ -300,7 +300,7 @@ func (c *chatView) memberItem(gtx layout.Context, m *discord.Member, w func(gtx 
 					// It moves under the pointer, as on Discord, from the
 					// still picture until the moving one is ready.
 					var img *paint.ImageOp
-					if hovered {
+					if hovered && !c.u.images.lowPower {
 						img = c.u.images.frame(gtx, col.Nameplate.VideoURL()+"#"+gifVideoFragment, gtx.Dp(480))
 					}
 					if img == nil {

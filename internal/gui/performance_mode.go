@@ -5,7 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
+
+// lowPowerFrame is the shortest time between two frames in Performance
+// Mode.
+const lowPowerFrame = time.Second / 30
 
 type performanceSettings struct {
 	Enabled bool `json:"enabled"`

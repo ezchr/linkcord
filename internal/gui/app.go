@@ -131,6 +131,8 @@ type ui struct {
 	screen  screen
 	login   *loginView
 	chat    *chatView
+	// lastFrame is when the last frame was drawn, for Performance Mode.
+	lastFrame time.Time
 	startup startupState
 
 	// focused reports whether the window has the keyboard focus.
@@ -314,6 +316,15 @@ func (u *ui) loop() error {
 				}
 			}
 		case app.FrameEvent:
+			// Performance Mode draws at most 30 pictures a second: what
+			// moves, scrolling included, costs half as much of a fast
+			// screen's.
+			if u.images != nil && u.images.lowPower {
+				if wait := lowPowerFrame - time.Since(u.lastFrame); wait > 0 {
+					time.Sleep(wait)
+				}
+				u.lastFrame = time.Now()
+			}
 			start := time.Now()
 			u.runPending()
 			pending := time.Since(start)

@@ -36,7 +36,11 @@ func (c *chatView) previewFor(key string) string {
 		p = new(streamPreview)
 		c.previews[key] = p
 	}
-	if !p.asking && time.Since(p.asked) > time.Minute && !c.demo {
+	every := time.Minute
+	if c.u.images.lowPower {
+		every = 5 * time.Minute
+	}
+	if !p.asking && time.Since(p.asked) > every && !c.demo {
 		p.asking, p.asked = true, time.Now()
 		go func() {
 			res, err := c.st.Client.RequestJSON[struct {

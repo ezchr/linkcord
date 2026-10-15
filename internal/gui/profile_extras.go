@@ -38,7 +38,8 @@ func (c *chatView) animatedAvatarURL(guildID discord.GuildID, user discord.User)
 			hash, url = m.Avatar, m.AvatarURLWithType(discord.PNGImage, guildID)
 		}
 	}
-	if strings.HasPrefix(hash, "a_") {
+	// Performance Mode keeps it still.
+	if strings.HasPrefix(hash, "a_") && !c.u.images.lowPower {
 		url = strings.Replace(url, ".png", ".gif", 1)
 	}
 	return cdnSize(url)
@@ -53,7 +54,7 @@ func (c *chatView) layoutCardAvatar(gtx layout.Context, p *profileView, user dis
 		deco = p.data.User.AvatarDecoration
 	}
 	if deco != nil && deco.Asset != "" {
-		c.u.decoration(gtx, deco.URL(true), dims.Size.X)
+		c.u.decoration(gtx, deco.URL(!c.u.images.lowPower), dims.Size.X)
 	}
 	statusDot(gtx, c.status(p.guildID, user.ID), dims.Size.X, ring)
 	return dims
