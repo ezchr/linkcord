@@ -181,6 +181,8 @@ type Session struct {
 	// sent counts the voice packets sent since the last report, and failed
 	// those that could not be; failedAt is when one last failed to be logged.
 	sent, failed atomic.Uint64
+	// received counts the packets heard and decrypted.
+	received atomic.Uint64
 	failedAt     time.Time
 }
 
@@ -436,6 +438,7 @@ func (s *Session) Join(channelID discord.ChannelID) (err error) {
 		go s.receive(session)
 		go s.send(session)
 		go s.report()
+		go s.watchDevices()
 	}
 
 	if err := s.setDevices(true, false); err != nil {
@@ -654,6 +657,7 @@ func (s *Session) receive(session *voice.Session) {
 		speaker.user = user
 		s.stateMu.Unlock()
 		heard, failed = time.Now(), 0
+		s.received.Add(1)
 		s.clips.record(user, packet.Opus)
 
 		if err := speaker.write(packet.Sequence(), packet.Opus); err != nil {
@@ -690,15 +694,43 @@ func (s *Session) rejoin() {
 	}
 }
 
+// watchDevices starts again, every two seconds, the microphone or speakers
+// in use if they stopped, as one does when Windows loses it for a moment, a
+// headset going to sleep or its driver resetting: everyone would otherwise
+// stay silent until the voice channel is joined again.
+func (s *Session) watchDevices() {
+	for range time.Tick(2 * time.Second) {
+		if !s.Status().Joined {
+			continue
+		}
+		s.mu.Lock()
+		restart := func(device **malgo.Device, kind malgo.DeviceType, id string, data func(output, input []byte), name string) {
+			if *device == nil || (*device).IsStarted() {
+				return
+			}
+			(*device).Uninit()
+			*device = nil
+			err := setDevice(device, true, kind, id, data)
+			slog.Warn("the "+name+" stopped; started it again", "err", err)
+		}
+		restart(&s.playback, malgo.Playback, s.output, s.mix, "speakers")
+		restart(&s.capture, malgo.Capture, s.input, s.captured, "microphone")
+		s.mu.Unlock()
+	}
+}
+
 // report logs, every minute in a voice channel, what was sent and how it
 // was encrypted, which tells why the others would not hear the user.
 func (s *Session) report() {
 	for range time.Tick(time.Minute) {
-		sent, failed := s.sent.Swap(0), s.failed.Swap(0)
+		sent, failed, received := s.sent.Swap(0), s.failed.Swap(0), s.received.Swap(0)
 		if !s.Status().Joined {
 			continue
 		}
-		args := []any{"sent", sent, "failed", failed}
+		s.mu.Lock()
+		playing := s.playback != nil && s.playback.IsStarted()
+		s.mu.Unlock()
+		args := []any{"sent", sent, "failed", failed, "received", received, "playing", playing}
 		if e2ee := s.e2ee.Load(); e2ee != nil {
 			st, stats := e2ee.State(), e2ee.Stats()
 			args = append(args, "dave_ready", st.Ready, "dave_epoch", st.EpochID, "dave_version", st.ProtocolVersion,
