@@ -47,9 +47,12 @@ type media struct {
 	lastTS   uint32
 	lastSent time.Time
 	buf      []byte
-	// noExtension leaves the playout delay extension out of the video, as
-	// for a stream only Linkcord shows.
+	// noExtension leaves the header extension out of the video, as for a
+	// stream only Linkcord shows.
 	noExtension bool
+	// transportSeq numbers the video and RTX packets for the transport-wide
+	// congestion control extension.
+	transportSeq uint16
 
 	// keyframe is sent to when a receiver asks for a keyframe.
 	keyframe chan struct{}
@@ -195,7 +198,7 @@ func (m *media) sendFrame(frame []byte, ts uint32) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	nals := splitNALs(frame)
-	header := make([]byte, 12, 16)
+	header := make([]byte, 12, 12+4)
 	payload := make([]byte, 0, mtu+8)
 	sent := 0
 	send := func(last bool, p []byte) error {
@@ -339,28 +342,39 @@ func splitNALs(frame []byte) [][]byte {
 	return nals
 }
 
-// playoutDelay is the one element of the video's header extension, as
-// Discord's clients and bots send it: the playout delay (ID 5, three bytes)
-// at zero, for as little buffering as can be. Discord's own clients do not
-// show a stream whose packets lack it.
-var playoutDelay = []byte{5<<4 | 2, 0, 0, 0}
+// The video's header extension carries what Discord's own clients send, and
+// Discord's servers expect: abs-send-time (ID 3, three bytes) and the
+// transport-wide sequence number (ID 5, two bytes), counted over every
+// video and RTX packet, then a byte of padding to fill the second word.
+const (
+	extAbsSendTime   = 3
+	extTransportSeq  = 5
+	extensionElement = 8
+)
 
 // withExtension marks the 12-byte video header as extended and adds the
-// extension's own header (the one-byte profile, one word long), which stay
-// readable; extended puts the extension's element before the payload, which
-// is encrypted with it.
+// extension's own header (the one-byte profile, two words long), which stay
+// readable; extended puts the extension's elements before the payload, which
+// is encrypted with them.
 func (m *media) withExtension(header []byte) []byte {
 	if m.noExtension {
 		return header
 	}
 	header[0] |= 0x10
-	return append(header, 0xBE, 0xDE, 0, 1)
+	return append(header, 0xBE, 0xDE, 0, extensionElement/4)
 }
 
 func (m *media) extended(p []byte) []byte {
 	if m.noExtension {
 		return p
 	}
-	out := make([]byte, 0, len(playoutDelay)+len(p))
-	return append(append(out, playoutDelay...), p...)
+	// abs-send-time is seconds in 6.18 fixed point, its low 24 bits.
+	now := uint64(time.Now().UnixNano())
+	abs := uint32((now << 18) / uint64(time.Second))
+	seq := m.transportSeq
+	m.transportSeq++
+	out := make([]byte, 0, extensionElement+len(p))
+	out = append(out, extAbsSendTime<<4|2, byte(abs>>16), byte(abs>>8), byte(abs))
+	out = append(out, extTransportSeq<<4|1, byte(seq>>8), byte(seq), 0)
+	return append(out, p...)
 }

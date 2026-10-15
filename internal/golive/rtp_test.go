@@ -62,6 +62,7 @@ func TestRoundTrip(t *testing.T) {
 	var rebuilt []byte
 	var fu []byte
 	marker := false
+	var transportSeq uint16
 	buf := make([]byte, 2048)
 	l.SetReadDeadline(time.Now().Add(2 * time.Second))
 	for !marker {
@@ -70,12 +71,12 @@ func TestRoundTrip(t *testing.T) {
 			t.Fatal(err)
 		}
 		pkt := buf[:n]
-		// Extended, with the playout delay extension, as Discord's clients
-		// wait for: its header readable, its element encrypted.
+		// Extended as Discord's clients send video: the extension's header
+		// readable, its elements encrypted.
 		if pkt[0] != 0x90 || pkt[1]&0x7F != payloadH264 || binary.BigEndian.Uint32(pkt[8:]) != 1234 || binary.BigEndian.Uint32(pkt[4:]) != 9000 {
 			t.Fatalf("bad RTP header % x", pkt[:12])
 		}
-		if !bytes.Equal(pkt[12:16], []byte{0xbe, 0xde, 0, 1}) {
+		if !bytes.Equal(pkt[12:16], []byte{0xbe, 0xde, 0, 2}) {
 			t.Fatalf("bad extension header % x", pkt[12:16])
 		}
 		marker = pkt[1]&0x80 != 0
@@ -85,10 +86,14 @@ func TestRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatal("transport decryption:", err)
 		}
-		if !bytes.Equal(payload[:4], playoutDelay) {
-			t.Fatalf("bad extension element % x", payload[:4])
+		if payload[0] != extAbsSendTime<<4|2 || payload[4] != extTransportSeq<<4|1 || payload[7] != 0 {
+			t.Fatalf("bad extension elements % x", payload[:8])
 		}
-		payload = payload[4:]
+		if seq := binary.BigEndian.Uint16(payload[5:]); seq != transportSeq {
+			t.Fatalf("transport-wide sequence %d, want %d", seq, transportSeq)
+		}
+		transportSeq++
+		payload = payload[8:]
 		if payload[0]&0x1F == 28 {
 			if payload[1]&0x80 != 0 {
 				fu = []byte{payload[0]&0xE0 | payload[1]&0x1F}
