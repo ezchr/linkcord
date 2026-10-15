@@ -3,7 +3,9 @@ package gui
 import (
 	"context"
 	"fmt"
+	"gioui.org/gesture"
 	"image"
+	"log/slog"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -32,6 +34,9 @@ type streamWatch struct {
 	shown *image.RGBA
 	// buttons are the "Watch Stream" buttons, by streamer.
 	buttons map[discord.UserID]*widget.Clickable
+	// hover is the pointer over the stream, which shows its size and
+	// pictures a second.
+	hover gesture.Hover
 }
 
 // iconStopWatching is the button that stops watching a stream.
@@ -125,6 +130,7 @@ func (c *chatView) startWatching(vs discord.VoiceState) {
 			}
 			started.SetAudioMuted(c.streamMuted[vs.UserID])
 			started.SetClipLength(time.Duration(u.app.StreamClipMinutes) * time.Minute)
+			go c.watchStall(started, vs)
 		})
 	}()
 }
@@ -134,7 +140,7 @@ func (c *chatView) stopWatching() {
 	if w := c.watch.w; w != nil {
 		go w.Stop()
 	}
-	c.watch = streamWatch{buttons: c.watch.buttons}
+	c.watch = streamWatch{buttons: c.watch.buttons, hover: c.watch.hover}
 }
 
 // watchedFrame is the picture of the watched stream of id, or nil.
@@ -187,11 +193,22 @@ func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, 
 		b := frame.Size()
 		scale := min(float32(size.X)/float32(b.X), float32(size.Y)/float32(b.Y)) / gtx.Metric.PxPerDp
 		widget.Image{Src: *frame, Fit: widget.Contain, Scale: scale}.Layout(igtx)
-		c.layoutStreamInfo(gtx)
+		if c.watch.hover.Update(gtx.Source) {
+			c.layoutStreamInfo(gtx)
+		}
+		area := clip.Rect{Max: size}.Push(gtx.Ops)
+		pass := pointer.PassOp{}.Push(gtx.Ops)
+		c.watch.hover.Add(gtx.Ops)
+		pass.Pop()
+		area.Pop()
 		if ids, ok := c.streamViewers(vs); ok && len(ids) > 0 {
 			t := op.Offset(image.Pt(gtx.Dp(10), gtx.Dp(10))).Push(gtx.Ops)
 			m := op.Record(gtx.Ops)
-			d := layout.UniformInset(unit.Dp(6)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			// As small as the viewers, not the card: its backing would
+			// otherwise darken the whole stream.
+			vgtx := gtx
+			vgtx.Constraints.Min = image.Point{}
+			d := layout.UniformInset(unit.Dp(6)).Layout(vgtx, func(gtx layout.Context) layout.Dimensions {
 				return c.layoutStreamViewers(gtx, vs.GuildID, ids)
 			})
 			call := m.Stop()
@@ -298,4 +315,28 @@ func (c *chatView) saveStreamClip(d time.Duration) {
 			showInFolder(out)
 		})
 	}()
+}
+
+// watchStall watches the stream again when its video stopped coming for a
+// while, unpaused, as the stream server sometimes stops sending to one
+// viewer: joining it again is what brings it back.
+func (c *chatView) watchStall(w *golive.Watch, vs discord.VoiceState) {
+	t := time.NewTicker(2 * time.Second)
+	defer t.Stop()
+	for range t.C {
+		stalled := w.Stalled()
+		if stalled < 6*time.Second {
+			if w.Ended() {
+				return
+			}
+			continue
+		}
+		slog.Warn("the stream stopped coming; watching it again", "streamer", vs.UserID, "for", stalled)
+		c.u.post(func() {
+			if c.watch.w == w {
+				c.startWatching(vs)
+			}
+		})
+		return
+	}
 }

@@ -76,6 +76,10 @@ type Watch struct {
 	// inspected counts the packets logged to see how they are built.
 	inspected atomic.Int64
 	padded    atomic.Int64
+	// lastPacket is when the last video packet came, in Unix nanoseconds,
+	// and paused whether the streamer paused the stream.
+	lastPacket atomic.Int64
+	paused     atomic.Bool
 	// overflows are pictures the decoder had no room for; keyframes are
 	// the keyframe requests sent; deepest is the longest decode queue seen
 	// since the last log.
@@ -222,6 +226,7 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 		p.Subscribe(func(ev *StreamCreateEvent) {
 			if ev.StreamKey == w.key {
 				w.log.Info("stream create", "rtc_server", ev.RTCServerID, "rtc_channel", ev.RTCChannelID, "paused", ev.Paused, "viewers", len(ev.ViewerIDs))
+				w.paused.Store(ev.Paused)
 				w.mu.Lock()
 				w.created = true
 				w.mu.Unlock()
@@ -229,6 +234,11 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 				case created <- ev:
 				default:
 				}
+			}
+		}),
+		p.Subscribe(func(ev *StreamUpdateEvent) {
+			if ev.StreamKey == w.key {
+				w.paused.Store(ev.Paused)
 			}
 		}),
 		p.Subscribe(func(ev *StreamServerUpdateEvent) {
@@ -770,6 +780,7 @@ func (w *Watch) receive() {
 			continue
 		}
 		w.packets.Add(1)
+		w.lastPacket.Store(time.Now().UnixNano())
 		if hdr[0]&0x20 != 0 {
 			w.padded.Add(1)
 		}
@@ -1270,5 +1281,25 @@ func (w *Watch) teardown() {
 	}
 	if audio != nil {
 		audio.stop()
+	}
+}
+
+// Stalled reports how long no video has come while the stream is not
+// paused, 0 if it comes or before the first packet.
+func (w *Watch) Stalled() time.Duration {
+	last := w.lastPacket.Load()
+	if last == 0 || w.paused.Load() {
+		return 0
+	}
+	return time.Since(time.Unix(0, last))
+}
+
+// Ended reports whether watching ended.
+func (w *Watch) Ended() bool {
+	select {
+	case <-w.done:
+		return true
+	default:
+		return false
 	}
 }
