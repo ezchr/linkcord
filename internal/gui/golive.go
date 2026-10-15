@@ -40,6 +40,8 @@ type streamPicker struct {
 	chosen  int
 	height  int
 	fps     int
+	// changing reports whether it chooses what an ongoing stream shares.
+	changing bool
 
 	sound widget.Clickable
 	// everyone and linkcordOnly choose who can watch.
@@ -169,12 +171,21 @@ func (c *chatView) updateStreamPicker(gtx layout.Context) {
 			sp.fps = streamFPS[i]
 		}
 	}
-	if sp.goLive.Clicked(gtx) && sp.chosen >= 0 && sp.chosen < len(sp.sources) {
+	if sp.goLive.Clicked(gtx) && len(sp.sources) > 0 {
+		// Nothing chosen shares the whole screen: the main one.
+		chosen := sp.chosen
+		if chosen < 0 || chosen >= len(sp.sources) {
+			chosen = mainScreen(sp.sources)
+		}
+		sp.open = false
+		if sp.changing && c.u.streaming() {
+			c.changeStream(sp.sources[chosen])
+			return
+		}
 		settings := c.u.voiceSettings()
 		settings.StreamHeight, settings.StreamFPS = sp.height, sp.fps
 		c.u.saveVoiceSettings()
-		sp.open = false
-		c.startStream(sp.sources[sp.chosen], golive.Quality{Height: sp.height, FPS: sp.fps})
+		c.startStream(sp.sources[chosen], golive.Quality{Height: sp.height, FPS: sp.fps})
 	}
 }
 
@@ -268,10 +279,14 @@ func (c *chatView) layoutStreamPicker(gtx layout.Context) {
 							layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 								bg := colorAccent
-								if sp.chosen < 0 {
+								if sp.loading || len(sp.sources) == 0 {
 									bg = withAlpha(colorAccent, 0x60)
 								}
-								return button(gtx, th, &sp.goLive, bg, "Go Live")
+								text := "Go Live"
+								if sp.changing {
+									text = "Change Stream"
+								}
+								return button(gtx, th, &sp.goLive, bg, text)
 							}),
 						)
 					})
@@ -565,6 +580,10 @@ func (c *chatView) screenShareClicked() {
 				u.toggleStreamSound()
 				c.menu.stay = true
 			}},
+			{text: "Change Stream", act: func() {
+				c.openStreamPicker()
+				u.voice.picker.changing = true
+			}},
 			{sep: true},
 			{text: "Stop Streaming", col: colorRed, act: u.stopStream},
 		}
@@ -740,4 +759,47 @@ func liveBadge(gtx layout.Context, th *material.Theme) layout.Dimensions {
 		return layout.Inset{Left: unit.Dp(4), Right: unit.Dp(4), Top: unit.Dp(1), Bottom: unit.Dp(1)}.Layout(gtx,
 			bold(label(th, 10, colorHeader, "LIVE")).Layout)
 	})
+}
+
+// changeStream shares src in place of what the stream shares, without
+// ending it.
+func (c *chatView) changeStream(src golive.Source) {
+	u := c.u
+	v := &u.voice
+	if v.demoStream != nil {
+		v.demoStream = src.Thumb
+		return
+	}
+	s := v.stream
+	if s == nil {
+		return
+	}
+	go func() {
+		err := s.SetSource(src)
+		u.post(func() {
+			if err != nil {
+				u.voiceFailed("Could not change the stream", err)
+				return
+			}
+			u.voiceInfo("Your stream changed")
+		})
+	}()
+}
+
+// mainScreen is the index of the main screen of sources, or of the first
+// screen, or 0.
+func mainScreen(sources []golive.Source) int {
+	first := -1
+	for i, s := range sources {
+		if s.Kind != golive.Screen {
+			continue
+		}
+		if s.Primary {
+			return i
+		}
+		if first < 0 {
+			first = i
+		}
+	}
+	return max(first, 0)
 }

@@ -40,8 +40,10 @@ type Stream struct {
 	// previewW is how wide the preview is shown, in pixels, for it to be
 	// made as wide.
 	previewW atomic.Int32
-	// keyframe asks the loop for a keyframe.
+	// keyframe asks the loop for a keyframe, and source to share another
+	// screen or window.
 	keyframe chan struct{}
+	source   chan *capturer
 
 	mu      sync.Mutex
 	viewers []discord.UserID
@@ -70,6 +72,7 @@ func Start(ctx context.Context, p Params) (*Stream, error) {
 		log:       slog.Default().With("stream", StreamKey(p.GuildID, p.ChannelID, p.UserID)),
 		done:      make(chan struct{}),
 		keyframe:  make(chan struct{}, 1),
+		source:    make(chan *capturer, 1),
 		seen:      make(map[string]bool),
 		connected: make(map[discord.UserID]bool),
 	}
@@ -356,7 +359,15 @@ func (s *Stream) requestKeyframe() {
 // loop captures, encodes, encrypts and sends pictures until the stream
 // stops.
 func (s *Stream) loop(capt *capturer) {
-	defer capt.close()
+	defer func() {
+		capt.close()
+		// One handed over as the stream ended is not shared.
+		select {
+		case next := <-s.source:
+			next.close()
+		default:
+		}
+	}()
 	fps := max(s.p.Quality.FPS, 1)
 	tick := time.NewTicker(time.Second / time.Duration(fps))
 	defer tick.Stop()
@@ -406,6 +417,17 @@ func (s *Stream) loop(capt *capturer) {
 				"passthrough", ds.PassthroughFrames, "encrypt_failures", ds.EncryptFailures,
 				"rtcp_in", s.med.rtcpSummary(), "packets", s.med.packetCount())
 			frames, idrs, empty, failed, bytes, encodeTime = 0, 0, 0, 0, 0, 0
+			continue
+		case next := <-s.source:
+			capt.close()
+			capt = next
+			s.log.Info("stream capturing", "with", capt.method())
+			// The new picture starts afresh, with a keyframe, and at its
+			// own size if that differs, which a new encoder takes care of.
+			if enc != nil {
+				enc.forceIDR()
+			}
+			haveLast, wantFrame = false, true
 			continue
 		case <-s.keyframe:
 			if enc != nil {
@@ -687,4 +709,32 @@ func (s *Stream) encrypt(pic []byte) ([]byte, error) {
 		}
 	}
 	return nil, errors.New("golive: could not veil a picture")
+}
+
+// SetSource shares src in place of what is shared, without ending the
+// stream, and moves the sound along with it.
+func (s *Stream) SetSource(src Source) error {
+	if s.stopped.Load() {
+		return errors.New("golive: the stream ended")
+	}
+	capt := newCapturer(src, true)
+	if _, _, gone := capt.grab(); gone {
+		capt.close()
+		return ErrSourceGone
+	}
+	select {
+	case old := <-s.source:
+		old.close()
+	default:
+	}
+	s.source <- capt
+	s.mu.Lock()
+	sound := s.soundStop != nil
+	s.p.Source = src
+	s.mu.Unlock()
+	if sound {
+		s.SetSound(false)
+		s.SetSound(true)
+	}
+	return nil
 }
