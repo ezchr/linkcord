@@ -189,6 +189,7 @@ type generalView struct {
 	roleColors                               widget.Clickable
 	ghostBtn, ghostTypingBtn, editOthersBtn  widget.Clickable
 	gamesBtn                                 widget.Clickable
+	fakeMuteBtn, fakeDeafenBtn               widget.Clickable
 	font                                     fontView
 	startup, minimized, tray                 widget.Clickable
 	langs                                    [2]widget.Clickable
@@ -296,6 +297,14 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 		if !c.demo {
 			c.pushPresence()
 		}
+	}
+	if g.fakeMuteBtn.Clicked(gtx) {
+		u.voice.fakeMute = !u.voice.fakeMute
+		u.applyFake()
+	}
+	if g.fakeDeafenBtn.Clicked(gtx) {
+		u.voice.fakeDeafen = !u.voice.fakeDeafen
+		u.applyFake()
 	}
 	if g.ghostTypingBtn.Clicked(gtx) {
 		u.app.GhostTyping = !u.app.GhostTyping
@@ -425,6 +434,16 @@ func (c *chatView) featureRows() []layout.Widget {
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.gamesBtn, "Show Games You Play",
 				"Games Discord knows show on your profile while they run, as Discord's app shows them, from Discord's own list of games, updated daily.", !c.u.app.NoGameDetection)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.fakeMuteBtn, "Fake Mute",
+				"In voice channels the others see you muted, while what you say still reaches them. Off again when Linkcord closes.", c.u.voice.fakeMute)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.fakeDeafenBtn, "Fake Deafen",
+				"In voice channels the others see you deafened, while you still hear them, and they you unless muted. Off again when Linkcord closes.", c.u.voice.fakeDeafen)
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {

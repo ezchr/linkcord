@@ -64,6 +64,9 @@ type voiceState struct {
 	// muted and deafened are what the user chose with the buttons, which also
 	// apply to the next call joined.
 	muted, deafened bool
+	// fakeMute and fakeDeafen show the user muted or deafened to the others
+	// while they are not, until Linkcord closes.
+	fakeMute, fakeDeafen bool
 
 	// settings are how loud each user is played and the devices chosen,
 	// kept between runs once loaded.
@@ -528,6 +531,7 @@ func (c *chatView) joinVoice(ch discord.Channel) {
 	}
 	s := u.voiceSession(c.st)
 	muted, deafened := u.voice.muted, u.voice.deafened
+	fakeMute, fakeDeafen := u.voice.fakeMute, u.voice.fakeDeafen
 	canSpeak := !ch.GuildID.IsValid() || c.can(ch.ID, discord.PermissionSpeak|discord.PermissionUseVAD)
 	go func() {
 		// Joining leaves the user muted; the buttons' choice applies after.
@@ -537,6 +541,9 @@ func (c *chatView) joinVoice(ch discord.Channel) {
 		}
 		if err == nil && deafened {
 			err = s.Toggle(true)
+		}
+		if err == nil && (fakeMute || fakeDeafen) {
+			err = s.SetFake(fakeMute, fakeDeafen)
 		}
 		if err != nil {
 			u.post(func() { u.voiceFailed("Could not join "+ch.Name, err) })
@@ -615,6 +622,27 @@ func (u *ui) toggleVoice(deafen bool) {
 	}
 }
 
+// applyFake shows the user to the others as muted or deafened, or not, as
+// they pretend.
+func (u *ui) applyFake() {
+	v := &u.voice
+	if v.demoChannel.IsValid() && u.chat != nil {
+		ch, err := u.chat.st.Cabinet.Channel(v.demoChannel)
+		if err == nil {
+			u.chat.demoVoice(*ch)
+		}
+		return
+	}
+	if s := v.session; s != nil {
+		mute, deafen := v.fakeMute, v.fakeDeafen
+		go func() {
+			if err := s.SetFake(mute, deafen); err != nil {
+				u.post(func() { u.voiceFailed("Could not change how others see you", err) })
+			}
+		}()
+	}
+}
+
 // demoVoice puts the user in ch in the demo, or in no voice channel if ch is
 // the zero channel, as Discord would report it.
 func (c *chatView) demoVoice(ch discord.Channel) {
@@ -628,7 +656,7 @@ func (c *chatView) demoVoice(ch discord.Channel) {
 	if ch.ID.IsValid() {
 		c.st.Cabinet.VoiceStateSet(ch.GuildID, &discord.VoiceState{
 			GuildID: ch.GuildID, ChannelID: ch.ID, UserID: c.me.ID,
-			SelfMute: u.voice.muted, SelfDeaf: u.voice.deafened,
+			SelfMute: u.voice.muted || u.voice.fakeMute || u.voice.fakeDeafen, SelfDeaf: u.voice.deafened || u.voice.fakeDeafen,
 		}, false)
 	}
 	c.rebuildRows()

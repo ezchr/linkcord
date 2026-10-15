@@ -88,6 +88,7 @@ func (*Player) Play(discord.AttachmentID, []byte) error   { return errNoVoice }
 func (*Player) Seek(time.Duration) error                  { return nil }
 
 func (*Session) SetMuteDeafen(bool, bool) error { return nil }
+func (*Session) SetFake(bool, bool) error       { return nil }
 
 // Recorder records nothing.
 type Recorder struct{}

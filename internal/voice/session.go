@@ -174,6 +174,8 @@ type Session struct {
 	// come in saturated.
 	clips     clipBuffer
 	autoLevel atomic.Bool
+	// fake is what the user pretends to the others, if anything.
+	fake atomic.Pointer[fakeState]
 
 	// e2ee encrypts end to end in the voice channel joined, made anew by
 	// each voice server; it is kept for the log.
@@ -542,12 +544,7 @@ func (s *Session) Toggle(deafen bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	return s.state.SendGateway(ctx, &gateway.UpdateVoiceStateCommand{
-		GuildID:   channel.GuildID,
-		ChannelID: channel.ID,
-		SelfMute:  mute,
-		SelfDeaf:  deafen,
-	})
+	return s.state.SendGateway(ctx, s.voiceState(channel.GuildID, channel.ID, mute, deafen))
 }
 
 // SetMuteDeafen mutes and deafens the user, or not, as given, in the voice
@@ -571,12 +568,7 @@ func (s *Session) SetMuteDeafen(mute, deafen bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	return s.state.SendGateway(ctx, &gateway.UpdateVoiceStateCommand{
-		GuildID:   channel.GuildID,
-		ChannelID: channel.ID,
-		SelfMute:  mute,
-		SelfDeaf:  deafen,
-	})
+	return s.state.SendGateway(ctx, s.voiceState(channel.GuildID, channel.ID, mute, deafen))
 }
 
 // captured queues what the microphone captured. It is what the capture device calls.
