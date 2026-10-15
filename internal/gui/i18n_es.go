@@ -703,6 +703,7 @@ var spanish = map[string]string{
 	"Mute Members": "Silenciar miembros",
 	"Mute Server": "Silenciar servidor",
 	"Mute Soundboard": "Silenciar caja de sonidos",
+	"Soundboard Volume": "Volumen de la caja de sonidos",
 	"Mute Stream": "Silenciar transmisión",
 	"Mutes or unmutes your microphone.": "Silencia o activa tu micrófono.",
 	"My Account": "Mi cuenta",

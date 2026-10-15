@@ -41,6 +41,8 @@ type userMenu struct {
 	channel discord.ChannelID
 	page    userMenuPage
 	volume  slider
+	// soundboard is the slider of how loud their soundboard sounds play.
+	soundboard slider
 	// streamVolume is the slider of their stream's sound, when watched.
 	streamVolume slider
 }
@@ -204,6 +206,7 @@ func (c *chatView) userMenuItems() []menuItem {
 					}
 					u.saveAppSettings()
 				})},
+				menuItem{w: c.layoutSoundboardVolumeItem},
 			)
 			// The sound of their stream, when it is watched.
 			if w := c.watch.w; w != nil && c.watch.streamer == id {
@@ -842,4 +845,31 @@ func (c *chatView) voiceRowMenu(gtx layout.Context, r channelRow, size image.Poi
 	if rightClicked(gtx, c.rightTag("vm"+r.user.String()), size) {
 		c.openUserMenu(r.user, r.ch.GuildID, r.ch.ID)
 	}
+}
+
+// layoutSoundboardVolumeItem is the slider of how loud the soundboard
+// sounds of the user of the menu play, from silent to twice as loud.
+func (c *chatView) layoutSoundboardVolumeItem(gtx layout.Context) layout.Dimensions {
+	th := c.u.th
+	um := &c.umenu
+	id := um.user.ID
+	if r := um.soundboard.update(gtx); r.changed || r.released {
+		c.u.setSoundboardVolume(id, r.value*2)
+		if r.released {
+			c.u.saveAppSettings()
+		}
+	}
+	vol := c.u.soundboardVolume(id)
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, label(th, 14, colorText, "Soundboard Volume").Layout),
+				layout.Rigid(label(th, 12, colorMuted, fmt.Sprintf("%d%%", int(vol*100+0.5))).Layout),
+			)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return um.soundboard.layout(gtx, 0, vol/2)
+		}),
+	)
 }

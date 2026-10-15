@@ -50,7 +50,7 @@ func (c *chatView) watchSoundboard() func() {
 			if ev.ChannelID != u.voiceChannel() || u.voice.deafened || slices.Contains(u.app.SoundboardMuted, ev.UserID) {
 				return
 			}
-			go c.playSoundboardSound(id, float32(volume))
+			go c.playSoundboardSound(id, float32(volume)*u.soundboardVolume(ev.UserID))
 		})
 	})
 }
@@ -78,4 +78,28 @@ func (c *chatView) playSoundboardSound(id string, volume float32) {
 		settings := u.voiceSettings()
 		u.voice.effects.Play(pcm, settings.Output, volume*settings.outputVolume())
 	})
+}
+
+// soundboardVolume is how loud the soundboard sounds of id are played, 1
+// being as they are sent.
+func (u *ui) soundboardVolume(id discord.UserID) float32 {
+	if v, ok := u.app.SoundboardVolumes[id]; ok {
+		return v
+	}
+	return 1
+}
+
+// setSoundboardVolume plays the soundboard sounds of id vol times as loud,
+// snapping to 1 close to it, as the slider of their voice does.
+func (u *ui) setSoundboardVolume(id discord.UserID, vol float32) {
+	vol = snapVolume(vol)
+	a := &u.app
+	if vol == 1 {
+		delete(a.SoundboardVolumes, id)
+		return
+	}
+	if a.SoundboardVolumes == nil {
+		a.SoundboardVolumes = make(map[discord.UserID]float32)
+	}
+	a.SoundboardVolumes[id] = vol
 }

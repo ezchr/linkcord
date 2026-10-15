@@ -60,6 +60,9 @@ type appSettings struct {
 	StreamClipMinutes int `json:"stream_clip_minutes,omitempty"`
 	// SoundboardMuted are those whose soundboard sounds are not played.
 	SoundboardMuted []discord.UserID `json:"soundboard_muted,omitempty"`
+	// SoundboardVolumes are how loud each one's soundboard sounds play,
+	// from silent to twice as loud, by who, when not as sent.
+	SoundboardVolumes map[discord.UserID]float32 `json:"soundboard_volumes,omitempty"`
 	// GhostRead reads channels without telling Discord, so that they stay
 	// unread everywhere else.
 	GhostRead bool `json:"ghost_read,omitempty"`
