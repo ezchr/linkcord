@@ -47,6 +47,9 @@ type media struct {
 	lastTS   uint32
 	lastSent time.Time
 	buf      []byte
+	// noExtension leaves the header extension out of the video, as for a
+	// stream only Linkcord shows.
+	noExtension bool
 	// transportSeq numbers the video and RTX packets for the transport-wide
 	// congestion control extension.
 	transportSeq uint16
@@ -354,11 +357,17 @@ const (
 // readable; extended puts the extension's elements before the payload, which
 // is encrypted with them.
 func (m *media) withExtension(header []byte) []byte {
+	if m.noExtension {
+		return header
+	}
 	header[0] |= 0x10
 	return append(header, 0xBE, 0xDE, 0, extensionElement/4)
 }
 
 func (m *media) extended(p []byte) []byte {
+	if m.noExtension {
+		return p
+	}
 	// abs-send-time is seconds in 6.18 fixed point, its low 24 bits.
 	now := uint64(time.Now().UnixNano())
 	abs := uint32((now << 18) / uint64(time.Second))

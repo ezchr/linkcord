@@ -178,6 +178,9 @@ func Start(ctx context.Context, p Params) (*Stream, error) {
 	var ip string
 	var port uint16
 	s.med, ip, port, err = dialMedia(wait, fmt.Sprintf("%s:%d", r.IP, r.Port), r.SSRC)
+	if s.med != nil {
+		s.med.noExtension = p.LinkcordOnly
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -474,7 +477,7 @@ func (s *Stream) loop(capt *capturer) {
 		if frame == nil {
 			continue
 		}
-		out, err := s.encrypt(frame)
+		out, err := s.conn.dave.EncryptH264(frame)
 		if errors.Is(err, session.ErrStartCode) {
 			enc.forceIDR()
 			continue
@@ -663,16 +666,4 @@ func (s *Stream) teardown() {
 	if s.cancel != nil {
 		s.cancel()
 	}
-}
-
-// encrypt encrypts a picture end to end, veiled for a stream for Linkcord
-// only.
-func (s *Stream) encrypt(pic []byte) ([]byte, error) {
-	for range 8 {
-		out, err := s.conn.dave.EncryptH264(pic)
-		if err != nil || !s.p.LinkcordOnly || veil(out) {
-			return out, err
-		}
-	}
-	return nil, errors.New("golive: could not veil a picture")
 }

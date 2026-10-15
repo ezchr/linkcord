@@ -83,8 +83,9 @@ type Params struct {
 	Quality   Quality
 	// Sound sends the sound of the source along, until SetSound says not.
 	Sound bool
-	// LinkcordOnly veils the video so that only Linkcord shows it, not
-	// Discord's own clients.
+	// LinkcordOnly sends the video as Linkcord did before, without the
+	// playout delay extension Discord's own clients wait for, so that only
+	// Linkcord shows it.
 	LinkcordOnly bool
 	// CodecDir is where OpenH264 is kept.
 	CodecDir string

@@ -75,8 +75,6 @@ type Watch struct {
 	rtxSeen, rtxIgnored                           atomic.Int64
 	// inspected counts the packets logged to see how they are built.
 	inspected atomic.Int64
-	// veiled is set once the stream turns out to be for Linkcord only.
-	veiled atomic.Bool
 	padded    atomic.Int64
 	// overflows are pictures the decoder had no room for; keyframes are
 	// the keyframe requests sent; deepest is the longest decode queue seen
@@ -787,7 +785,7 @@ func (w *Watch) receive() {
 func (w *Watch) decode(au []byte) {
 	w.assembled.Add(1)
 	out := make([]byte, w.conn.dave.MaxDecryptedFrameSize(godave.UserID(w.p.StreamerID.String()), len(au)))
-	n, err := w.decrypt(au, out)
+	n, err := w.conn.dave.Decrypt(godave.UserID(w.p.StreamerID.String()), au, out)
 	if err != nil {
 		if n := w.daveFailed.Add(1); n <= 5 || n%100 == 0 {
 			parsed, footerErr := frame.Parse(au)
@@ -1273,25 +1271,4 @@ func (w *Watch) teardown() {
 	if audio != nil {
 		audio.stop()
 	}
-}
-
-// decrypt removes the end-to-end encryption of a picture, veiled or not,
-// trying first what the last one was.
-func (w *Watch) decrypt(au, out []byte) (int, error) {
-	user := godave.UserID(w.p.StreamerID.String())
-	try := func(veiled bool) (int, error) {
-		if veiled {
-			return w.conn.dave.Decrypt(user, unveiled(au), out)
-		}
-		return w.conn.dave.Decrypt(user, au, out)
-	}
-	was := w.veiled.Load()
-	n, err := try(was)
-	if err != nil && frame.LooksLikeDAVEFrame(au) {
-		if n2, err2 := try(!was); err2 == nil {
-			w.veiled.Store(!was)
-			return n2, nil
-		}
-	}
-	return n, err
 }
