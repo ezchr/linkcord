@@ -255,17 +255,37 @@ func (c *chatView) mentionsMe(m discord.Message) bool {
 	if m.Author.ID == c.me.ID {
 		return false
 	}
-	// Discord notifies of every message of a DM, but marks only those that
-	// name the user, or answer them with a ping, which names them too.
-	if c.demo || c.selChannel == nil || !c.selChannel.GuildID.IsValid() {
-		for _, u := range m.Mentions {
-			if u.ID == c.me.ID {
-				return true
-			}
+	// Whether Discord would notify of it is no test: in a channel set to
+	// notify of all messages, every message would be marked.
+	for _, u := range m.Mentions {
+		if u.ID == c.me.ID {
+			return true
 		}
-		return m.MentionEveryone || strings.Contains(m.Content, "<@"+c.me.ID.String()+">")
 	}
-	return c.st.MessageMentions(&m) != 0
+	if id := c.me.ID.String(); strings.Contains(m.Content, "<@"+id+">") || strings.Contains(m.Content, "<@!"+id+">") {
+		return true
+	}
+	if c.demo || c.selChannel == nil || !c.selChannel.GuildID.IsValid() {
+		return m.MentionEveryone
+	}
+	guildID := c.selChannel.GuildID
+	settings := c.st.MutedState.GuildSettings(guildID)
+	if m.MentionEveryone && !settings.SuppressEveryone {
+		return true
+	}
+	if len(m.MentionRoleIDs) == 0 || settings.SuppressRoles {
+		return false
+	}
+	me, err := c.st.Cabinet.Member(guildID, c.me.ID)
+	if err != nil {
+		return false
+	}
+	for _, r := range m.MentionRoleIDs {
+		if slices.Contains(me.RoleIDs, r) {
+			return true
+		}
+	}
+	return false
 }
 
 // layoutToolbar draws the buttons of a message over its top right corner.
