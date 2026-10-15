@@ -133,6 +133,9 @@ type chatView struct {
 	// localEdits are what the user changed others' messages to say, only
 	// on their screen.
 	localEdits map[discord.MessageID]string
+	// games are the games of Discord's list running, the newest first.
+	games        []playing
+	gamesWatched bool
 	// myStatus is the status the user chose here, kept over what the
 	// sessions say.
 	myStatus discord.Status
@@ -608,6 +611,10 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 		me := ready.User
 		c.u.rpcMe.Store(&me)
 		c.u.startRPC()
+		if !c.gamesWatched {
+			c.gamesWatched = true
+			c.watchGames()
+		}
 	}
 	c.startCommunity()
 

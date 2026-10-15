@@ -1058,6 +1058,8 @@ var spanish = map[string]string{
 	"Try generating another code. If it happens again, sign in with your token; see the Token tab for instructions.": "Prueba a generar otro código. Si vuelve a pasar, inicia sesión con tu token; mira las instrucciones en la pestaña Token.",
 	"Turn each sound on or off, and choose how loud it plays. The play button lets you hear it.": "Activa o desactiva cada sonido y elige su volumen. El botón de reproducir te deja oírlo.",
 	"Type Without Showing Typing": "Escribir sin mostrar que escribes",
+	"Show Games You Play": "Mostrar los juegos a los que juegas",
+	"Games Discord knows show on your profile while they run, as Discord's app shows them, from Discord's own list of games, updated daily.": "Los juegos que Discord conoce salen en tu perfil mientras se ejecutan, como en la app de Discord, según la lista de juegos de Discord, que se actualiza cada día.",
 	"US Central": "EE. UU. centro",
 	"US East": "EE. UU. este",
 	"US South": "EE. UU. sur",

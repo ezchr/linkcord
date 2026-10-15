@@ -86,6 +86,12 @@ func (c *chatView) setRPCActivity(conn, clientID string, activity json.RawMessag
 		}
 		c.rpcActivities[conn] = rpcActivity{clientID, activity}
 	}
+	c.pushPresence()
+}
+
+// pushPresence shows on the user's profile what programs show over the RPC
+// and the games detected, with the status and custom status they have.
+func (c *chatView) pushPresence() {
 	acts := make([]rpcActivity, 0, len(c.rpcActivities))
 	for _, a := range c.rpcActivities {
 		acts = append(acts, a)
@@ -110,6 +116,7 @@ func (c *chatView) setRPCActivity(conn, clientID string, activity json.RawMessag
 			}
 		}
 	}
+	games := c.gameActivities()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -121,6 +128,7 @@ func (c *chatView) setRPCActivity(conn, clientID string, activity json.RawMessag
 				slog.Warn("could not show a program's activity", "client_id", a.clientID, "err", err)
 			}
 		}
+		all = append(all, games...)
 		if all == nil {
 			all = []json.RawMessage{}
 		}

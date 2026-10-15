@@ -68,6 +68,9 @@ type appSettings struct {
 	GhostRead bool `json:"ghost_read,omitempty"`
 	// GhostTyping writes without others seeing that the user is typing.
 	GhostTyping bool `json:"ghost_typing,omitempty"`
+	// NoGameDetection stops showing the games of Discord's list that run
+	// as being played.
+	NoGameDetection bool `json:"no_game_detection,omitempty"`
 	// EditOthers lets the user change what others' messages say, only on
 	// their screen.
 	EditOthers bool `json:"edit_others,omitempty"`
@@ -185,6 +188,7 @@ type generalView struct {
 	zoom, chatText, groupGap                 slider
 	roleColors                               widget.Clickable
 	ghostBtn, ghostTypingBtn, editOthersBtn  widget.Clickable
+	gamesBtn                                 widget.Clickable
 	font                                     fontView
 	startup, minimized, tray                 widget.Clickable
 	langs                                    [2]widget.Clickable
@@ -285,6 +289,13 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 	if g.ghostBtn.Clicked(gtx) {
 		u.app.GhostRead = !u.app.GhostRead
 		u.saveAppSettings()
+	}
+	if g.gamesBtn.Clicked(gtx) {
+		u.app.NoGameDetection = !u.app.NoGameDetection
+		u.saveAppSettings()
+		if !c.demo {
+			c.pushPresence()
+		}
 	}
 	if g.ghostTypingBtn.Clicked(gtx) {
 		u.app.GhostTyping = !u.app.GhostTyping
@@ -409,6 +420,11 @@ func (c *chatView) featureRows() []layout.Widget {
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.ghostBtn, "Read Without Marking as Read",
 				"Opening a channel does not tell Discord you saw it: it stays unread in Discord's app, and in Linkcord too. Right-click Mark As Read still marks it. Sending a message there marks it, as Discord does.", c.u.app.GhostRead)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.gamesBtn, "Show Games You Play",
+				"Games Discord knows show on your profile while they run, as Discord's app shows them, from Discord's own list of games, updated daily.", !c.u.app.NoGameDetection)
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
