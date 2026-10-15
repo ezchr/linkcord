@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"golang.org/x/exp/shiny/materialdesign/icons"
 	"log/slog"
 	"time"
 
@@ -120,4 +121,82 @@ func (c *chatView) layoutJumpBar(gtx layout.Context) layout.Dimensions {
 			})
 		})
 	})
+}
+
+// iconFirstMessage is the button that goes to the first message.
+var iconFirstMessage = mustIcon(icons.EditorVerticalAlignTop)
+
+// jumpToFirst shows the first messages of the open channel, with a bar to
+// go back to the newest.
+func (c *chatView) jumpToFirst() {
+	if c.selChannel == nil {
+		return
+	}
+	if c.noOlder && len(c.messages) > 0 {
+		c.scrollToMessage(0)
+		return
+	}
+	if c.demo {
+		return
+	}
+	ch, epoch := c.selChannel.ID, c.historyEpoch
+	c.loading = true
+	go func() {
+		// After the smallest ID there is: from the start.
+		msgs, err := c.st.Client.MessagesAfter(ch, 1, 50)
+		c.u.post(func() {
+			if c.closed || c.historyEpoch != epoch || c.selChannel == nil || c.selChannel.ID != ch {
+				return
+			}
+			c.loading = false
+			if err != nil {
+				c.loadErr = "Could not load the first messages: " + err.Error()
+				return
+			}
+			c.messages = c.deleted.merge(ch, sortedMessages(msgs), 0, 0)
+			// All of it may fit; otherwise newer ones load as reached, and a
+			// bar leads to the newest.
+			c.detached, c.noOlder = len(msgs) >= 50, true
+			clear(c.selectables)
+			clear(c.richStates)
+			c.requestAuthors(c.messages)
+			if len(c.messages) > 0 {
+				c.scrollToMessage(0)
+			}
+		})
+	}()
+}
+
+// loadNewer fetches the messages after the newest shown, past a jump, until
+// the newest of all are reached.
+func (c *chatView) loadNewer() {
+	if c.selChannel == nil || !c.detached || c.loading || c.loadingNewer || len(c.messages) == 0 {
+		return
+	}
+	c.loadingNewer = true
+	ch, after, epoch := c.selChannel.ID, c.messages[len(c.messages)-1].ID, c.historyEpoch
+	go func() {
+		msgs, err := c.st.Client.MessagesAfter(ch, after, 50)
+		c.u.post(func() {
+			if c.closed || c.historyEpoch != epoch || c.selChannel == nil || c.selChannel.ID != ch || !c.detached {
+				c.loadingNewer = false
+				return
+			}
+			c.loadingNewer = false
+			if err != nil {
+				slog.Warn("could not load newer messages", "err", err)
+				return
+			}
+			for _, m := range sortedMessages(msgs) {
+				if c.messageIndex(m.ID) < 0 {
+					c.messages = append(c.messages, m)
+				}
+			}
+			c.requestAuthors(msgs)
+			// The newest are reached: new ones arrive as usual again.
+			if len(msgs) < 50 {
+				c.detached = false
+			}
+		})
+	}()
 }

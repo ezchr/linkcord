@@ -261,6 +261,10 @@ type chatView struct {
 	membersToggle widget.Clickable
 	// callBtn and videoCallBtn call the direct message or group open.
 	callBtn, videoCallBtn widget.Clickable
+	// firstBtn goes to the first message of the channel; loadingNewer is
+	// set while the messages after those shown load, past a jump.
+	firstBtn     widget.Clickable
+	loadingNewer bool
 	memberRows    []memberRow
 	memberList    widget.List
 	memberChunk   int
@@ -1189,6 +1193,9 @@ func (c *chatView) update(gtx layout.Context) {
 		} else {
 			c.openProfile(c.me, discord.NullGuildID)
 		}
+	}
+	if c.firstBtn.Clicked(gtx) {
+		c.jumpToFirst()
 	}
 	if c.callBtn.Clicked(gtx) && c.selChannel != nil {
 		c.callChannel(*c.selChannel, false)

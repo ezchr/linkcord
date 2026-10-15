@@ -117,6 +117,12 @@ func (c *chatView) chatHeader(gtx layout.Context, title string) layout.Dimension
 				return vcenter(gtx, c.layoutSearchBox)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				// To the first message of the channel.
+				return vcenter(gtx, func(gtx layout.Context) layout.Dimensions {
+					return iconButton(gtx, &c.firstBtn, iconFirstMessage, colorMuted, colorHeader)
+				})
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				if ch.Type != discord.GroupDM && !ch.GuildID.IsValid() {
 					return layout.Dimensions{}
 				}
@@ -161,6 +167,10 @@ func (c *chatView) layoutHistory(gtx layout.Context) layout.Dimensions {
 	})
 	if pos := c.messageList.Position; pos.First == 0 {
 		c.loadOlder()
+	} else if c.detached && pos.First+pos.Count >= len(c.messages)+1 {
+		// Past a jump, the messages after those shown load as they are
+		// reached.
+		c.loadNewer()
 	}
 	return dims
 }
