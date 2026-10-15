@@ -13,9 +13,6 @@ import (
 	"github.com/ayn2op/ningen/v3"
 )
 
-// maxUnreadDMs is how many unread conversations the server column shows.
-const maxUnreadDMs = 8
-
 // dmUnreadCount is how many unread messages a conversation has. Every
 // message in one counts as a mention, which Discord keeps the number of.
 func (c *chatView) dmUnreadCount(chID discord.ChannelID) int {
@@ -54,10 +51,8 @@ func (c *chatView) unreadDMs() []discord.Channel {
 			out = append(out, ch)
 		}
 	}
+	// All of them, as Discord shows: the column scrolls.
 	slices.SortFunc(out, func(a, b discord.Channel) int { return cmp.Compare(b.LastMessageID, a.LastMessageID) })
-	if len(out) > maxUnreadDMs {
-		out = out[:maxUnreadDMs]
-	}
 	return out
 }
 
