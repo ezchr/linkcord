@@ -200,8 +200,10 @@ static int next(lc_dupl *d, UINT timeout) {
 		return 0;
 	}
 	int kept = 1;
-	// A picture of only the pointer moving has nothing new.
-	if (info.LastPresentTime.QuadPart != 0 || !d->have) {
+	// A picture of only the pointer moving has nothing new, and the first
+	// one, before anything was drawn, is black: what was drawn is waited
+	// for, and GDI's picture stands in meanwhile.
+	if (info.LastPresentTime.QuadPart != 0) {
 		ID3D11Texture2D *tex = NULL;
 		if (SUCCEEDED(IDXGIResource_QueryInterface(res, &lc_IID_ID3D11Texture2D, (void **)&tex))) {
 			kept = keep(d, tex);

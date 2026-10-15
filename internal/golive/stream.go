@@ -297,6 +297,10 @@ func (s *Stream) waitFor(ctx context.Context, match func(ws.Event) bool) (ws.Eve
 			if ce, ok := op.Data.(*ws.CloseEvent); ok {
 				return nil, ce
 			}
+			// Why the stream server does not answer, if it does not.
+			if be, ok := op.Data.(*ws.BackgroundErrorEvent); ok {
+				s.log.Warn("stream server error", "err", be.Err)
+			}
 			if match(op.Data) {
 				return op.Data, nil
 			}

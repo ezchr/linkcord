@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gioui.org/io/pointer"
@@ -499,6 +501,11 @@ func (c *chatView) startStream(src golive.Source, q golive.Quality) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		started, err := golive.Start(ctx, params)
+		// The stream server sometimes never answers a first try.
+		if err != nil && ctx.Err() == nil && strings.Contains(err.Error(), "did not answer") {
+			slog.Warn("the stream server did not answer; trying again", "err", err)
+			started, err = golive.Start(ctx, params)
+		}
 		u.post(func() {
 			v.streamStarting = false
 			if err != nil {

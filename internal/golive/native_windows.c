@@ -399,6 +399,31 @@ const uint8_t *lc_capture_grab(lc_capture *c, int *w, int *h, int *stride, int *
 	return pix;
 }
 
+// gdi_screen captures the screen with GDI, slower than duplication but
+// working everywhere. It reports whether it could.
+static int gdi_screen(lc_capture *c) {
+	// The screen may have changed resolution since it was chosen.
+	POINT at = {c->x, c->y};
+	MONITORINFO mi;
+	memset(&mi, 0, sizeof mi);
+	mi.cbSize = sizeof mi;
+	if (GetMonitorInfoW(MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST), &mi)) {
+		c->w = mi.rcMonitor.right - mi.rcMonitor.left;
+		c->h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+	}
+	HDC sdc = GetDC(NULL);
+	if (!ensure(c, sdc, c->w, c->h)) {
+		ReleaseDC(NULL, sdc);
+		return 0;
+	}
+	BitBlt(c->mem, 0, 0, c->w, c->h, sdc, c->x, c->y, SRCCOPY);
+	ReleaseDC(NULL, sdc);
+	if (c->cursor) {
+		draw_cursor(c, c->x, c->y);
+	}
+	return 1;
+}
+
 static const uint8_t *grab(lc_capture *c, int *w, int *h, int *stride, int *gone) {
 	*gone = 0;
 	if (c->hwnd) {
@@ -445,39 +470,26 @@ static const uint8_t *grab(lc_capture *c, int *w, int *h, int *stride, int *gone
 			return grab(c, w, h, stride, gone);
 		}
 		if (r == 0) {
-			return NULL;
-		}
-		HDC sdc = GetDC(NULL);
-		int ok = ensure(c, sdc, pw, ph);
-		ReleaseDC(NULL, sdc);
-		if (!ok) {
-			return NULL;
-		}
-		// The picture is kept clean of the pointer, drawn over a copy.
-		memcpy(c->bits, pix, (size_t)pw * ph * 4);
-		if (c->cursor) {
-			draw_cursor(c, c->x, c->y);
-		}
-	} else {
-		// The screen may have changed resolution since it was chosen.
-		POINT at = {c->x, c->y};
-		MONITORINFO mi;
-		memset(&mi, 0, sizeof mi);
-		mi.cbSize = sizeof mi;
-		if (GetMonitorInfoW(MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST), &mi)) {
-			c->w = mi.rcMonitor.right - mi.rcMonitor.left;
-			c->h = mi.rcMonitor.bottom - mi.rcMonitor.top;
-		}
-		HDC sdc = GetDC(NULL);
-		if (!ensure(c, sdc, c->w, c->h)) {
+			// Nothing drawn since the duplication began, which would be
+			// black: GDI's picture stands in.
+			if (!gdi_screen(c)) {
+				return NULL;
+			}
+		} else {
+			HDC sdc = GetDC(NULL);
+			int ok = ensure(c, sdc, pw, ph);
 			ReleaseDC(NULL, sdc);
-			return NULL;
+			if (!ok) {
+				return NULL;
+			}
+			// The picture is kept clean of the pointer, drawn over a copy.
+			memcpy(c->bits, pix, (size_t)pw * ph * 4);
+			if (c->cursor) {
+				draw_cursor(c, c->x, c->y);
+			}
 		}
-		BitBlt(c->mem, 0, 0, c->w, c->h, sdc, c->x, c->y, SRCCOPY);
-		ReleaseDC(NULL, sdc);
-		if (c->cursor) {
-			draw_cursor(c, c->x, c->y);
-		}
+	} else if (!gdi_screen(c)) {
+		return NULL;
 	}
 	GdiFlush();
 	*w = c->bw;
