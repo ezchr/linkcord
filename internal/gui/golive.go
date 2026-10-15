@@ -153,8 +153,8 @@ func (c *chatView) updateStreamPicker(gtx layout.Context) {
 		if only {
 			btn = &sp.linkcordOnly
 		}
-		if btn.Clicked(gtx) && c.u.voiceSettings().StreamEveryone == only {
-			c.u.voiceSettings().StreamEveryone = !only
+		if btn.Clicked(gtx) && c.u.voiceSettings().StreamLinkcordOnly != only {
+			c.u.voiceSettings().StreamLinkcordOnly = only
 			c.u.saveVoiceSettings()
 		}
 	}
@@ -385,11 +385,11 @@ func (c *chatView) layoutStreamQuality(gtx layout.Context) layout.Dimensions {
 	})}
 	// Discord's own clients, or only Linkcord: they need what Linkcord's
 	// stream sent before left out.
-	only := !c.u.voiceSettings().StreamEveryone
+	only := c.u.voiceSettings().StreamLinkcordOnly
 	who := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Right: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return chip(gtx, th, &sp.everyone, "Everyone (testing)", !only, true)
+				return chip(gtx, th, &sp.everyone, "Everyone", !only, true)
 			})
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -465,7 +465,7 @@ func (c *chatView) startStream(src golive.Source, q golive.Quality) {
 		Quality:   q,
 		Sound:     !u.voiceSettings().StreamMute,
 		// Only Linkcord shows it, if the user chose so.
-		LinkcordOnly: !u.voiceSettings().StreamEveryone,
+		LinkcordOnly: u.voiceSettings().StreamLinkcordOnly,
 		CodecDir:     filepath.Dir(logPath()),
 	}
 	var s *golive.Stream

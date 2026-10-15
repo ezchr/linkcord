@@ -7,7 +7,6 @@ package gui
 // follows it, such as "Replying to " and a name.
 var spanish = map[string]string{
 	"Who Can Watch": "Quién puede verlo",
-	"Everyone (testing)": "Todos (en pruebas)",
 	"Linkcord Only": "Solo Linkcord",
 	" (server pronouns and About Me need Nitro)": " (los pronombres del servidor y Sobre mí necesitan Nitro)",
 	" MATCHING @": " QUE COINCIDEN CON @",
