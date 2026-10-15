@@ -277,13 +277,16 @@ func (c *chatView) layoutToolbar(gtx layout.Context, m discord.Message, row layo
 	if c.canSendHere() {
 		kinds = append(kinds, actReply)
 	}
-	if m.Author.ID == c.me.ID || c.u.app.EditOthers {
+	// A message someone deleted, kept here, can be changed or taken away
+	// on this screen, whoever wrote it.
+	gone := c.deleted.has(m.ID)
+	if m.Author.ID == c.me.ID || c.u.app.EditOthers || gone {
 		kinds = append(kinds, actEdit)
 	}
 	if m.Content != "" {
 		kinds = append(kinds, actCopy)
 	}
-	if c.canDelete(m) {
+	if c.canDelete(m) || gone {
 		kinds = append(kinds, actDelete)
 	}
 	if len(kinds) == 0 {
@@ -472,6 +475,19 @@ func (c *chatView) saveEdit(id discord.MessageID) {
 		return
 	}
 	m := c.messages[i]
+	// A deleted message, kept here, changes in what is kept, for good:
+	// Discord has nothing to change.
+	if c.deleted.has(m.ID) {
+		if text == "" {
+			c.askDelete(m, false)
+			return
+		}
+		c.deleted.setContent(m.ID, text)
+		c.messages[i].Content = text
+		delete(c.selectables, id)
+		delete(c.richStates, id)
+		return
+	}
 	if m.Author.ID != c.me.ID {
 		c.editLocally(m, text)
 		return
@@ -611,6 +627,15 @@ func (c *chatView) dismissMessage(id discord.MessageID) {
 func (c *chatView) deleteMessage(m discord.Message) {
 	if isEphemeral(m) {
 		c.dismissMessage(m.ID)
+		return
+	}
+	// A deleted message, kept here, goes from what is kept.
+	if c.deleted.has(m.ID) {
+		c.act.deleting = nil
+		c.deleted.forget(m.ID)
+		c.messages = slices.DeleteFunc(c.messages, func(x discord.Message) bool { return x.ID == m.ID })
+		c.forgetMessage(m.ID)
+		gtxFocus(c)
 		return
 	}
 	c.act.deleting = nil

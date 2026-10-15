@@ -229,3 +229,39 @@ func (c *chatView) layoutDeletedSign(gtx layout.Context, id discord.MessageID) l
 		return dims
 	})
 }
+
+// forget takes a kept message away, for good, as the user asked.
+func (d *deletedLog) forget(id discord.MessageID) {
+	d.change(func() {
+		delete(d.msgs, id)
+		d.mine[id] = true
+	})
+}
+
+// setContent has a kept message say text, for good, as the user changed
+// it.
+func (d *deletedLog) setContent(id discord.MessageID, text string) {
+	d.change(func() {
+		if e, ok := d.msgs[id]; ok {
+			e.Message.Content = text
+			d.msgs[id] = e
+		}
+	})
+}
+
+// change applies f to the kept messages, and saves them.
+func (d *deletedLog) change(f func()) {
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	f()
+	entries := make([]deletedEntry, 0, len(d.msgs))
+	for _, e := range d.msgs {
+		entries = append(entries, e)
+	}
+	d.mu.Unlock()
+	if d.path != "" {
+		go d.save(entries)
+	}
+}
