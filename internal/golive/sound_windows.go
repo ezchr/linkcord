@@ -242,10 +242,12 @@ func (m *mixer) close() {
 	}
 }
 
-// proc is the parent and the executable, in lower case, of a process.
+// proc is the parent and the executable, in lower case, of a process, and
+// when it started, 0 if Windows does not tell.
 type proc struct {
-	parent uint32
-	exe    string
+	parent  uint32
+	exe     string
+	started int64
 }
 
 // procTable is every process.
@@ -261,13 +263,29 @@ func processes() procTable {
 	var e windows.ProcessEntry32
 	e.Size = uint32(unsafe.Sizeof(e))
 	for err = windows.Process32First(snap, &e); err == nil; err = windows.Process32Next(snap, &e) {
-		t[e.ProcessID] = proc{e.ParentProcessID, strings.ToLower(windows.UTF16ToString(e.ExeFile[:]))}
+		t[e.ProcessID] = proc{e.ParentProcessID, strings.ToLower(windows.UTF16ToString(e.ExeFile[:])), processStart(e.ProcessID)}
 	}
 	return t
 }
 
+// processStart is when the process pid started, 0 if it cannot be told.
+func processStart(pid uint32) int64 {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return 0
+	}
+	defer windows.CloseHandle(h)
+	var created, exited, kernel, user windows.Filetime
+	if windows.GetProcessTimes(h, &created, &exited, &kernel, &user) != nil {
+		return 0
+	}
+	return created.Nanoseconds()
+}
+
 // descends reports whether pid is in the tree of root: root itself or a
-// process it started, or one that one of those started.
+// process it started, or one that one of those started. A parent that
+// started after its child is not one: the parent ended, and Windows gave its
+// ID to a new process, which would otherwise take the child's sound away.
 func (t procTable) descends(pid, root uint32) bool {
 	for range 64 {
 		if pid == root {
@@ -275,6 +293,9 @@ func (t procTable) descends(pid, root uint32) bool {
 		}
 		p, ok := t[pid]
 		if !ok || p.parent == 0 || p.parent == pid {
+			return false
+		}
+		if parent, ok := t[p.parent]; ok && parent.started != 0 && p.started != 0 && parent.started > p.started {
 			return false
 		}
 		pid = p.parent
