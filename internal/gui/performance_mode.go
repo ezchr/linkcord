@@ -5,12 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"time"
 )
-
-// lowPowerFrame is the shortest time between two frames in Performance
-// Mode.
-const lowPowerFrame = time.Second / 30
 
 type performanceSettings struct {
 	Enabled bool `json:"enabled"`
@@ -54,5 +51,11 @@ func (u *ui) setPerformanceMode(enabled bool) error {
 	next.lowPower = enabled
 	u.images = next
 	u.win.Invalidate()
+	// The pictures of the old cache go back to Windows at once, rather than
+	// show as Linkcord's memory beside the new ones.
+	go func() {
+		time.Sleep(2 * time.Second)
+		debug.FreeOSMemory()
+	}()
 	return nil
 }

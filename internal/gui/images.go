@@ -195,10 +195,21 @@ func (im *images) load(key, url string, size int, e *imageEntry) {
 	// The limit is for reading the disk only: holding it while downloading
 	// let two pictures load at a time, which made emoji and stickers crawl.
 	im.decode <- struct{}{}
-	frames, delays, err := im.animFromDisk(key, size)
+	var frames []image.Image
+	var delays []time.Duration
 	var img image.Image
-	if err != nil && (!isGIFVideoURL(url) || im.lowPower) {
-		img, err = im.fromDisk(stillKey(key, url))
+	var err error
+	if im.lowPower {
+		// The still kept on disk, small, before the whole animation,
+		// decoded only for its first picture.
+		if img, err = im.fromDisk(stillKey(key, url)); err != nil {
+			frames, delays, err = im.animFromDisk(key, size)
+		}
+	} else {
+		frames, delays, err = im.animFromDisk(key, size)
+		if err != nil && !isGIFVideoURL(url) {
+			img, err = im.fromDisk(stillKey(key, url))
+		}
 	}
 	<-im.decode
 	if err != nil {

@@ -917,7 +917,7 @@ func (c *chatView) advancedRows() []layout.Widget {
 	community := loadCommunity()
 	rows := []layout.Widget{
 		func(gtx layout.Context) layout.Dimensions {
-			return switchRow(gtx, th, &s.perfBtn, "Performance Mode", "Keeps GIFs, animated avatars, banners, frames, nameplates and profile effects still, refreshes stream previews less often and draws at most 30 frames a second, which uses less CPU, memory and battery.", u.images.lowPower)
+			return switchRow(gtx, th, &s.perfBtn, "Performance Mode", "Keeps GIFs, animated avatars, banners, frames, nameplates and profile effects still, and refreshes stream previews less often, which uses less CPU, memory and battery.", u.images.lowPower)
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {

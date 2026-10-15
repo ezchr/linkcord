@@ -1369,7 +1369,7 @@ func (c *chatView) layoutSelfMenu(gtx layout.Context, p *profileView) layout.Dim
 					}
 					return dot(gtx, col, 10)
 				}, performanceText, colorText, false),
-				layout.Rigid(label(th, 11, colorMuted, "On keeps animations still and draws less often.").Layout),
+				layout.Rigid(label(th, 11, colorMuted, "On keeps animations still.").Layout),
 				item(&p.copyID, func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconCopy, 18, colorMuted) }, copyTxt, colorText, false),
 				item(&p.quit, func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconQuit, 18, colorMuted) }, "Quit "+appName, colorText, false),
 				item(&p.logout, func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconLogout, 18, colorRed) }, "Log out", colorRed, false),
