@@ -278,6 +278,9 @@ type chatView struct {
 	// openChannel is the ID of the channel open, for the gateway's
 	// goroutine to tell what is in view.
 	openChannel atomic.Uint64
+	// viewerOnly is set while only a viewer and what opens over it are
+	// drawn.
+	viewerOnly bool
 	// guildBadges are the unread marks of servers, worked out lately; rels
 	// the relationships, read at relsAt.
 	guildBadges map[discord.GuildID]guildBadge
@@ -1339,6 +1342,16 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 		c.layoutOverlays(gtx)
 		return dims
 	}
+	// A picture or video seen whole hides what is behind it: that is not
+	// drawn, for a moving picture redraws the window each frame, which
+	// with all of it behind took a whole core.
+	if c.viewer != nil || (c.video != nil && c.video.visible()) {
+		paint.FillShape(gtx.Ops, rgb(0x000000), clip.Rect{Max: gtx.Constraints.Max}.Op())
+		c.viewerOnly = true
+		c.layoutOverlays(gtx)
+		c.viewerOnly = false
+		return layout.Dimensions{Size: gtx.Constraints.Max}
+	}
 	// Before the results are drawn, which takes their clicks.
 	c.updateSearch(gtx)
 	channels, members, showMembers := c.paneWidths(gtx)
@@ -1383,22 +1396,23 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 // layoutOverlays draws what opens over the columns: cards, viewers, forms
 // and menus.
 func (c *chatView) layoutOverlays(gtx layout.Context) {
-	if c.profile != nil {
+	// Under a viewer, only what opens over it is drawn.
+	if !c.viewerOnly && c.profile != nil {
 		c.layoutProfile(gtx)
 	}
-	if c.tagCard != nil {
+	if !c.viewerOnly && c.tagCard != nil {
 		c.layoutTagCard(gtx)
 	}
-	if l := &c.voiceLog; l.open && l.panelW > 0 {
+	if l := &c.voiceLog; !c.viewerOnly && l.open && l.panelW > 0 {
 		pgtx := gtx
 		w := l.panelW - gtx.Dp(16)
 		pgtx.Constraints = layout.Constraints{Min: image.Pt(w, 0), Max: image.Pt(w, gtx.Dp(240))}
 		drawAbove(gtx, pgtx, image.Pt(gtx.Dp(72)+gtx.Dp(8), gtx.Constraints.Max.Y-l.panelH-gtx.Dp(6)), l, c.layoutVoiceLog)
 	}
-	if c.imgEdit != nil {
+	if !c.viewerOnly && c.imgEdit != nil {
 		c.layoutImageEditor(gtx)
 	}
-	if c.incoming != nil {
+	if !c.viewerOnly && c.incoming != nil {
 		c.layoutIncomingCall(gtx)
 	}
 	if c.viewer != nil {
