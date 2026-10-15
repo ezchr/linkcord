@@ -47,6 +47,9 @@ type media struct {
 	lastTS   uint32
 	lastSent time.Time
 	buf      []byte
+	// noExtension leaves the playout delay extension out of the video, as
+	// for a stream only Linkcord shows.
+	noExtension bool
 
 	// keyframe is sent to when a receiver asks for a keyframe.
 	keyframe chan struct{}
@@ -192,10 +195,11 @@ func (m *media) sendFrame(frame []byte, ts uint32) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	nals := splitNALs(frame)
-	header := make([]byte, 12)
+	header := make([]byte, 12, 16)
 	payload := make([]byte, 0, mtu+8)
 	sent := 0
 	send := func(last bool, p []byte) error {
+		header = header[:12]
 		header[0] = 0x80 // version 2
 		header[1] = payloadH264
 		if last {
@@ -205,7 +209,7 @@ func (m *media) sendFrame(frame []byte, ts uint32) error {
 		m.seq++
 		binary.BigEndian.PutUint32(header[4:], ts)
 		binary.BigEndian.PutUint32(header[8:], m.ssrc)
-		pkt := m.seal(header, p)
+		pkt := m.seal(m.withExtension(header), m.extended(p))
 		if _, err := m.conn.Write(pkt); err != nil {
 			return err
 		}
@@ -333,4 +337,30 @@ func splitNALs(frame []byte) [][]byte {
 		nals = append(nals, frame[start:])
 	}
 	return nals
+}
+
+// playoutDelay is the one element of the video's header extension, as
+// Discord's clients and bots send it: the playout delay (ID 5, three bytes)
+// at zero, for as little buffering as can be. Discord's own clients do not
+// show a stream whose packets lack it.
+var playoutDelay = []byte{5<<4 | 2, 0, 0, 0}
+
+// withExtension marks the 12-byte video header as extended and adds the
+// extension's own header (the one-byte profile, one word long), which stay
+// readable; extended puts the extension's element before the payload, which
+// is encrypted with it.
+func (m *media) withExtension(header []byte) []byte {
+	if m.noExtension {
+		return header
+	}
+	header[0] |= 0x10
+	return append(header, 0xBE, 0xDE, 0, 1)
+}
+
+func (m *media) extended(p []byte) []byte {
+	if m.noExtension {
+		return p
+	}
+	out := make([]byte, 0, len(playoutDelay)+len(p))
+	return append(append(out, playoutDelay...), p...)
 }

@@ -8,6 +8,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -72,7 +73,9 @@ type Watch struct {
 	// The counts of how the stream goes, which are logged.
 	packets, assembled, lost, daveFailed, skipped atomic.Int64
 	rtxSeen, rtxIgnored                           atomic.Int64
-	padded                                        atomic.Int64
+	// inspected counts the packets logged to see how they are built.
+	inspected atomic.Int64
+	padded    atomic.Int64
 	// overflows are pictures the decoder had no room for; keyframes are
 	// the keyframe requests sent; deepest is the longest decode queue seen
 	// since the last log.
@@ -82,20 +85,20 @@ type Watch struct {
 	taken *image.RGBA
 	// view is the size the picture is shown at, width<<32|height, set by
 	// SetView; 0 is unknown.
-	view atomic.Uint64
-	videoBytes                                    atomic.Int64
-	reception                                     watchReception // guarded by mu
-	needIDR                                       atomic.Bool
-	lastPLI                                       atomic.Int64
-	srcW, srcH, fps                               int
-	created                                       bool
-	once                                          sync.Once
-	decoder                                       *exec.Cmd
-	decIn                                         io.WriteCloser
-	decodeQueue                                   chan pictureJob
-	videoGeneration                               atomic.Uint64
-	audio                                         *streamAudio
-	done                                          chan struct{}
+	view            atomic.Uint64
+	videoBytes      atomic.Int64
+	reception       watchReception // guarded by mu
+	needIDR         atomic.Bool
+	lastPLI         atomic.Int64
+	srcW, srcH, fps int
+	created         bool
+	once            sync.Once
+	decoder         *exec.Cmd
+	decIn           io.WriteCloser
+	decodeQueue     chan pictureJob
+	videoGeneration atomic.Uint64
+	audio           *streamAudio
+	done            chan struct{}
 
 	// audioVolume is how loud the stream's sound plays, a thousandth more
 	// than its thousandths, zero as it comes; audioMuted mutes it.
@@ -426,6 +429,9 @@ func waitOp(ctx context.Context, log *slog.Logger, ops <-chan ws.Op, keep chan w
 func (w *Watch) follow(early chan ws.Op) {
 	handle := func(op ws.Op) {
 		if v, ok := op.Data.(*videoEvent); ok && v.UserID == w.p.StreamerID {
+			if raw, err := json.Marshal(v); err == nil {
+				w.log.Info("stream video announce", "op12", string(raw))
+			}
 			ssrc, rtx := v.VideoSSRC, v.RTXSSRC
 			w.mu.Lock()
 			w.audioSSRC = v.AudioSSRC
@@ -551,6 +557,15 @@ func (w *Watch) open(pkt []byte) (header []byte, payload []byte, err error) {
 	}
 	if len(plain) < 4*extWords {
 		return nil, nil, errors.New("short extension body")
+	}
+	// How the streamer's client builds its packets, for making Linkcord's
+	// own stream as Discord's clients expect: the first ones are logged.
+	if n := w.inspected.Add(1); n <= 12 && w.log != nil {
+		body := plain[:4*extWords]
+		payload := plain[4*extWords:]
+		w.log.Info("stream packet", "n", n, "pt", pkt[1]&0x7F, "marker", pkt[1]&0x80 != 0,
+			"csrc", pkt[0]&0x0F, "ext_profile", fmt.Sprintf("%04x", profile), "ext_words", extWords,
+			"ext", fmt.Sprintf("%x", body), "payload_head", fmt.Sprintf("%x", payload[:min(len(payload), 6)]), "size", len(pkt))
 	}
 	// Every packet counts for transport feedback.
 	if ext {

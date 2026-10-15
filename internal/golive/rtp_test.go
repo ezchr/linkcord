@@ -70,16 +70,25 @@ func TestRoundTrip(t *testing.T) {
 			t.Fatal(err)
 		}
 		pkt := buf[:n]
-		if pkt[0] != 0x80 || pkt[1]&0x7F != payloadH264 || binary.BigEndian.Uint32(pkt[8:]) != 1234 || binary.BigEndian.Uint32(pkt[4:]) != 9000 {
+		// Extended, with the playout delay extension, as Discord's clients
+		// wait for: its header readable, its element encrypted.
+		if pkt[0] != 0x90 || pkt[1]&0x7F != payloadH264 || binary.BigEndian.Uint32(pkt[8:]) != 1234 || binary.BigEndian.Uint32(pkt[4:]) != 9000 {
 			t.Fatalf("bad RTP header % x", pkt[:12])
+		}
+		if !bytes.Equal(pkt[12:16], []byte{0xbe, 0xde, 0, 1}) {
+			t.Fatalf("bad extension header % x", pkt[12:16])
 		}
 		marker = pkt[1]&0x80 != 0
 		var nonce [12]byte
 		copy(nonce[:4], pkt[n-4:])
-		payload, err := recv.aead.Open(nil, nonce[:], pkt[12:n-4], pkt[:12])
+		payload, err := recv.aead.Open(nil, nonce[:], pkt[16:n-4], pkt[:16])
 		if err != nil {
 			t.Fatal("transport decryption:", err)
 		}
+		if !bytes.Equal(payload[:4], playoutDelay) {
+			t.Fatalf("bad extension element % x", payload[:4])
+		}
+		payload = payload[4:]
 		if payload[0]&0x1F == 28 {
 			if payload[1]&0x80 != 0 {
 				fu = []byte{payload[0]&0xE0 | payload[1]&0x1F}

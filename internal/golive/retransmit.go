@@ -85,6 +85,6 @@ func (m *media) retransmit(seq uint16) error {
 	binary.BigEndian.PutUint32(header[8:], m.rtxSSRC)
 	payload := binary.BigEndian.AppendUint16(nil, p.seq)
 	payload = append(payload, p.payload...)
-	_, err := m.conn.Write(m.seal(header, payload))
+	_, err := m.conn.Write(m.seal(m.withExtension(header), m.extended(payload)))
 	return err
 }

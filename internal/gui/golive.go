@@ -42,6 +42,8 @@ type streamPicker struct {
 	fps     int
 
 	sound widget.Clickable
+	// everyone and linkcordOnly choose who can watch.
+	everyone, linkcordOnly widget.Clickable
 	// backdrop is the dark area around the window, which a click closes it
 	// from.
 	backdrop      widget.Clickable
@@ -145,6 +147,16 @@ func (c *chatView) updateStreamPicker(gtx layout.Context) {
 		settings := c.u.voiceSettings()
 		settings.StreamMute = !settings.StreamMute
 		c.u.saveVoiceSettings()
+	}
+	for _, only := range []bool{false, true} {
+		btn := &sp.everyone
+		if only {
+			btn = &sp.linkcordOnly
+		}
+		if btn.Clicked(gtx) && c.u.voiceSettings().StreamLinkcordOnly != only {
+			c.u.voiceSettings().StreamLinkcordOnly = only
+			c.u.saveVoiceSettings()
+		}
 	}
 	nitro := c.hasNitro()
 	for i := range sp.heights {
@@ -371,11 +383,25 @@ func (c *chatView) layoutStreamQuality(gtx layout.Context) layout.Dimensions {
 	sound := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 		return chip(gtx, th, &sp.sound, soundText, !c.u.voiceSettings().StreamMute, true)
 	})}
+	// Discord's own clients, or only Linkcord: they need what Linkcord's
+	// stream sent before left out.
+	only := c.u.voiceSettings().StreamLinkcordOnly
+	who := []layout.FlexChild{
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Right: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return chip(gtx, th, &sp.everyone, "Everyone", !only, true)
+			})
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return chip(gtx, th, &sp.linkcordOnly, "Linkcord Only", only, true)
+		}),
+	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(bold(label(th, 12, colorMuted, "STREAM QUALITY")).Layout),
 		row("Resolution", heights),
 		row("Frame Rate", rates),
 		row("Sound", sound),
+		row("Who Can Watch", who),
 	)
 }
 
@@ -438,7 +464,9 @@ func (c *chatView) startStream(src golive.Source, q golive.Quality) {
 		Source:    src,
 		Quality:   q,
 		Sound:     !u.voiceSettings().StreamMute,
-		CodecDir:  filepath.Dir(logPath()),
+		// Only Linkcord shows it, if the user chose so.
+		LinkcordOnly: u.voiceSettings().StreamLinkcordOnly,
+		CodecDir:     filepath.Dir(logPath()),
 	}
 	var s *golive.Stream
 	params.OnEnd = func(err error) {

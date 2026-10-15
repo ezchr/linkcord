@@ -6,6 +6,8 @@ package gui
 // starts or ends with a space is also put in front of or after what
 // follows it, such as "Replying to " and a name.
 var spanish = map[string]string{
+	"Who Can Watch": "Quién puede verlo",
+	"Linkcord Only": "Solo Linkcord",
 	" (server pronouns and About Me need Nitro)": " (los pronombres del servidor y Sobre mí necesitan Nitro)",
 	" MATCHING @": " QUE COINCIDEN CON @",
 	" Members": " Miembros",
