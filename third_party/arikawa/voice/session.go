@@ -571,6 +571,19 @@ func (s *Session) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
+// DecryptError is a packet of the SSRC that could not be decrypted end to
+// end. It is a udp.ErrDecryptionFailed.
+type DecryptError struct {
+	SSRC uint32
+	Err  error
+}
+
+func (e *DecryptError) Error() string {
+	return fmt.Sprintf("%v end to end for SSRC %d: %v", udp.ErrDecryptionFailed, e.SSRC, e.Err)
+}
+
+func (e *DecryptError) Unwrap() []error { return []error{udp.ErrDecryptionFailed, e.Err} }
+
 // ReadPacket reads a single packet from the UDP connection. This is NOT at all
 // thread safe, and must be used very carefully. The backing buffer is always
 // reused.
@@ -590,7 +603,7 @@ func (s *Session) ReadPacket() (*udp.Packet, error) {
 	s.recvBuf = slices.Grow(s.recvBuf[:0], dave.MaxDecryptedFrameSize(user, len(p.Opus)))
 	n, err := dave.Decrypt(user, p.Opus, s.recvBuf[:cap(s.recvBuf)])
 	if err != nil {
-		return nil, fmt.Errorf("%w end to end for SSRC %d: %w", udp.ErrDecryptionFailed, p.SSRC(), err)
+		return nil, &DecryptError{SSRC: p.SSRC(), Err: err}
 	}
 	p.Opus = s.recvBuf[:n]
 	return p, nil
