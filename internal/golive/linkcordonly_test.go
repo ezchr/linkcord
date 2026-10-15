@@ -8,10 +8,9 @@ import (
 	"time"
 )
 
-// TestLinkcordOnlyExtension checks that a stream for Linkcord only carries
-// the playout delay extension, and that Linkcord's viewer reads past it to
-// the picture.
-func TestLinkcordOnlyExtension(t *testing.T) {
+// TestLinkcordOnlyNoExtension checks that a stream for Linkcord only goes
+// out without a header extension, as Linkcord's viewers have always read.
+func TestLinkcordOnlyNoExtension(t *testing.T) {
 	l, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		t.Fatal(err)
@@ -37,13 +36,12 @@ func TestLinkcordOnlyExtension(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkt := buf[:n]
-	if pkt[0] != 0x90 || !bytes.Equal(pkt[12:16], []byte{0xbe, 0xde, 0, 1}) {
-		t.Fatalf("bad header % x", pkt[:16])
+	if buf[0] != 0x80 {
+		t.Fatalf("bad header % x", buf[:12])
 	}
 	w := &Watch{}
 	w.useSecret(modes[0], secret)
-	_, payload, err := w.open(pkt)
+	_, payload, err := w.open(buf[:n])
 	if err != nil {
 		t.Fatal(err)
 	}

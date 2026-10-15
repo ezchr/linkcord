@@ -47,8 +47,8 @@ type media struct {
 	lastTS   uint32
 	lastSent time.Time
 	buf      []byte
-	// linkcordOnly sends the playout delay extension in place of what
-	// Discord's clients expect, for a stream that only Linkcord shows.
+	// linkcordOnly leaves the header extension out, as for a stream that
+	// only Linkcord shows: its pictures are veiled (see veil).
 	linkcordOnly bool
 	// transportSeq numbers the video and RTX packets for the transport-wide
 	// congestion control extension.
@@ -357,23 +357,16 @@ const (
 // readable; extended puts the extension's elements before the payload, which
 // is encrypted with them.
 func (m *media) withExtension(header []byte) []byte {
-	header[0] |= 0x10
 	if m.linkcordOnly {
-		return append(header, 0xBE, 0xDE, 0, uint8(len(playoutDelay)/4))
+		return header
 	}
+	header[0] |= 0x10
 	return append(header, 0xBE, 0xDE, 0, extensionElement/4)
 }
 
-// playoutDelay is the extension of a stream for Linkcord only: the playout
-// delay (ID 5, three bytes) at zero. Discord's servers read ID 5 as the
-// transport-wide sequence number, which three bytes are not, and Discord's
-// clients do not show the stream; Linkcord does.
-var playoutDelay = []byte{5<<4 | 2, 0, 0, 0}
-
 func (m *media) extended(p []byte) []byte {
 	if m.linkcordOnly {
-		out := make([]byte, 0, len(playoutDelay)+len(p))
-		return append(append(out, playoutDelay...), p...)
+		return p
 	}
 	// abs-send-time is seconds in 6.18 fixed point, its low 24 bits.
 	now := uint64(time.Now().UnixNano())

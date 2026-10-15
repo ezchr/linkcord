@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"github.com/thomas-vilte/dave-go/frame"
 	"image"
 	"log/slog"
 	"math/big"
@@ -477,13 +478,16 @@ func (s *Stream) loop(capt *capturer) {
 		if frame == nil {
 			continue
 		}
-		out, err := s.conn.dave.EncryptH264(frame)
+		out, err := s.encrypt(frame)
 		if errors.Is(err, session.ErrStartCode) {
 			enc.forceIDR()
 			continue
 		}
 		if err != nil {
 			s.log.Warn("could not encrypt a picture", "err", err)
+			continue
+		}
+		if out == nil {
 			continue
 		}
 		ts := uint32(elapsed * 90000 / time.Second)
@@ -666,4 +670,21 @@ func (s *Stream) teardown() {
 	if s.cancel != nil {
 		s.cancel()
 	}
+}
+
+// encrypt encrypts a picture end to end, veiled for a stream for Linkcord
+// only.
+func (s *Stream) encrypt(pic []byte) ([]byte, error) {
+	for range 8 {
+		out, err := s.conn.dave.EncryptH264(pic)
+		if err != nil || !s.p.LinkcordOnly || veil(out) {
+			return out, err
+		}
+		// Not encrypted end to end yet, so not to be veiled either: not
+		// sent, as Discord's clients would show it.
+		if !frame.LooksLikeDAVEFrame(out) {
+			return nil, nil
+		}
+	}
+	return nil, errors.New("golive: could not veil a picture")
 }
