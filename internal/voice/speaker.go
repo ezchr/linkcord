@@ -123,7 +123,7 @@ func (s *speaker) mix(output []byte, volume float32, guard bool) {
 			v := float32(int16(binary.LittleEndian.Uint16(s.buf[i:])))
 			peak = max(peak, v, -v)
 		}
-		volume *= s.guard.apply(peak, volume)
+		volume *= s.guard.apply(peak)
 	}
 	for i := 0; i+1 < n; i += 2 {
 		sample := int32(int16(binary.LittleEndian.Uint16(s.buf[i:])))

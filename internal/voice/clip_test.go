@@ -61,17 +61,27 @@ func TestClip(t *testing.T) {
 
 func TestLevelGuard(t *testing.T) {
 	var g levelGuard
-	if gain := g.apply(30000, 1); gain >= 0.5 {
+	if gain := g.apply(30000); gain >= 0.5 {
 		t.Errorf("a saturated voice is played at %v", gain)
 	}
 	for range 1000 {
-		g.apply(3000, 1)
+		g.apply(3000)
 	}
 	if g.gain != 1 {
 		t.Errorf("the voice did not come back up: %v", g.gain)
 	}
 	var quiet levelGuard
-	if gain := quiet.apply(10000, 1); gain != 1 {
+	if gain := quiet.apply(10000); gain != 1 {
 		t.Errorf("a voice that is not saturated is lowered: %v", gain)
+	}
+}
+
+// TestGuardKeepsVolume checks that a loud voice the guard lowers is still
+// played as loud as chosen for it, relative to the others.
+func TestGuardKeepsVolume(t *testing.T) {
+	var normal, boosted, lowered levelGuard
+	at := func(g *levelGuard, volume float32) float32 { return 30000 * volume * g.apply(30000) }
+	if a, b, c := at(&normal, 1), at(&boosted, 2), at(&lowered, 0.6); !(c < a && a < b) {
+		t.Fatalf("played at %v (100%%), %v (200%%), %v (60%%)", a, b, c)
 	}
 }

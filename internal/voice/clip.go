@@ -150,14 +150,15 @@ const (
 	guardRelease = 0.0017
 )
 
-// apply is the gain for samples whose loudest is peak, played volume times
-// as loud.
-func (g *levelGuard) apply(peak, volume float32) float32 {
+// apply is the gain for samples whose loudest is peak, as they come in: the
+// volume chosen for the user goes on top of it, so that the guard does not
+// undo it.
+func (g *levelGuard) apply(peak float32) float32 {
 	if g.gain == 0 {
 		g.gain = 1
 	}
-	if peak >= saturated && peak*volume*g.gain > guardTarget {
-		g.gain = guardTarget / (peak * volume)
+	if peak >= saturated && peak*g.gain > guardTarget {
+		g.gain = guardTarget / peak
 	} else if g.gain < 1 {
 		g.gain = min(1, g.gain+guardRelease)
 	}
