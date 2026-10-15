@@ -44,6 +44,9 @@ type User struct {
 	Collectibles *Collectibles `json:"collectibles,omitempty"`
 	// PrimaryGuild is the tag of a server that the user wears by their name.
 	PrimaryGuild *PrimaryGuild `json:"primary_guild,omitempty"`
+	// DisplayNameStyles are the font, effect and colors of the user's name,
+	// as Nitro lets them choose, if any.
+	DisplayNameStyles *DisplayNameStyles `json:"display_name_styles,omitempty"`
 }
 
 // AvatarDecoration is a frame drawn around an avatar.
@@ -340,4 +343,18 @@ const (
 	BlockedRelationship
 	IncomingFriendRequest
 	SentFriendRequest
+)
+
+// DisplayNameStyles is how a user's name is drawn: in the font FontID, with
+// the effect EffectID, in Colors, RGB.
+type DisplayNameStyles struct {
+	FontID   int      `json:"font_id"`
+	EffectID int      `json:"effect_id"`
+	Colors   []uint32 `json:"colors"`
+}
+
+// The effects of a styled name.
+const (
+	DisplayNameEffectSolid    = 1
+	DisplayNameEffectGradient = 2
 )

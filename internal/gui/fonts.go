@@ -133,6 +133,26 @@ func newShaper(name string) *text.Shaper {
 			loadFirst(files)
 		}
 	}
+	// The fonts of names, under their own names so that nothing else is
+	// drawn in them.
+	for id := range nameFonts {
+		if needs&needName(id) == 0 {
+			continue
+		}
+		data, err := os.ReadFile(nameFontPath(id))
+		if err != nil {
+			continue
+		}
+		faces, err := opentype.ParseCollection(data)
+		if err != nil {
+			slog.Warn("failed to parse the font of a name", "font", id, "err", err)
+			continue
+		}
+		for _, f := range faces {
+			f.Font = font.Font{Typeface: nameTypeface(id)}
+			collection = append(collection, f)
+		}
+	}
 	// Not the rest of Windows' fonts: Gio would read whole any font that
 	// has a character missing here, a hundred megabytes for one mark.
 	// --system-fonts (LINKCORD_SYSTEM_FONTS=1) lets it, for scripts none of

@@ -3,8 +3,6 @@ eliasnaur.com/font v0.0.0-20230308162249-dd43949cb42d/go.mod h1:OYVuxibdk9OSLX8v
 gioui.org/cpu v0.0.0-20210808092351-bfe733dd3334/go.mod h1:A8M0Cn5o+vY5LTMlnRoK3O5kG+rH0kWfJjeKd9QpBmQ=
 gioui.org/shader v1.0.9 h1:XxnqIfmClWpN49kizxH2W0JcCFrrEP4q3jZmNYaltbs=
 gioui.org/shader v1.0.9/go.mod h1:mWdiME581d/kV7/iEhLmUgUK5iZ09XR5XpduXzbePVM=
-gioui.org/x v0.10.3 h1:Q5ou4xPottXzyHq+x36ZcjFZfEV6rnyokWVPlMeyq9k=
-gioui.org/x v0.10.3/go.mod h1:zAKc92Mp1xlficmcPkUFOcREY01zMiqLmO4qhiJEEO4=
 github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=
 github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/akavel/rsrc v0.10.2 h1:Zxm8V5eI1hW4gGaYsJQUhxpjkENuG91ki8B4zCrvEsw=
@@ -17,8 +15,6 @@ github.com/alecthomas/repr v0.5.2 h1:SU73FTI9D1P5UNtvseffFSGmdNci/O6RsqzeXJtP0Qs
 github.com/alecthomas/repr v0.5.2/go.mod h1:Fr0507jx4eOXV7AlPV6AVZLYrLIuIeSOWtW57eE/O/4=
 github.com/andybalholm/brotli v1.2.6 h1:ftYnfj6usCp+UGV5kSJ3+chpMQgU+gJf/AxsUQ52REI=
 github.com/andybalholm/brotli v1.2.6/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
-github.com/ayn2op/arikawa/v3 v3.0.0-20261012034659-5b006907b2de h1:bO825TKutshlGQ/AsH6uYpZVjHQhDLElctgrh/T90aU=
-github.com/ayn2op/arikawa/v3 v3.0.0-20261012034659-5b006907b2de/go.mod h1:YARcqZmk7hDjXB+lexlXX4wDFHULafbGnF0gsD0tuNw=
 github.com/ayn2op/ningen/v3 v3.0.1-0.20260929010920-29794d5fa70e h1:QAei/IVEyZV7GcpkpcFUh37+QRqwrt57z7OT3ciHrhI=
 github.com/ayn2op/ningen/v3 v3.0.1-0.20260929010920-29794d5fa70e/go.mod h1:RsvYiMzi4Si1F7vmml5NCL2DaKIZXkNUQC7QlGTMtCw=
 github.com/ayn2op/tview v0.0.0-20261012034741-d8b2704e2b8e h1:uCt61XkJ0DqRiBd5ozXZVd2xWlNFcA0rR2hew9lAZx0=
@@ -69,6 +65,8 @@ github.com/go-text/typesetting-utils v0.0.0-20260419141703-4ffe8874dabc h1:8FGo2
 github.com/go-text/typesetting-utils v0.0.0-20260419141703-4ffe8874dabc/go.mod h1:3/62I4La/HBRX9TcTpBj4eipLiwzf+vhI+7whTc9V7o=
 github.com/godbus/dbus/v5 v5.2.3 h1:IQNSXULh6Nc4ZH8ETJ5Mdsj8loUFCWSBnsjmJkyjUB8=
 github.com/godbus/dbus/v5 v5.2.3/go.mod h1:3AAv2+hPq5rdnr5txxxRwiGjPXamgoIHgz9FPBfOp3c=
+github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 h1:DACJavvAHhabrF08vX0COfcOBJRhZ8lUbR+ZWIs0Y5g=
+github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0/go.mod h1:E/TSTwGwJL78qG/PmXZO1EjYhfJinVAhrmmHX6Z8B9k=
 github.com/gorilla/schema v1.4.1 h1:jUg5hUjCSDZpNGLuXQOgIWGdlgrIdYvgQ0wZtdK1M3E=
 github.com/gorilla/schema v1.4.1/go.mod h1:Dg5SSm5PV60mhF2NFaTV1xuYYj8tV8NOPRo4FggUMnM=
 github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
@@ -108,8 +106,12 @@ github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWD
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
 github.com/tam7t/hpkp v0.0.0-20160821193359-2b70b4024ed5 h1:YqAladjX7xpA6BM04leXMWAEjS0mTZ5kUU9KRBriQJc=
 github.com/tam7t/hpkp v0.0.0-20160821193359-2b70b4024ed5/go.mod h1:2JjD2zLQYH5HO74y5+aE3remJQvl6q4Sn6aWA2wD1Ng=
-github.com/thomas-vilte/dave-go v0.5.1 h1:sc0roOie5Ayn+3eKOUjry9kbBPDvFQCF8t+gy/EOrW4=
-github.com/thomas-vilte/dave-go v0.5.1/go.mod h1:h0UvVsCDECUe6W6dlSHEQTbx3TT13pGmHGngG0GXg1o=
+github.com/tdewolff/font v0.0.0-20261010204837-88a7f6b56918 h1:z7YAbjYz/bmG0AUx2pqmClRxUI2aCxP0rQMJAMcdmok=
+github.com/tdewolff/font v0.0.0-20261010204837-88a7f6b56918/go.mod h1:ipESUihcEdgRBhIwTRHmBTOMamccMQrp4iCxfa1aFws=
+github.com/tdewolff/parse/v2 v2.8.16 h1:bLk5svUOQRkW/Y2SJ+DeENSIkZBcTIkq+Atyv5D8feI=
+github.com/tdewolff/parse/v2 v2.8.16/go.mod h1:XdsoSFThlVIRIajAuqz1evNY7bagZS8LBOPA3aVopwQ=
+github.com/tdewolff/test v1.0.12 h1:7F21DqIajswxuche0geHdrUZRCWE4oko4b7bcmkkrxk=
+github.com/tdewolff/test v1.0.12/go.mod h1:XPuWBzvdUzhCuxWO1ojpXsyzsA5bFoS3tO/Q3kFuTG8=
 github.com/thomas-vilte/mls-go v1.6.0 h1:HGxrRe0kRfEAXu7MtTemNzqGmC/758rfGkarhYGPOYg=
 github.com/thomas-vilte/mls-go v1.6.0/go.mod h1:Cxl407ecAW94wwYLOycpQUp0UyfBk6dNmvs1hkw2yLg=
 github.com/tphakala/go-opus v1.1.0 h1:SbXQjwI/ZYy6wPXd0fafLTurkUbAhBpaYnvXYtn8uIo=

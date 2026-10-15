@@ -20,9 +20,12 @@ require (
 	github.com/ayn2op/tview v0.0.0-20261012034741-d8b2704e2b8e
 	github.com/bogdanfinn/fhttp v0.6.9
 	github.com/bogdanfinn/tls-client v1.16.0
+	github.com/disgoorg/godave v0.3.0
+	github.com/gabstv/go-bsdiff v1.0.5
 	github.com/gdamore/tcell/v3 v3.6.0
 	github.com/gen2brain/malgo v0.11.26
 	github.com/gorilla/websocket v1.5.3
+	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/klauspost/compress v1.20.1
 	github.com/mattn/go-shellwords v1.0.16
 	github.com/ncruces/zenity v0.10.15
@@ -30,13 +33,17 @@ require (
 	github.com/sahilm/fuzzy v0.1.3
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
+	github.com/tdewolff/font v0.0.0-20261010204837-88a7f6b56918
 	github.com/thomas-vilte/dave-go v0.5.1
+	github.com/thomas-vilte/mls-go v1.6.0
 	github.com/tphakala/go-opus v1.1.0
 	github.com/yuin/goldmark v1.8.6
 	github.com/zalando/go-keyring v0.2.8
 	golang.design/x/clipboard v0.11.0
+	golang.org/x/crypto v0.58.0
 	golang.org/x/exp/shiny v0.0.0-20261011100332-faecfb24eb49
 	golang.org/x/image v0.47.0
+	golang.org/x/sys v0.49.0
 )
 
 require (
@@ -52,31 +59,27 @@ require (
 	github.com/cloudflare/circl v1.6.5 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/dchest/jsmin v1.0.0 // indirect
-	github.com/disgoorg/godave v0.3.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.8.4 // indirect
 	github.com/dsnet/compress v0.0.0-20171208185109-cc9eb1d7ad76 // indirect
 	github.com/ebitengine/purego v0.11.1 // indirect
-	github.com/gabstv/go-bsdiff v1.0.5 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
 	github.com/godbus/dbus/v5 v5.2.3 // indirect
+	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/gorilla/schema v1.4.1 // indirect
-	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
 	github.com/josephspurrier/goversioninfo v1.7.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/randall77/makefat v0.0.0-20260406194835-1b91746796b7 // indirect
 	github.com/tam7t/hpkp v0.0.0-20160821193359-2b70b4024ed5 // indirect
-	github.com/thomas-vilte/mls-go v1.6.0 // indirect
+	github.com/tdewolff/parse/v2 v2.8.16 // indirect
 	github.com/tphakala/simd v1.11.0 // indirect
 	github.com/twmb/murmur3 v1.2.1 // indirect
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect
 	golang.design/x/x11 v0.2.0 // indirect
-	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
 	golang.org/x/mobile v0.0.0-20261011034528-197770444867 // indirect
 	golang.org/x/net v0.61.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/term v0.47.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.16.0 // indirect

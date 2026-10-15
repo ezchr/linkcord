@@ -648,7 +648,9 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 		layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 		section(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(bold(label(th, 20, colorHeader, name)).Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return styledName(gtx, bold(label(th, 20, colorHeader, name)), user)
+				}),
 				layout.Rigid(c.linkcordBadge(user.ID, 20)),
 			)
 		}),

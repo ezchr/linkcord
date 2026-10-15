@@ -24,8 +24,11 @@ func (u *ui) startDemo() {
 	me := discord.User{ID: discord.UserID(id(1)), Discriminator: "0", Username: "demo_user", DisplayName: "You (demo)"}
 	cab.MyselfSet(me, false)
 	users := []discord.User{
-		{ID: discord.UserID(id(2)), Discriminator: "0", Username: "ana", DisplayName: "Ana", PrimaryGuild: &discord.PrimaryGuild{GuildID: discord.GuildID(id(100)), Enabled: true, Tag: "DEMO"}},
-		{ID: discord.UserID(id(3)), Discriminator: "0", Username: "beto", DisplayName: "Beto"},
+		{ID: discord.UserID(id(2)), Discriminator: "0", Username: "ana", DisplayName: "Ana", PrimaryGuild: &discord.PrimaryGuild{GuildID: discord.GuildID(id(100)), Enabled: true, Tag: "DEMO"},
+			// Names styled with Nitro.
+			DisplayNameStyles: &discord.DisplayNameStyles{FontID: 14, EffectID: discord.DisplayNameEffectGradient, Colors: []uint32{0x5865f2, 0xeb459e}}},
+		{ID: discord.UserID(id(3)), Discriminator: "0", Username: "beto", DisplayName: "Beto",
+			DisplayNameStyles: &discord.DisplayNameStyles{FontID: 3, EffectID: discord.DisplayNameEffectSolid, Colors: []uint32{0x57f287}}},
 		{ID: discord.UserID(id(4)), Discriminator: "0", Username: "carla", DisplayName: "Carla"},
 		{ID: discord.UserID(id(5)), Discriminator: "0", Username: "dani", DisplayName: "Dani ダニ"},
 		{ID: discord.UserID(id(6)), Discriminator: "0", Username: "demo_bot", DisplayName: "Welcome Bot", Bot: true},

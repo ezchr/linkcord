@@ -368,7 +368,7 @@ func (c *chatView) layoutMemberName(gtx layout.Context, m *discord.Member, guild
 	ngtx.Constraints.Min = image.Point{}
 	ngtx.Constraints.Max.X = max(gtx.Constraints.Max.X-used, 0)
 	macro := op.Record(gtx.Ops)
-	ndims := oneLine(name).Layout(ngtx)
+	ndims := styledName(ngtx, oneLine(name), m.User)
 	nameCall := macro.Stop()
 	height := ndims.Size.Y
 	for _, s := range sizes {
