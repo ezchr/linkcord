@@ -183,6 +183,9 @@ type Session struct {
 	sent, failed atomic.Uint64
 	// received counts the packets heard and decrypted.
 	received atomic.Uint64
+	// leftAt is when this end last left a voice channel itself, in Unix
+	// nanoseconds.
+	leftAt atomic.Int64
 	failedAt     time.Time
 }
 
@@ -256,6 +259,11 @@ func (s *Session) follow(event *gateway.VoiceStateUpdateEvent) {
 	defer s.mu.Unlock()
 
 	status, own := s.Status(), event.SessionID == s.state.Ready().SessionID
+	// Leaving, then joining, as joining again does, has the news of the leave
+	// come once the join is done, as it waits for the join: it is not news.
+	if own && !event.ChannelID.IsValid() && status.Joined && time.Since(time.Unix(0, s.leftAt.Load())) < 10*time.Second {
+		return
+	}
 	switch {
 	case !status.Joined || own && event.ChannelID == status.ChannelID:
 	case own && event.ChannelID.IsValid():
@@ -449,6 +457,7 @@ func (s *Session) Join(channelID discord.ChannelID) (err error) {
 	// group is a leave and a join: moved in place, the connection waited for
 	// what Discord had already sent, and the call never connected.
 	if prev := s.joinedChannel; prev.IsValid() && prev != channelID && s.crossesKinds(prev, channelID) {
+		s.leftAt.Store(time.Now().UnixNano())
 		if err := session.Leave(ctx); err != nil {
 			slog.Warn("could not leave before moving to the call", "err", err)
 		}
@@ -499,6 +508,7 @@ func (s *Session) Leave() error {
 
 func (s *Session) leave() error {
 	defer s.left()
+	s.leftAt.Store(time.Now().UnixNano())
 
 	session := s.session.Load()
 	if session == nil {
@@ -610,44 +620,35 @@ func (s *Session) mix(output, _ []byte) {
 // make them, until they are not, or stops.
 func (s *Session) SetAutoLevel(on bool) { s.autoLevel.Store(on) }
 
-// failing is how long the packets of one SSRC have failed to be decrypted.
-type failing struct {
-	since time.Time
-	count int
-}
-
 // receive buffers what each user says in the voice channels that session joins.
 func (s *Session) receive(session *voice.Session) {
 	var (
-		// fails are the SSRCs whose packets fail to be decrypted, since a
-		// packet of theirs last could; healed is when the voice channel was
-		// last joined again for it.
-		fails  = make(map[uint32]*failing)
+		// heard is when what was said could last be decrypted, and failed how
+		// many packets could not since; healed is when the voice channel was
+		// last joined again for it. logged are the SSRCs whose failure was
+		// logged since they were last heard.
+		heard  = time.Now()
+		failed int
 		healed time.Time
+		logged = make(map[uint32]bool)
 	)
 	for {
 		packet, err := session.ReadPacket()
 		if errors.Is(err, udp.ErrDecryptionFailed) {
+			failed++
 			var de *voice.DecryptError
-			if !errors.As(err, &de) {
-				continue
-			}
-			f := fails[de.SSRC]
-			if f == nil {
-				f = &failing{since: time.Now()}
-				fails[de.SSRC] = f
-			}
-			f.count++
-			if f.count == 25 {
+			if errors.As(err, &de) && !logged[de.SSRC] {
+				logged[de.SSRC] = true
 				slog.Warn("voice packets cannot be decrypted", "ssrc", de.SSRC, "user", session.User(de.SSRC), "err", de.Err)
 			}
-			// Someone cannot be heard any more, as when the keys of the call
-			// changed, someone joining, without this end following: joining
-			// again gets the keys anew.
-			if f.count >= 50 && time.Since(f.since) > 3*time.Second && time.Since(healed) > 30*time.Second {
-				healed = time.Now()
-				clear(fails)
-				slog.Warn("someone in the voice channel cannot be decrypted; joining it again", "ssrc", de.SSRC, "user", session.User(de.SSRC), "err", de.Err)
+			// Nothing anyone says can be decrypted any more, as when the keys
+			// of the call changed, someone joining, without this end
+			// following: joining again gets the keys anew. One person who
+			// cannot be decrypted is their client's doing, which joining
+			// again does not mend.
+			if failed >= 150 && time.Since(heard) > 5*time.Second && time.Since(healed) > time.Minute {
+				healed, failed = time.Now(), 0
+				slog.Warn("nothing said in the voice channel can be decrypted; joining it again", "err", err)
 				go s.rejoin()
 			}
 			continue
@@ -658,7 +659,8 @@ func (s *Session) receive(session *voice.Session) {
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
-		delete(fails, packet.SSRC())
+		heard, failed = time.Now(), 0
+		delete(logged, packet.SSRC())
 
 		s.stateMu.Lock()
 		speaker := s.speakers[packet.SSRC()]
