@@ -138,6 +138,10 @@ type chatView struct {
 	edits     map[discord.MessageID][]editVersion
 	// translations are the messages shown in the user's language.
 	translations map[discord.MessageID]*translation
+	// reactors are who reacted, by message and emoji, asked for one at a
+	// time through reactorJobs.
+	reactors    map[reactorsKey]*reactorsEntry
+	reactorJobs chan reactorsJob
 	showEdits map[discord.MessageID]bool
 	// games are the games of Discord's list running, the newest first.
 	games        []playing

@@ -1060,6 +1060,8 @@ var spanish = map[string]string{
 	"Type Without Showing Typing": "Escribir sin mostrar que escribes",
 	"Show Games You Play": "Mostrar los juegos a los que juegas",
 	"Fake Mute": "Silencio falso",
+	"Who Reacted": "Quién reaccionó",
+	"Reactions show the pictures of some of those who reacted, beside the count.": "Las reacciones muestran las fotos de algunos de los que reaccionaron, junto al número.",
 	"Could not translate: ": "No se pudo traducir: ",
 	"It is already in your language.": "Ya está en tu idioma.",
 	"Translating…": "Traduciendo…",

@@ -813,6 +813,7 @@ func (c *chatView) layoutReactions(gtx layout.Context, m discord.Message) layout
 	var chips []layout.FlexChild
 	for _, r := range m.Reactions {
 		btn := c.reactionButton(m.ID, r.Emoji)
+		who := c.reactorsOf(m, r)
 		if btn.Clicked(gtx) {
 			id, e := m.ID, r.Emoji
 			c.u.post(func() { c.toggleReaction(id, e) })
@@ -834,6 +835,7 @@ func (c *chatView) layoutReactions(gtx layout.Context, m discord.Message) layout
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutEmoji(gtx, r.Emoji, 18) }),
 							layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
 							layout.Rigid(bold(label(th, 14, count, fmt.Sprint(r.Count))).Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutReactors(gtx, who) }),
 						)
 					})
 					call := macro.Stop()

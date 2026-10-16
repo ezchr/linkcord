@@ -73,6 +73,8 @@ type appSettings struct {
 	SplitLong bool `json:"split_long,omitempty"`
 	// NoEditHistory stops keeping what messages said before an edit.
 	NoEditHistory bool `json:"no_edit_history,omitempty"`
+	// NoWhoReacted stops showing who reacted in reactions.
+	NoWhoReacted bool `json:"no_who_reacted,omitempty"`
 	// ShowHiddenChannels lists the channels the user may not see too,
 	// dimmed, with what is known of them.
 	ShowHiddenChannels bool `json:"show_hidden_channels,omitempty"`
@@ -206,6 +208,7 @@ type generalView struct {
 	fakeMuteBtn, fakeDeafenBtn               widget.Clickable
 	splitBtn                                 widget.Clickable
 	editHistoryBtn                           widget.Clickable
+	whoReactedBtn                            widget.Clickable
 	hiddenChBtn                              widget.Clickable
 	activityBtns                             map[string]*widget.Clickable
 	platform                                 platformView
@@ -323,6 +326,10 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 		u.app.ShowHiddenChannels = !u.app.ShowHiddenChannels
 		u.saveAppSettings()
 		c.rebuildRows()
+	}
+	if g.whoReactedBtn.Clicked(gtx) {
+		u.app.NoWhoReacted = !u.app.NoWhoReacted
+		u.saveAppSettings()
 	}
 	if g.editHistoryBtn.Clicked(gtx) {
 		u.app.NoEditHistory = !u.app.NoEditHistory
@@ -461,6 +468,11 @@ func (c *chatView) featureRows() []layout.Widget {
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.deletedBtn, "Show Deleted Messages",
 				"Messages others delete while Linkcord is open stay in their place, marked with a red bin. Only you see them.", !c.u.app.HideDeleted)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.whoReactedBtn, "Who Reacted",
+				"Reactions show the pictures of some of those who reacted, beside the count.", !c.u.app.NoWhoReacted)
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
