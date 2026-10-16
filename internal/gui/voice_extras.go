@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -184,7 +185,11 @@ func topStats(m map[string]*voiceStatRow, n int) []voiceStatRow {
 	for _, r := range m {
 		out = append(out, *r)
 	}
-	slices.SortFunc(out, func(a, b voiceStatRow) int { return cmp.Compare(b.Time, a.Time) })
+	// Those with the same time by name, so that they keep their place: the
+	// map gives them in no order.
+	slices.SortFunc(out, func(a, b voiceStatRow) int {
+		return cmp.Or(cmp.Compare(b.Time, a.Time), strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)), strings.Compare(a.Name, b.Name))
+	})
 	return out[:min(n, len(out))]
 }
 
