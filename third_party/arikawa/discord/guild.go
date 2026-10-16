@@ -607,4 +607,7 @@ type ClientStatus struct {
 	// Web is the user's status set for an active web (browser, bot
 	// account) application session.
 	Web Status `json:"web,omitempty"`
+	// Embedded is the user's status set for an active session on a console
+	// (Xbox, PlayStation).
+	Embedded Status `json:"embedded,omitempty"`
 }

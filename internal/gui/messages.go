@@ -389,7 +389,13 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 									return c.guildTag(gtx, pg.GuildID, pg.Badge, pg.Tag)
 								})
 							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return c.layoutStaffTag(gtx, guildID, m.Author.ID)
+							}),
 							layout.Rigid(c.linkcordBadge(m.Author.ID, 16)),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return c.layoutPlatforms(gtx, c.presence(guildID, m.Author.ID))
+							}),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 								return c.layoutTimeoutMark(gtx, c.timeoutUntil(guildID, m.Author.ID))
 							}),

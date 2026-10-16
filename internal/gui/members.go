@@ -260,12 +260,17 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 							if !c.u.app.NoModInfo {
 								until = memberTimeout(m)
 							}
-							return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-									return c.layoutMemberName(gtx, m, guildID, label(th, 15, col, name), roleColored)
-								}),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutTimeoutMark(gtx, until) }),
-							)
+							// The crown, platforms and timeout go right after the name,
+							// which leaves them the room they take.
+							return nameWithMarks(gtx, func(gtx layout.Context) layout.Dimensions {
+								return c.layoutMemberName(gtx, m, guildID, label(th, 15, col, name), roleColored)
+							}, func(gtx layout.Context) layout.Dimensions {
+								return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutStaffTag(gtx, guildID, m.User.ID) }),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutPlatforms(gtx, presence) }),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutTimeoutMark(gtx, until) }),
+								)
+							})
 						})}
 						if !offline {
 							if line := activityLine(presence); line != "" {

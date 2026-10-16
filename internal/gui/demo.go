@@ -55,7 +55,7 @@ func (u *ui) startDemo() {
 	guild := discord.Guild{ID: discord.GuildID(id(100)), Name: "Demo Server", OwnerID: me.ID, NitroBoost: discord.NitroLevel2, NitroBoosters: 9}
 	cab.GuildSet(&guild, false)
 	roles := []discord.Role{
-		{ID: discord.RoleID(id(101)), Name: "Moderators", Color: 0x2ecc71, Position: 3, Hoist: true},
+		{ID: discord.RoleID(id(101)), Name: "Moderators", Color: 0x2ecc71, Position: 3, Hoist: true, Permissions: discord.PermissionManageMessages | discord.PermissionKickMembers},
 		{ID: discord.RoleID(id(102)), Name: "Members", Color: 0x7a4a1e, Position: 2, Hoist: true},
 		{ID: discord.RoleID(id(103)), Name: "Bots", Color: 0xf1c40f, Position: 1, Hoist: true},
 	}
@@ -69,6 +69,17 @@ func (u *ui) startDemo() {
 		if i == 1 {
 			// Beto boosts the server.
 			m.BoostedSince = discord.NewTimestamp(time.Now().Add(-30 * 24 * time.Hour))
+		}
+		// Where some are connected from, which shows beside their names.
+		switch user.Username {
+		case "ana":
+			presences[i].ClientStatus = discord.ClientStatus{Mobile: discord.OnlineStatus}
+		case "beto":
+			presences[i].ClientStatus = discord.ClientStatus{Desktop: discord.OnlineStatus, Web: discord.IdleStatus}
+		case "dani":
+			presences[i].ClientStatus = discord.ClientStatus{Desktop: discord.OnlineStatus}
+		case "elena":
+			presences[i].ClientStatus = discord.ClientStatus{Embedded: discord.DoNotDisturbStatus}
 		}
 		if user.Username == "fer" {
 			// Fer is timed out, which Show Timeouts shows.

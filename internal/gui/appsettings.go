@@ -78,6 +78,10 @@ type appSettings struct {
 	// NoModInfo hides who is timed out, which Discord shows only to
 	// moderators.
 	NoModInfo bool `json:"no_mod_info,omitempty"`
+	// NoPlatformIcons hides where people are connected from, and
+	// NoStaffTags the crowns of a server's owner, admins and managers.
+	NoPlatformIcons bool `json:"no_platform_icons,omitempty"`
+	NoStaffTags     bool `json:"no_staff_tags,omitempty"`
 	// TimeZones are where the user said people live, by user ID, for their
 	// profiles to say what time it is for them.
 	TimeZones map[string]string `json:"time_zones,omitempty"`
@@ -222,6 +226,7 @@ type generalView struct {
 	editHistoryBtn                           widget.Clickable
 	whoReactedBtn                            widget.Clickable
 	modInfoBtn                               widget.Clickable
+	platformIconsBtn, staffTagsBtn           widget.Clickable
 	rejoinBtn, narratorBtn, statsBtn         widget.Clickable
 	statsResetBtn                            widget.Clickable
 	hiddenChBtn                              widget.Clickable
@@ -357,6 +362,14 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 	}
 	if g.statsBtn.Clicked(gtx) {
 		u.app.NoVoiceStats = !u.app.NoVoiceStats
+		u.saveAppSettings()
+	}
+	if g.platformIconsBtn.Clicked(gtx) {
+		u.app.NoPlatformIcons = !u.app.NoPlatformIcons
+		u.saveAppSettings()
+	}
+	if g.staffTagsBtn.Clicked(gtx) {
+		u.app.NoStaffTags = !u.app.NoStaffTags
 		u.saveAppSettings()
 	}
 	if g.modInfoBtn.Clicked(gtx) {
@@ -504,6 +517,16 @@ func (c *chatView) featureRows() []layout.Widget {
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.deletedBtn, "Show Deleted Messages",
 				"Messages others delete while Linkcord is open stay in their place, marked with a red bin. Only you see them.", !c.u.app.HideDeleted)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.platformIconsBtn, "Platform Icons",
+				"Beside names, where each person is connected from: a computer, a phone, the web or a console, in the color of their status there.", !c.u.app.NoPlatformIcons)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.staffTagsBtn, "Staff Crowns",
+				"A crown beside the names of a server's staff: gold for its owner, silver for admins, bronze for those who manage it.", !c.u.app.NoStaffTags)
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
