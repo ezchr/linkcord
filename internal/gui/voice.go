@@ -67,6 +67,8 @@ type voiceState struct {
 	// fakeMute and fakeDeafen show the user muted or deafened to the others
 	// while they are not, until Linkcord closes.
 	fakeMute, fakeDeafen bool
+	// leftAt is when the user last left a voice channel themselves.
+	leftAt time.Time
 
 	// settings are how loud each user is played and the devices chosen,
 	// kept between runs once loaded.
@@ -569,6 +571,7 @@ func (u *ui) leaveVoice() {
 		u.chat.stopWatching()
 	}
 	v := &u.voice
+	v.leftAt = time.Now()
 	if v.demoChannel.IsValid() && u.chat != nil {
 		u.chat.demoVoice(discord.Channel{})
 		return

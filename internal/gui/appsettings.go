@@ -75,6 +75,12 @@ type appSettings struct {
 	NoEditHistory bool `json:"no_edit_history,omitempty"`
 	// NoWhoReacted stops showing who reacted in reactions.
 	NoWhoReacted bool `json:"no_who_reacted,omitempty"`
+	// VoiceRejoin joins the voice channel again when someone else
+	// disconnects the user, VoiceNarrator says aloud who joins and leaves
+	// it, and NoVoiceStats stops counting the time in voice.
+	VoiceRejoin   bool `json:"voice_rejoin,omitempty"`
+	VoiceNarrator bool `json:"voice_narrator,omitempty"`
+	NoVoiceStats  bool `json:"no_voice_stats,omitempty"`
 	// ShowHiddenChannels lists the channels the user may not see too,
 	// dimmed, with what is known of them.
 	ShowHiddenChannels bool `json:"show_hidden_channels,omitempty"`
@@ -209,6 +215,8 @@ type generalView struct {
 	splitBtn                                 widget.Clickable
 	editHistoryBtn                           widget.Clickable
 	whoReactedBtn                            widget.Clickable
+	rejoinBtn, narratorBtn, statsBtn         widget.Clickable
+	statsResetBtn                            widget.Clickable
 	hiddenChBtn                              widget.Clickable
 	activityBtns                             map[string]*widget.Clickable
 	platform                                 platformView
@@ -326,6 +334,23 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 		u.app.ShowHiddenChannels = !u.app.ShowHiddenChannels
 		u.saveAppSettings()
 		c.rebuildRows()
+	}
+	if g.rejoinBtn.Clicked(gtx) {
+		u.app.VoiceRejoin = !u.app.VoiceRejoin
+		u.saveAppSettings()
+	}
+	if g.narratorBtn.Clicked(gtx) {
+		u.app.VoiceNarrator = !u.app.VoiceNarrator
+		u.saveAppSettings()
+		if u.app.VoiceNarrator {
+			speak(tr("The narrator is on"))
+		} else {
+			stopNarrator()
+		}
+	}
+	if g.statsBtn.Clicked(gtx) {
+		u.app.NoVoiceStats = !u.app.NoVoiceStats
+		u.saveAppSettings()
 	}
 	if g.whoReactedBtn.Clicked(gtx) {
 		u.app.NoWhoReacted = !u.app.NoWhoReacted
@@ -493,6 +518,22 @@ func (c *chatView) featureRows() []layout.Widget {
 		c.hiddenActivityRows,
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		c.platformRows,
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.rejoinBtn, "Join Voice Again",
+				"When someone disconnects you from a voice channel, Linkcord joins it again a second later.", c.u.app.VoiceRejoin)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.narratorBtn, "Voice Narrator",
+				"A voice says aloud who joins and leaves the voice channel you are in, with Windows' own voice.", c.u.app.VoiceNarrator)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.statsBtn, "Voice Statistics",
+				"How long you spend in voice, in which channels and with whom. Right-click someone, then Follow in Voice, to join the channels they go to.", !c.u.app.NoVoiceStats)
+		},
+		c.voiceStatsRows,
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.fakeMuteBtn, "Fake Mute",

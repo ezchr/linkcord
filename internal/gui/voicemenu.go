@@ -273,6 +273,13 @@ func (c *chatView) userMenuItems() []menuItem {
 	}
 
 	var voice []menuItem
+	if !self && guildID.IsValid() {
+		// Joins the voice channels they go to, until stopped.
+		following := c.following == id
+		voice = append(voice, menuItem{text: "Follow in Voice", check: checked(following), act: func() {
+			c.toggleFollow(guildID, id)
+		}})
+	}
 	if vs != nil && guildID.IsValid() {
 		if has(discord.PermissionMuteMembers) {
 			on := vs.Mute

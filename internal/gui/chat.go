@@ -138,6 +138,12 @@ type chatView struct {
 	edits     map[discord.MessageID][]editVersion
 	// translations are the messages shown in the user's language.
 	translations map[discord.MessageID]*translation
+	// following is who the user follows from voice channel to voice
+	// channel, lastVoice the voice channel they were last in, and stats how
+	// long they spent in voice.
+	following discord.UserID
+	lastVoice discord.VoiceState
+	stats     *voiceStats
 	// reactors are who reacted, by message and emoji, asked for one at a
 	// time through reactorJobs.
 	reactors    map[reactorsKey]*reactorsEntry
@@ -603,6 +609,10 @@ func (c *chatView) close() {
 	c.u.voice.demoChannel = 0
 	c.stopEvents()
 	close(c.done)
+	stopNarrator()
+	if c.stats != nil {
+		c.stats.save()
+	}
 	st := c.st
 	go func() {
 		if err := st.Close(); err != nil {
@@ -624,6 +634,7 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 		if !c.gamesWatched {
 			c.gamesWatched = true
 			c.watchGames()
+			c.watchVoiceStats()
 		}
 	}
 	c.startCommunity()
@@ -1206,6 +1217,7 @@ func (c *chatView) apply(ev gateway.Event) {
 		c.rebuildMentions()
 	case *gateway.VoiceStateUpdateEvent:
 		c.voiceSounds(ev)
+		c.voiceExtras(ev)
 		c.noteCallVoice(ev.VoiceState)
 		c.rebuildRows()
 	case *gateway.ChannelCreateEvent, *gateway.ChannelUpdateEvent, *gateway.ChannelDeleteEvent:

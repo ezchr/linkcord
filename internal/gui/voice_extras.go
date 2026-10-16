@@ -1,0 +1,212 @@
+package gui
+
+import (
+	"cmp"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"slices"
+	"sync"
+	"time"
+
+	"github.com/ayn2op/arikawa/v3/discord"
+	"github.com/ayn2op/arikawa/v3/gateway"
+)
+
+// Following someone in voice, joining again when disconnected, and how long
+// the user spends in voice and with whom.
+
+// voiceExtras follows what a voice state update means for those features.
+func (c *chatView) voiceExtras(ev *gateway.VoiceStateUpdateEvent) {
+	u := c.u
+	if ev.UserID == c.me.ID {
+		if ev.ChannelID.IsValid() {
+			c.lastVoice = ev.VoiceState
+			return
+		}
+		// Disconnected: by someone else, unless the user left a moment ago.
+		last := c.lastVoice
+		c.lastVoice = discord.VoiceState{}
+		if !u.app.VoiceRejoin || !last.ChannelID.IsValid() || time.Since(u.voice.leftAt) < 5*time.Second {
+			return
+		}
+		ch, err := c.st.Cabinet.Channel(last.ChannelID)
+		if err != nil {
+			return
+		}
+		u.voiceInfo(fmt.Sprintf(tr("Disconnected from %s, joining again…"), ch.Name))
+		time.AfterFunc(time.Second, func() {
+			u.post(func() {
+				if !c.closed && !u.voiceStatus().Joined {
+					c.joinVoice(*ch)
+				}
+			})
+		})
+		return
+	}
+	// The one followed goes to another voice channel: so does the user.
+	if c.following.IsValid() && ev.UserID == c.following && ev.ChannelID.IsValid() && ev.ChannelID != u.voiceChannel() {
+		if ch, err := c.st.Cabinet.Channel(ev.ChannelID); err == nil {
+			if c.joinable(*ch) == nil {
+				c.joinVoice(*ch)
+			}
+		}
+	}
+}
+
+// toggleFollow follows id from voice channel to voice channel, or stops.
+func (c *chatView) toggleFollow(guildID discord.GuildID, id discord.UserID) {
+	if c.following == id {
+		c.following = 0
+		c.u.voiceInfo(tr("No longer following anyone in voice"))
+		return
+	}
+	c.following = id
+	c.u.voiceInfo(fmt.Sprintf(tr("Following %s in voice"), c.memberName(guildID, id, nil)))
+	// Where they are now, the user goes too.
+	if vs, err := c.st.Cabinet.VoiceState(guildID, id); err == nil && vs.ChannelID.IsValid() && vs.ChannelID != c.u.voiceChannel() {
+		if ch, err := c.st.Cabinet.Channel(vs.ChannelID); err == nil && c.joinable(*ch) == nil {
+			c.joinVoice(*ch)
+		}
+	}
+}
+
+// voiceStats is how long the user spent in voice, by channel and with each
+// person, kept in voice-stats.json.
+type voiceStats struct {
+	Since    time.Time                `json:"since"`
+	Total    time.Duration            `json:"total"`
+	Channels map[string]*voiceStatRow `json:"channels"`
+	People   map[string]*voiceStatRow `json:"people"`
+}
+
+type voiceStatRow struct {
+	Name string        `json:"name"`
+	Time time.Duration `json:"time"`
+}
+
+var voiceStatsMu sync.Mutex
+
+func voiceStatsPath() string { return filepath.Join(filepath.Dir(logPath()), "voice-stats.json") }
+
+func loadVoiceStats() *voiceStats {
+	s := &voiceStats{Since: time.Now(), Channels: map[string]*voiceStatRow{}, People: map[string]*voiceStatRow{}}
+	if data, err := os.ReadFile(voiceStatsPath()); err == nil {
+		json.Unmarshal(data, s)
+	}
+	if s.Channels == nil {
+		s.Channels = map[string]*voiceStatRow{}
+	}
+	if s.People == nil {
+		s.People = map[string]*voiceStatRow{}
+	}
+	return s
+}
+
+func (s *voiceStats) save() {
+	data, err := json.Marshal(s)
+	if err != nil {
+		return
+	}
+	go func() {
+		voiceStatsMu.Lock()
+		defer voiceStatsMu.Unlock()
+		if err := os.WriteFile(voiceStatsPath(), data, 0o600); err != nil {
+			slog.Warn("could not keep the voice statistics", "err", err)
+		}
+	}()
+}
+
+// statTick is how often the time in voice is counted.
+const statTick = 30 * time.Second
+
+// watchVoiceStats counts, every half minute, the time in the voice channel
+// the user is in, and with whom, until done.
+func (c *chatView) watchVoiceStats() {
+	c.stats = loadVoiceStats()
+	go func() {
+		tick := time.NewTicker(statTick)
+		defer tick.Stop()
+		n := 0
+		for {
+			select {
+			case <-c.done:
+				return
+			case <-tick.C:
+			}
+			n++
+			save := n%4 == 0
+			c.u.post(func() { c.countVoice(save) })
+		}
+	}()
+}
+
+// countVoice adds a tick to the channel the user is in and to those in it.
+func (c *chatView) countVoice(save bool) {
+	st := c.u.voiceStatus()
+	if c.u.app.NoVoiceStats || !st.Joined || c.stats == nil {
+		return
+	}
+	s := c.stats
+	s.Total += statTick
+	ch, err := c.st.Cabinet.Channel(st.ChannelID)
+	if err != nil {
+		return
+	}
+	add := func(m map[string]*voiceStatRow, id, name string) {
+		r := m[id]
+		if r == nil {
+			r = new(voiceStatRow)
+			m[id] = r
+		}
+		r.Name = cmp.Or(name, r.Name)
+		r.Time += statTick
+	}
+	add(s.Channels, ch.ID.String(), ch.Name)
+	if ch.GuildID.IsValid() {
+		states, _ := c.st.Cabinet.VoiceStates(ch.GuildID)
+		for _, vs := range states {
+			if vs.ChannelID == ch.ID && vs.UserID != c.me.ID {
+				add(s.People, vs.UserID.String(), c.memberName(ch.GuildID, vs.UserID, vs.Member))
+			}
+		}
+	}
+	if save {
+		s.save()
+	}
+}
+
+// topStats are the rows of m with the most time, at most n.
+func topStats(m map[string]*voiceStatRow, n int) []voiceStatRow {
+	var out []voiceStatRow
+	for _, r := range m {
+		out = append(out, *r)
+	}
+	slices.SortFunc(out, func(a, b voiceStatRow) int { return cmp.Compare(b.Time, a.Time) })
+	return out[:min(n, len(out))]
+}
+
+// narrate says aloud who joined or left the voice channel the user is in,
+// as they chose.
+func (c *chatView) narrate(ev *gateway.VoiceStateUpdateEvent, joined bool) {
+	if !c.u.app.VoiceNarrator {
+		return
+	}
+	name := c.memberName(ev.GuildID, ev.UserID, ev.Member)
+	text := fmt.Sprintf(tr("%s left"), name)
+	if joined {
+		text = fmt.Sprintf(tr("%s joined"), name)
+	}
+	go speak(text)
+}
+
+// formatHours is d as hours and minutes.
+func formatHours(d time.Duration) string {
+	h, m := int(d.Hours()), int(d.Minutes())%60
+	if h == 0 {
+		return fmt.Sprintf("%d min", m)
+	}
+	return fmt.Sprintf("%d h %d min", h, m)
+}

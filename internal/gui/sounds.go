@@ -132,6 +132,7 @@ func (c *chatView) voiceSounds(ev *gateway.VoiceStateUpdateEvent) {
 		return
 	}
 	c.noteVoiceLog(ev.UserID, in)
+	c.narrate(ev, in)
 	if in {
 		c.callers[ev.UserID] = true
 		c.u.playSound(dcsound.UserJoin)
