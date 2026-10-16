@@ -48,13 +48,62 @@ func (c *chatView) voiceExtras(ev *gateway.VoiceStateUpdateEvent) {
 		return
 	}
 	// The one followed goes to another voice channel: so does the user.
-	if c.following.IsValid() && ev.UserID == c.following && ev.ChannelID.IsValid() && ev.ChannelID != u.voiceChannel() {
-		if ch, err := c.st.Cabinet.Channel(ev.ChannelID); err == nil {
-			if c.joinable(*ch) == nil {
-				c.joinVoice(*ch)
-			}
-		}
+	if c.following.IsValid() && ev.UserID == c.following && ev.ChannelID.IsValid() {
+		c.followGuild = ev.GuildID
+		c.followTo(ev.ChannelID)
 	}
+}
+
+// followTo joins chID, where the one followed is, unless the user is there
+// or tried a moment ago; why it cannot, the voice panel says.
+func (c *chatView) followTo(chID discord.ChannelID) {
+	u := c.u
+	if chID == u.voiceChannel() {
+		return
+	}
+	// A join takes a moment: the same one is not asked for again at once.
+	if chID == c.followTried && time.Since(c.followAt) < 6*time.Second {
+		return
+	}
+	ch, err := c.st.Cabinet.Channel(chID)
+	if err != nil {
+		return
+	}
+	c.followTried, c.followAt = chID, time.Now()
+	if err := c.joinable(*ch); err != nil {
+		u.voiceInfo(fmt.Sprintf(tr("Could not follow into %s: "), ch.Name) + tr(err.Error()))
+		return
+	}
+	c.joinVoice(*ch)
+}
+
+// watchFollow looks every two seconds where the one followed is, and joins
+// them if the user is not with them: a join missed, as one asked while the
+// voice connection was busy leaving the last channel, is tried again.
+func (c *chatView) watchFollow() {
+	if c.followWatched {
+		return
+	}
+	c.followWatched = true
+	go func() {
+		tick := time.NewTicker(2 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-c.done:
+				return
+			case <-tick.C:
+			}
+			c.u.post(func() {
+				if !c.following.IsValid() || !c.followGuild.IsValid() {
+					return
+				}
+				if vs, err := c.st.Cabinet.VoiceState(c.followGuild, c.following); err == nil && vs.ChannelID.IsValid() {
+					c.followTo(vs.ChannelID)
+				}
+			})
+		}
+	}()
 }
 
 // toggleFollow follows id from voice channel to voice channel, or stops.
@@ -64,13 +113,13 @@ func (c *chatView) toggleFollow(guildID discord.GuildID, id discord.UserID) {
 		c.u.voiceInfo(tr("No longer following anyone in voice"))
 		return
 	}
-	c.following = id
+	c.following, c.followGuild = id, guildID
+	c.followTried = 0
 	c.u.voiceInfo(fmt.Sprintf(tr("Following %s in voice"), c.memberName(guildID, id, nil)))
+	c.watchFollow()
 	// Where they are now, the user goes too.
-	if vs, err := c.st.Cabinet.VoiceState(guildID, id); err == nil && vs.ChannelID.IsValid() && vs.ChannelID != c.u.voiceChannel() {
-		if ch, err := c.st.Cabinet.Channel(vs.ChannelID); err == nil && c.joinable(*ch) == nil {
-			c.joinVoice(*ch)
-		}
+	if vs, err := c.st.Cabinet.VoiceState(guildID, id); err == nil && vs.ChannelID.IsValid() {
+		c.followTo(vs.ChannelID)
 	}
 }
 

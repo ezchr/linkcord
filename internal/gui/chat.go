@@ -143,6 +143,13 @@ type chatView struct {
 	// long they spent in voice.
 	following discord.UserID
 	lastVoice discord.VoiceState
+	// followGuild is the server of the one followed, followTried and
+	// followAt the channel last tried to follow them into and when, and
+	// followWatched whether their place is looked at.
+	followGuild   discord.GuildID
+	followTried   discord.ChannelID
+	followAt      time.Time
+	followWatched bool
 	stats     *voiceStats
 	// sched is the window to schedule messages, and those waiting.
 	sched scheduleView
