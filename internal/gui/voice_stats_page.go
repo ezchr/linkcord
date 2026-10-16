@@ -47,7 +47,7 @@ func (c *chatView) voiceStatsRows(gtx layout.Context) layout.Dimensions {
 	}
 	rows = append(rows, layout.Spacer{Height: unit.Dp(10)}.Layout, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{}.Layout(gtx, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return button(gtx, th, &g.statsResetBtn, colorSecondaryButton, "Start Again")
+			return button(gtx, th, &g.statsResetBtn, colorSecondaryButton, tr("Start Again"))
 		}))
 	})
 	return stacked(rows...)(gtx)

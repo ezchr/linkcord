@@ -237,6 +237,7 @@ func (c *chatView) updateComposer(gtx layout.Context) {
 	if cs.attachBtn.Clicked(gtx) {
 		c.attachFiles()
 	}
+	c.updateSchedule(gtx)
 	if cs.silentBtn.Clicked(gtx) {
 		cs.silent = !cs.silent
 		if cs.silent {
@@ -617,6 +618,10 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 											return layout.Dimensions{}
 										}
 										return iconButton(gtx, &cs.voice.mic, iconMic, colorMuted, colorHeader)
+									}),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										// The clock schedules the message to be sent later.
+										return c.layoutScheduleButton(gtx)
 									}),
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 										// The bell sends the next message without notifying anyone,

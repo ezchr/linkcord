@@ -144,6 +144,8 @@ type chatView struct {
 	following discord.UserID
 	lastVoice discord.VoiceState
 	stats     *voiceStats
+	// sched is the window to schedule messages, and those waiting.
+	sched scheduleView
 	// reactors are who reacted, by message and emoji, asked for one at a
 	// time through reactorJobs.
 	reactors    map[reactorsKey]*reactorsEntry
@@ -635,6 +637,7 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 			c.gamesWatched = true
 			c.watchGames()
 			c.watchVoiceStats()
+			c.watchScheduled()
 		}
 	}
 	c.startCommunity()
@@ -1472,6 +1475,7 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 	if c.act.deleting != nil {
 		c.layoutDeleteConfirm(gtx)
 	}
+	c.layoutSchedule(gtx)
 	if c.inter.modal != nil {
 		c.layoutModal(gtx)
 	}
