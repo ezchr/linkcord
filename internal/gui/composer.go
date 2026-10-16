@@ -35,9 +35,13 @@ import (
 )
 
 var (
-	iconAdd   = mustIcon(icons.ContentAddCircle)
-	iconEmoji = mustIcon(icons.SocialMood)
-	iconFile  = mustIcon(icons.EditorInsertDriveFile)
+	// iconSilentOff is the bell of messages that notify, iconSilentOn of
+	// those that do not.
+	iconSilentOff = mustIcon(icons.SocialNotificationsNone)
+	iconSilentOn  = mustIcon(icons.SocialNotificationsOff)
+	iconAdd       = mustIcon(icons.ContentAddCircle)
+	iconEmoji     = mustIcon(icons.SocialMood)
+	iconFile      = mustIcon(icons.EditorInsertDriveFile)
 )
 
 // pendingFile is a file chosen to be sent with the next message.
@@ -94,6 +98,10 @@ type composerState struct {
 	emoji *emojiPicker
 	// pasted receives the text of the clipboard pasted in the box.
 	pasted int
+	// silent sends the next message without notifying, which silentBtn
+	// turns.
+	silent    bool
+	silentBtn widget.Clickable
 
 	// The place of the box, for the popups drawn above it.
 	paneX, paneW, boxH int
@@ -228,6 +236,13 @@ func (c *chatView) updateComposer(gtx layout.Context) {
 	c.updateVoiceRecording(gtx)
 	if cs.attachBtn.Clicked(gtx) {
 		c.attachFiles()
+	}
+	if cs.silentBtn.Clicked(gtx) {
+		cs.silent = !cs.silent
+		if cs.silent {
+			c.showNotice(tr("The next message will not notify anyone"))
+		}
+		gtxFocus(c)
 	}
 	for tab, btn := range map[int]*widget.Clickable{tabEmoji: &cs.emojiBtn, tabStickers: &cs.stickerBtn, tabGIFs: &cs.gifBtn} {
 		if !btn.Clicked(gtx) {
@@ -601,6 +616,15 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 										return iconButton(gtx, &cs.voice.mic, iconMic, colorMuted, colorHeader)
 									}),
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										// The bell sends the next message without notifying anyone,
+										// crossed out while on.
+										ic, col := iconSilentOff, colorMuted
+										if cs.silent {
+											ic, col = iconSilentOn, colorAccent
+										}
+										return iconButton(gtx, &cs.silentBtn, ic, col, colorHeader)
+									}),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 										return pickerButton(gtx, &cs.gifBtn, cs.emoji != nil && cs.emoji.tab == tabGIFs, c.gifGlyph)
 									}),
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -739,27 +763,43 @@ func (c *chatView) send() {
 		return
 	}
 	cs := &c.comp
-	text := strings.TrimSpace(c.composer.Text())
+	raw := c.composer.Text()
+	text := strings.TrimSpace(raw)
 	if text == "" && len(cs.files) == 0 {
 		return
 	}
-	content := c.withMarkup(text)
-	files := cs.files
-	if utf8.RuneCountInString(text) > c.messageLimit() {
-		// Too long for a message, the text goes as message.txt, as Discord
-		// does with long text.
-		f, err := textAsFile(text)
-		if err != nil {
-			c.sendErr = tr("Could not keep the long text as a file: ") + err.Error()
+	// As on Discord, @silent before the text sends it without notifying,
+	// as the bell beside the box does.
+	silent := cs.silent
+	if rest, ok := strings.CutPrefix(text, "@silent"); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\n') {
+		silent, text = true, strings.TrimSpace(rest)
+		if text == "" && len(cs.files) == 0 {
 			return
 		}
-		content, files = "", append(slices.Clone(files), f)
+	}
+	content := c.withMarkup(text)
+	files := cs.files
+	parts := []string{content}
+	if limit := c.messageLimit(); utf8.RuneCountInString(content) > limit {
+		if c.u.app.SplitLong {
+			// Sent as several messages, as Linkcord Features chooses.
+			parts = splitMessage(content, limit)
+		} else {
+			// Too long for a message, the text goes as message.txt, as
+			// Discord does with long text.
+			f, err := textAsFile(text)
+			if err != nil {
+				c.sendErr = tr("Could not keep the long text as a file: ") + err.Error()
+				return
+			}
+			parts, files = []string{""}, append(slices.Clone(files), f)
+		}
 	}
 	kept := cs.files
 	reply, ping := c.act.replyTo, c.act.replyPing
 	c.act.replyTo = nil
 	c.composer.SetText("")
-	cs.files, cs.mentions, cs.mentionOn = nil, nil, false
+	cs.files, cs.mentions, cs.mentionOn, cs.silent = nil, nil, false, false
 	c.sendErr = ""
 	c.typingUntil = time.Time{}
 	// Show the newest messages, where this one lands.
@@ -768,57 +808,86 @@ func (c *chatView) send() {
 
 	id := c.selChannel.ID
 	if c.demo {
-		m := discord.Message{
-			ID: discord.MessageID(discord.NewSnowflake(time.Now())), ChannelID: id, GuildID: c.selChannel.GuildID,
-			Author: c.me, Content: content, Timestamp: discord.NewTimestamp(time.Now()),
-			ReferencedMessage: reply,
+		for i, part := range parts {
+			m := discord.Message{
+				ID: discord.MessageID(discord.NewSnowflake(time.Now().Add(time.Duration(i) * time.Millisecond))), ChannelID: id, GuildID: c.selChannel.GuildID,
+				Author: c.me, Content: part, Timestamp: discord.NewTimestamp(time.Now()),
+			}
+			if silent {
+				m.Flags = discord.SuppressNotifications
+			}
+			if i == 0 {
+				m.ReferencedMessage = reply
+				for _, f := range files {
+					m.Attachments = append(m.Attachments, discord.Attachment{Filename: f.name, Size: uint64(f.size), URL: discord.URL("file:///" + filepath.ToSlash(f.path))})
+				}
+			}
+			c.messages = append(c.messages, m)
 		}
-		for _, f := range files {
-			m.Attachments = append(m.Attachments, discord.Attachment{Filename: f.name, Size: uint64(f.size), URL: discord.URL("file:///" + filepath.ToSlash(f.path))})
-		}
-		c.messages = append(c.messages, m)
 		return
 	}
 	cs.sending = len(files) > 0
 	go func() {
-		data := api.SendMessageData{
-			Content: content,
-			Nonce:   strconv.FormatInt(time.Now().UnixNano(), 10),
-		}
-		if reply != nil {
-			data.Reference = &discord.MessageReference{MessageID: reply.ID, ChannelID: id, GuildID: reply.GuildID}
-			if !ping {
-				// Everything else in the message still mentions as usual.
-				data.AllowedMentions = &api.AllowedMentions{
-					Parse:       []api.AllowedMentionType{api.AllowUserMention, api.AllowRoleMention, api.AllowEveryoneMention},
-					RepliedUser: option.Some(false),
-				}
-			}
-		}
 		var opened []*os.File
 		defer func() {
 			for _, f := range opened {
 				f.Close()
 			}
 		}()
-		for _, f := range files {
-			file, err := os.Open(f.path)
-			if err != nil {
-				c.u.post(func() { c.sendErr = "Could not open \"" + f.name + "\": " + err.Error() })
-				return
+		var err error
+		sent := 0
+		for i, part := range parts {
+			data := api.SendMessageData{
+				Content: part,
+				Nonce:   strconv.FormatInt(time.Now().UnixNano(), 10),
 			}
-			opened = append(opened, file)
-			data.Files = append(data.Files, sendpart.File{Name: f.name, Reader: file})
+			if silent {
+				data.Flags = discord.SuppressNotifications
+			}
+			// The first message answers, and carries the files.
+			if i == 0 {
+				if reply != nil {
+					data.Reference = &discord.MessageReference{MessageID: reply.ID, ChannelID: id, GuildID: reply.GuildID}
+					if !ping {
+						// Everything else in the message still mentions as usual.
+						data.AllowedMentions = &api.AllowedMentions{
+							Parse:       []api.AllowedMentionType{api.AllowUserMention, api.AllowRoleMention, api.AllowEveryoneMention},
+							RepliedUser: option.Some(false),
+						}
+					}
+				}
+				for _, f := range files {
+					file, ferr := os.Open(f.path)
+					if ferr != nil {
+						c.u.post(func() {
+							cs.sending = false
+							c.sendErr = "Could not open \"" + f.name + "\": " + ferr.Error()
+						})
+						return
+					}
+					opened = append(opened, file)
+					data.Files = append(data.Files, sendpart.File{Name: f.name, Reader: file})
+				}
+			}
+			if _, err = c.st.SendMessageComplex(id, data); err != nil {
+				break
+			}
+			sent++
 		}
-		_, err := c.st.SendMessageComplex(id, data)
 		c.u.post(func() {
 			cs.sending = false
 			if err == nil || c.selChannel == nil || c.selChannel.ID != id {
 				return
 			}
+			if sent > 0 {
+				// Some of the messages went: what is left cannot be put
+				// back as written.
+				c.sendErr = fmt.Sprintf(tr("Sent %d of %d messages: "), sent, len(parts)) + err.Error()
+				return
+			}
 			c.sendErr = "Could not send the message: " + err.Error()
 			if c.composer.Text() == "" {
-				c.composer.SetText(text)
+				c.composer.SetText(raw)
 			}
 			if len(cs.files) == 0 {
 				cs.files = kept

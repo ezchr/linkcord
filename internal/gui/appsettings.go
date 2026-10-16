@@ -68,6 +68,9 @@ type appSettings struct {
 	GhostRead bool `json:"ghost_read,omitempty"`
 	// GhostTyping writes without others seeing that the user is typing.
 	GhostTyping bool `json:"ghost_typing,omitempty"`
+	// SplitLong sends text too long for a message as several messages,
+	// rather than as message.txt.
+	SplitLong bool `json:"split_long,omitempty"`
 	// NoGameDetection stops showing the games of Discord's list that run
 	// as being played.
 	NoGameDetection bool `json:"no_game_detection,omitempty"`
@@ -190,6 +193,7 @@ type generalView struct {
 	ghostBtn, ghostTypingBtn, editOthersBtn  widget.Clickable
 	gamesBtn                                 widget.Clickable
 	fakeMuteBtn, fakeDeafenBtn               widget.Clickable
+	splitBtn                                 widget.Clickable
 	font                                     fontView
 	startup, minimized, tray                 widget.Clickable
 	langs                                    [2]widget.Clickable
@@ -297,6 +301,10 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 		if !c.demo {
 			c.pushPresence()
 		}
+	}
+	if g.splitBtn.Clicked(gtx) {
+		u.app.SplitLong = !u.app.SplitLong
+		u.saveAppSettings()
 	}
 	if g.fakeMuteBtn.Clicked(gtx) {
 		u.voice.fakeMute = !u.voice.fakeMute
@@ -444,6 +452,11 @@ func (c *chatView) featureRows() []layout.Widget {
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.fakeDeafenBtn, "Fake Deafen",
 				"In voice channels the others see you deafened, while you still hear them, and they you unless muted. Off again when Linkcord closes.", c.u.voice.fakeDeafen)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.splitBtn, "Split Long Messages",
+				"Text longer than a message may be is sent as several messages, cut at lines or spaces, rather than as message.txt. Code blocks cut in two stay code.", c.u.app.SplitLong)
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
