@@ -47,16 +47,20 @@ func (c *chatView) watchSoundboard() func() {
 		}
 		c.u.post(func() {
 			u := c.u
-			if ev.ChannelID != u.voiceChannel() || u.voice.deafened || slices.Contains(u.app.SoundboardMuted, ev.UserID) {
+			if ev.ChannelID != u.voiceChannel() {
 				return
 			}
-			go c.playSoundboardSound(id, float32(volume)*u.soundboardVolume(ev.UserID))
+			// Who played it gets a blue ring while it sounds, heard or not.
+			c.noteSoundPlayed(ev.UserID, soundGuess)
+			play := !u.voice.deafened && !slices.Contains(u.app.SoundboardMuted, ev.UserID)
+			go c.playSoundboardSound(id, ev.UserID, float32(volume)*u.soundboardVolume(ev.UserID), play)
 		})
 	})
 }
 
-// playSoundboardSound plays the sound id at volume, downloading it once.
-func (c *chatView) playSoundboardSound(id string, volume float32) {
+// playSoundboardSound plays the sound id that user played at volume, if
+// play, downloading it once; the ring of user lasts as long as it.
+func (c *chatView) playSoundboardSound(id string, user discord.UserID, volume float32, play bool) {
 	u := c.u
 	var pcm []int16
 	if v, ok := soundboardCache.Load(id); ok {
@@ -74,6 +78,10 @@ func (c *chatView) playSoundboardSound(id string, volume float32) {
 		soundboardCache.Store(id, pcm)
 	}
 	u.post(func() {
+		c.noteSoundPlayed(user, pcmDuration(pcm))
+		if !play {
+			return
+		}
 		u.soundLibrary()
 		settings := u.voiceSettings()
 		u.voice.effects.Play(pcm, settings.Output, volume*settings.outputVolume())

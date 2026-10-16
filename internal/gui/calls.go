@@ -333,9 +333,7 @@ func (c *chatView) layoutCallBanner(gtx layout.Context) layout.Dimensions {
 						return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 							px := gtx.Dp(80)
 							d := c.u.picture(gtx, c.animatedAvatarURL(0, user), 80, colorFor(uint64(id)), user.DisplayOrUsername(), -1)
-							if c.u.voiceSpeaking(id) {
-								speakingRing(gtx, px, rgb(0x000000))
-							}
+							c.voiceRing(gtx, id, px, rgb(0x000000))
 							return d
 						})
 					}))

@@ -67,6 +67,9 @@ type soundboard struct {
 	loaded  map[discord.GuildID]bool
 	loading bool
 	sounds  []soundboardSound
+	// others reports whether the sounds of the user's other servers were
+	// asked for, which play anywhere with Nitro.
+	others bool
 }
 
 // soundboardSound is a sound of Discord's soundboard, or of a server's.
@@ -381,7 +384,8 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 		pointer.CursorPointer.Add(gtx.Ops)
 		return layout.Dimensions{Size: size}
 	})
-	speaking := c.u.voiceSpeaking(vs.UserID)
+	// Green while they speak, blue while a sound they played sounds.
+	ringCol, speaking := c.voiceRingColor(gtx, vs.UserID)
 	rr := clip.UniformRRect(image.Rectangle{Max: size}, radius)
 	paint.FillShape(gtx.Ops, cardColor(vs.UserID), rr.Op(gtx.Ops))
 
@@ -434,7 +438,7 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 	center := op.Offset(image.Pt((size.X-px)/2, (size.Y-px)/2)).Push(gtx.Ops)
 	if speaking {
 		ring := gtx.Dp(3)
-		paint.FillShape(gtx.Ops, colorGreen, clip.Ellipse(image.Rect(-ring, -ring, px+ring, px+ring)).Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, ringCol, clip.Ellipse(image.Rect(-ring, -ring, px+ring, px+ring)).Op(gtx.Ops))
 	}
 	c.u.picture(gtx, c.voiceAvatarURL(guildID, vs), dp, colorFor(uint64(vs.UserID)), name, -1)
 	center.Pop()
@@ -446,7 +450,7 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 
 	if speaking {
 		w := gtx.Dp(2)
-		paint.FillShape(gtx.Ops, colorGreen, clip.Stroke{Path: clip.UniformRRect(image.Rectangle{Max: size}.Inset(w/2), radius).Path(gtx.Ops), Width: float32(w)}.Op())
+		paint.FillShape(gtx.Ops, ringCol, clip.Stroke{Path: clip.UniformRRect(image.Rectangle{Max: size}.Inset(w/2), radius).Path(gtx.Ops), Width: float32(w)}.Op())
 	}
 	if rightClicked(gtx, c.rightTag("card"+vs.UserID.String()), size) {
 		c.openUserMenu(vs.UserID, guildID, vs.ChannelID)
@@ -772,6 +776,21 @@ func (c *chatView) openSoundboard() {
 	}
 	if c.demo {
 		sb.sounds, sb.loaded[0] = demoSounds, true
+		// A sound of another server, to show them.
+		if guilds, err := c.st.Cabinet.Guilds(); err == nil {
+			for _, g := range guilds {
+				if g.ID != ch.GuildID {
+					sb.sounds = append(slices.Clone(demoSounds),
+						soundboardSound{ID: 8, Name: "victory", EmojiName: "🏆", GuildID: g.ID},
+						soundboardSound{ID: 9, Name: "bruh", EmojiName: "😐", GuildID: g.ID})
+					break
+				}
+			}
+		}
+	}
+	if !sb.others && !c.demo {
+		sb.others = true
+		c.loadOtherSounds(ch.GuildID)
 	}
 	if !sb.loaded[ch.GuildID] && !sb.loading && !c.demo {
 		sb.loading = true
@@ -802,7 +821,43 @@ func (c *chatView) openSoundboard() {
 	c.openMenu(c.pointerAt, 240, c.soundItems)
 }
 
-// soundItems are the sounds of the soundboard: Discord's, then the server's.
+// loadOtherSounds asks for the sounds of the user's servers but here, one
+// server at a time, for the soundboard to offer them too.
+func (c *chatView) loadOtherSounds(here discord.GuildID) {
+	guilds, err := c.st.Cabinet.Guilds()
+	if err != nil {
+		return
+	}
+	sb := &c.sounds
+	go func() {
+		for _, g := range guilds {
+			if g.ID == here {
+				continue
+			}
+			res, err := c.st.Client.RequestJSON[struct {
+				Items []soundboardSound `json:"items"`
+			}]("GET", api.EndpointGuilds+g.ID.String()+"/soundboard-sounds")
+			if err == nil && len(res.Items) > 0 {
+				gid, items := g.ID, res.Items
+				for i := range items {
+					items[i].GuildID = gid
+				}
+				c.u.post(func() {
+					sb.sounds = append(slices.DeleteFunc(sb.sounds, func(s soundboardSound) bool { return s.GuildID == gid }),
+						slices.DeleteFunc(items, func(s soundboardSound) bool { return s.Available != nil && !*s.Available })...)
+				})
+			}
+			select {
+			case <-c.done:
+				return
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+	}()
+}
+
+// soundItems are the sounds of the soundboard: the server's, those of the
+// user's other servers, then Discord's.
 func (c *chatView) soundItems() []menuItem {
 	sb := &c.sounds
 	ch, err := c.st.Cabinet.Channel(c.u.voiceChannel())
@@ -814,27 +869,55 @@ func (c *chatView) soundItems() []menuItem {
 		items = append(items, menuItem{title: true, text: "Loading…"})
 	}
 	var own, def []menuItem
+	others := make(map[discord.GuildID][]menuItem)
 	for _, s := range sb.sounds {
-		if s.GuildID.IsValid() && s.GuildID != ch.GuildID {
-			continue
-		}
 		text := s.Name
 		if s.EmojiName != "" {
 			text = s.EmojiName + "  " + s.Name
 		}
 		it := menuItem{key: "sound" + s.ID.String(), text: text, act: func() { c.playSound(ch.ID, s) }}
-		if s.GuildID.IsValid() {
+		switch {
+		case s.GuildID == ch.GuildID && s.GuildID.IsValid():
 			own = append(own, it)
-		} else {
+		case s.GuildID.IsValid():
+			others[s.GuildID] = append(others[s.GuildID], it)
+		default:
 			def = append(def, it)
 		}
 	}
 	if len(own) > 0 {
 		items = append(items, own...)
+	}
+	// Those of the other servers, in the order of the server list, under
+	// their server's name.
+	order := slices.Clone(c.guildOrder)
+	for id := range others {
+		if !slices.Contains(order, id) {
+			order = append(order, id)
+		}
+	}
+	for _, id := range order {
+		its := others[id]
+		if len(its) == 0 {
+			continue
+		}
+		name := id.String()
+		if g, err := c.st.Cabinet.Guild(id); err == nil {
+			name = g.Name
+		}
+		title := strings.ToUpper(name)
+		if !c.hasNitro() && !c.demo {
+			// Discord lets only Nitro play them out of their server.
+			title += " · NITRO"
+		}
+		items = append(items, menuItem{sep: true}, menuItem{title: true, text: title})
+		items = append(items, its...)
+	}
+	if len(def) > 0 {
 		items = append(items, menuItem{sep: true}, menuItem{title: true, text: "DEFAULT"})
 	}
 	items = append(items, def...)
-	if !sb.loading && len(own)+len(def) == 0 {
+	if !sb.loading && len(own)+len(def)+len(others) == 0 {
 		items = append(items, menuItem{title: true, text: "No sounds"})
 	}
 	return items
@@ -844,6 +927,7 @@ func (c *chatView) soundItems() []menuItem {
 func (c *chatView) playSound(chID discord.ChannelID, s soundboardSound) {
 	if c.demo {
 		c.u.voiceInfo("Played “" + s.Name + "”")
+		c.noteSoundPlayed(c.me.ID, soundGuess)
 		return
 	}
 	body := map[string]any{"sound_id": s.ID}

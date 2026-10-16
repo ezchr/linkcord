@@ -146,6 +146,9 @@ type chatView struct {
 	stats     *voiceStats
 	// sched is the window to schedule messages, and those waiting.
 	sched scheduleView
+	// sbPlaying is until when the sound each played on the soundboard
+	// sounds, for the blue ring around their picture.
+	sbPlaying map[discord.UserID]time.Time
 	// tzClicks open the choice of where someone lives, in their profile.
 	tzClicks map[discord.UserID]*widget.Clickable
 	// reactors are who reacted, by message and emoji, asked for one at a
@@ -1862,9 +1865,7 @@ func (c *chatView) layoutVoiceMember(gtx layout.Context, r channelRow, hovered b
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					dims := c.u.picture(gtx, r.avatar, 22, colorFor(uint64(r.user)), r.label, -1)
-					if c.u.voiceSpeaking(r.user) {
-						speakingRing(gtx, dims.Size.X, bg)
-					}
+					c.voiceRing(gtx, r.user, dims.Size.X, bg)
 					return dims
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
@@ -1967,9 +1968,7 @@ func (c *chatView) layoutUserPanel(gtx layout.Context) layout.Dimensions {
 											if d := c.me.AvatarDecoration; d != nil && d.Asset != "" {
 												c.u.decoration(gtx, d.URL(false), dims.Size.X)
 											}
-											if c.u.voiceSpeaking(c.me.ID) {
-												speakingRing(gtx, dims.Size.X, bg)
-											}
+											c.voiceRing(gtx, c.me.ID, dims.Size.X, bg)
 											statusDot(gtx, c.status(discord.NullGuildID, c.me.ID), dims.Size.X, bg)
 											return dims
 										}),

@@ -212,6 +212,12 @@ func (c *chatView) avatarStatusSpeaking(gtx layout.Context, user discord.User, g
 // speakingRing draws the green ring of who is speaking over the edge of a
 // round picture of px pixels, with a thin gap of the color bg inside it.
 func speakingRing(gtx layout.Context, px int, bg colorT) {
+	coloredRing(gtx, px, bg, colorGreen)
+}
+
+// coloredRing draws a ring of col over the edge of a round picture of px
+// pixels, with a thin gap of the color bg inside it.
+func coloredRing(gtx layout.Context, px int, bg, col colorT) {
 	w := max(gtx.Dp(2), 2)
 	gap := max(gtx.Dp(1), 1)
 	r := image.Rect(0, 0, px, px)
@@ -220,7 +226,7 @@ func speakingRing(gtx layout.Context, px int, bg colorT) {
 		paint.FillShape(gtx.Ops, c, clip.Stroke{Path: e.Path(gtx.Ops), Width: float32(width)}.Op())
 	}
 	stroke(bg, w, gap)
-	stroke(colorGreen, 0, w)
+	stroke(col, 0, w)
 }
 
 // statusDot draws the status dot over the bottom right corner of an avatar
