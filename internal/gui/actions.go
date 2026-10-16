@@ -43,6 +43,7 @@ const (
 	actEdit
 	actCopy
 	actDelete
+	actTranslate
 )
 
 type actionKey struct {
@@ -304,7 +305,7 @@ func (c *chatView) layoutToolbar(gtx layout.Context, m discord.Message, row layo
 		kinds = append(kinds, actEdit)
 	}
 	if m.Content != "" {
-		kinds = append(kinds, actCopy)
+		kinds = append(kinds, actTranslate, actCopy)
 	}
 	if c.canDelete(m) || gone {
 		kinds = append(kinds, actDelete)
@@ -367,6 +368,8 @@ func actionIcon(k actionKind) (*widget.Icon, colorT) {
 		return iconEdit, colorHeader
 	case actCopy:
 		return iconCopy, colorHeader
+	case actTranslate:
+		return iconTranslate, colorHeader
 	default:
 		return iconDelete, colorRed
 	}
@@ -389,6 +392,8 @@ func (c *chatView) runAction(gtx layout.Context, m discord.Message, k actionKind
 		c.u.post(func() { c.startEdit(m) })
 	case actDelete:
 		c.u.post(func() { c.askDelete(m, shift) })
+	case actTranslate:
+		c.u.post(func() { c.translate(m) })
 	}
 }
 

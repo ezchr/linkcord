@@ -136,6 +136,8 @@ type chatView struct {
 	// edits are what messages said before they were edited, and showEdits
 	// those whose earlier words show.
 	edits     map[discord.MessageID][]editVersion
+	// translations are the messages shown in the user's language.
+	translations map[discord.MessageID]*translation
 	showEdits map[discord.MessageID]bool
 	// games are the games of Discord's list running, the newest first.
 	games        []playing

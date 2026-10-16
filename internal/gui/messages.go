@@ -410,6 +410,9 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 						}
 						return c.layoutContent(gtx, m)
 					}))
+					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return c.layoutTranslation(gtx, m)
+					}))
 				}
 				if fwd := forwardedSnapshot(m); fwd != nil {
 					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
