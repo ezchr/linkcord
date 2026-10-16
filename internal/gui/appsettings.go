@@ -71,6 +71,9 @@ type appSettings struct {
 	// SplitLong sends text too long for a message as several messages,
 	// rather than as message.txt.
 	SplitLong bool `json:"split_long,omitempty"`
+	// ShowHiddenChannels lists the channels the user may not see too,
+	// dimmed, with what is known of them.
+	ShowHiddenChannels bool `json:"show_hidden_channels,omitempty"`
 	// Platform is what the others see the user connected from, see
 	// platformChoices; empty is the web, as Linkcord is.
 	Platform string `json:"platform,omitempty"`
@@ -200,6 +203,7 @@ type generalView struct {
 	gamesBtn                                 widget.Clickable
 	fakeMuteBtn, fakeDeafenBtn               widget.Clickable
 	splitBtn                                 widget.Clickable
+	hiddenChBtn                              widget.Clickable
 	activityBtns                             map[string]*widget.Clickable
 	platform                                 platformView
 	font                                     fontView
@@ -312,6 +316,11 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 	}
 	c.updateHiddenActivities(gtx)
 	c.updatePlatform(gtx)
+	if g.hiddenChBtn.Clicked(gtx) {
+		u.app.ShowHiddenChannels = !u.app.ShowHiddenChannels
+		u.saveAppSettings()
+		c.rebuildRows()
+	}
 	if g.splitBtn.Clicked(gtx) {
 		u.app.SplitLong = !u.app.SplitLong
 		u.saveAppSettings()
@@ -466,6 +475,11 @@ func (c *chatView) featureRows() []layout.Widget {
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.fakeDeafenBtn, "Fake Deafen",
 				"In voice channels the others see you deafened, while you still hear them, and they you unless muted. Off again when Linkcord closes.", c.u.voice.fakeDeafen)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.hiddenChBtn, "Show Hidden Channels",
+				"Channels of servers you may not see are listed too, dimmed with a lock: opening one shows its topic, when it was last written in and who can see it, not its messages.", c.u.app.ShowHiddenChannels)
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {

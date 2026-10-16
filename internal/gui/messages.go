@@ -140,6 +140,8 @@ func (c *chatView) chatHeader(gtx layout.Context, title string) layout.Dimension
 func (c *chatView) layoutHistory(gtx layout.Context) layout.Dimensions {
 	th := c.u.th
 	switch {
+	case c.selectedHidden():
+		return c.layoutHiddenChannel(gtx)
 	case c.loading:
 		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			s := gtx.Dp(32)

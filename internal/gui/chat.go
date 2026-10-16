@@ -790,7 +790,7 @@ func (c *chatView) rebuildRows() {
 		case !isTextual(ch.Type) && !isVoice(ch.Type):
 			// Forums and other kinds are not supported yet.
 		case ch.Type == discord.GuildPublicThread || ch.Type == discord.GuildPrivateThread || ch.Type == discord.GuildAnnouncementThread:
-		case !c.can(ch.ID, discord.PermissionViewChannel):
+		case !c.can(ch.ID, discord.PermissionViewChannel) && !c.u.app.ShowHiddenChannels:
 		case hideMuted && c.st.ChannelIsMuted(ch.ID, ningen.UnreadOpts{}):
 		case slices.Contains(c.u.app.PinnedChannels, ch.ID):
 			pinned = append(pinned, ch)
@@ -980,6 +980,11 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	}
 	c.setTitle(title + " - " + appName)
 
+	if c.hiddenChannel(ch) {
+		// Its messages cannot be read; what is known of it shows instead.
+		c.loading = false
+		return
+	}
 	id, epoch := ch.ID, c.historyEpoch
 	demo := c.demo
 	go func() {
@@ -1240,6 +1245,12 @@ func (c *chatView) update(gtx layout.Context) {
 				c.openHome(homeFriends)
 			}
 		case rowVoice:
+			// One the user may not see cannot be joined: what is known of
+			// it shows instead.
+			if c.hiddenChannel(r.ch) {
+				c.selectChannel(r.ch)
+				break
+			}
 			c.joinVoice(r.ch)
 			c.openCall(r.ch)
 		}
@@ -1680,6 +1691,10 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 	}
 	inVoice := r.kind == rowVoice && c.u.voiceChannel() == r.ch.ID
 	dims := rowItem(gtx, c.click(discord.Snowflake(r.ch.ID)), func(gtx layout.Context, hovered bool) layout.Dimensions {
+		// A channel the user may not see, listed as they chose, is dimmed.
+		if (r.kind == rowText || r.kind == rowVoice) && c.hiddenChannel(r.ch) && !hovered {
+			defer paint.PushOpacity(gtx.Ops, 0.45).Pop()
+		}
 		col := colorMuted
 		if selected || hovered || unread != ningen.ChannelRead || inVoice {
 			col = colorHeader
@@ -1699,13 +1714,13 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 					if inVoice {
 						col = colorGreen
 					}
-					return locked(gtx, privateChannel(r.ch), func(gtx layout.Context) layout.Dimensions {
+					return locked(gtx, privateChannel(r.ch) || c.hiddenChannel(r.ch), func(gtx layout.Context) layout.Dimensions {
 						return layout.Inset{Left: unit.Dp(1), Right: unit.Dp(1)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 							return icon(gtx, iconVoice, 18, col)
 						})
 					})
 				default:
-					return locked(gtx, privateChannel(r.ch), func(gtx layout.Context) layout.Dimensions {
+					return locked(gtx, privateChannel(r.ch) || c.hiddenChannel(r.ch), func(gtx layout.Context) layout.Dimensions {
 						gtx.Constraints.Min.X = gtx.Dp(20)
 						l := label(th, 20, colorChannel, "#")
 						l.Alignment = text.Middle

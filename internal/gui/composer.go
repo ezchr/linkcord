@@ -549,6 +549,9 @@ func (c *chatView) withMarkup(text string) string {
 }
 
 func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
+	if c.selectedHidden() {
+		return layout.Dimensions{}
+	}
 	th := c.u.th
 	cs := &c.comp
 	canSend := !c.selChannel.GuildID.IsValid() || c.can(c.selChannel.ID, discord.PermissionSendMessages)
