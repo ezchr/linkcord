@@ -762,6 +762,13 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 					layout.Rigid(label(th, 13, colorText, formatDate(d.GuildMember.JoinedAt.Time())).Layout),
 				)
 			}
+			// What time it is for them, where the user said they live.
+			if user.ID != c.me.ID && !user.Bot {
+				rows = append(rows,
+					layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutLocalTime(gtx, user.ID) }),
+				)
+			}
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
 		}),
 	)

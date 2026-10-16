@@ -146,6 +146,8 @@ type chatView struct {
 	stats     *voiceStats
 	// sched is the window to schedule messages, and those waiting.
 	sched scheduleView
+	// tzClicks open the choice of where someone lives, in their profile.
+	tzClicks map[discord.UserID]*widget.Clickable
 	// reactors are who reacted, by message and emoji, asked for one at a
 	// time through reactorJobs.
 	reactors    map[reactorsKey]*reactorsEntry

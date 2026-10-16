@@ -75,6 +75,9 @@ type appSettings struct {
 	NoEditHistory bool `json:"no_edit_history,omitempty"`
 	// NoWhoReacted stops showing who reacted in reactions.
 	NoWhoReacted bool `json:"no_who_reacted,omitempty"`
+	// TimeZones are where the user said people live, by user ID, for their
+	// profiles to say what time it is for them.
+	TimeZones map[string]string `json:"time_zones,omitempty"`
 	// VoiceRejoin joins the voice channel again when someone else
 	// disconnects the user, VoiceNarrator says aloud who joins and leaves
 	// it, and NoVoiceStats stops counting the time in voice.
