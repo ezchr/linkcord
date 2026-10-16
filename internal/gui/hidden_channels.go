@@ -69,7 +69,7 @@ func (c *chatView) layoutHiddenChannel(gtx layout.Context) layout.Dimensions {
 		line("TOPIC", ch.Topic)
 	}
 	if ch.LastMessageID.IsValid() {
-		line("LAST MESSAGE", formatDate(ch.LastMessageID.Time())+" · "+formatTime(ch.LastMessageID.Time()))
+		line("LAST MESSAGE", formatTime(ch.LastMessageID.Time()))
 	}
 	line("CREATED", formatDate(ch.CreatedAt()))
 	if who := c.whoSees(ch); len(who) > 0 {

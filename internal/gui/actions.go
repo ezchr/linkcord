@@ -525,8 +525,11 @@ func (c *chatView) saveEdit(id discord.MessageID) {
 		return
 	}
 	// Shown at once; the update from Discord confirms it.
+	edited := m
+	edited.Content, edited.EditedTimestamp = text, discord.NewTimestamp(time.Now())
+	c.noteEdit(m, edited)
 	c.messages[i].Content = text
-	c.messages[i].EditedTimestamp = discord.NewTimestamp(time.Now())
+	c.messages[i].EditedTimestamp = edited.EditedTimestamp
 	delete(c.selectables, id)
 	delete(c.richStates, id)
 	if c.demo {

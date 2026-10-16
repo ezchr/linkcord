@@ -71,6 +71,8 @@ type appSettings struct {
 	// SplitLong sends text too long for a message as several messages,
 	// rather than as message.txt.
 	SplitLong bool `json:"split_long,omitempty"`
+	// NoEditHistory stops keeping what messages said before an edit.
+	NoEditHistory bool `json:"no_edit_history,omitempty"`
 	// ShowHiddenChannels lists the channels the user may not see too,
 	// dimmed, with what is known of them.
 	ShowHiddenChannels bool `json:"show_hidden_channels,omitempty"`
@@ -203,6 +205,7 @@ type generalView struct {
 	gamesBtn                                 widget.Clickable
 	fakeMuteBtn, fakeDeafenBtn               widget.Clickable
 	splitBtn                                 widget.Clickable
+	editHistoryBtn                           widget.Clickable
 	hiddenChBtn                              widget.Clickable
 	activityBtns                             map[string]*widget.Clickable
 	platform                                 platformView
@@ -320,6 +323,13 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 		u.app.ShowHiddenChannels = !u.app.ShowHiddenChannels
 		u.saveAppSettings()
 		c.rebuildRows()
+	}
+	if g.editHistoryBtn.Clicked(gtx) {
+		u.app.NoEditHistory = !u.app.NoEditHistory
+		u.saveAppSettings()
+		if u.app.NoEditHistory {
+			clear(c.edits)
+		}
 	}
 	if g.splitBtn.Clicked(gtx) {
 		u.app.SplitLong = !u.app.SplitLong
@@ -451,6 +461,11 @@ func (c *chatView) featureRows() []layout.Widget {
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.deletedBtn, "Show Deleted Messages",
 				"Messages others delete while Linkcord is open stay in their place, marked with a red bin. Only you see them.", !c.u.app.HideDeleted)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.editHistoryBtn, "Show Edit History",
+				"What messages said before they were edited is kept while Linkcord is open: their \"(edited)\" shows it. Only you see it.", !c.u.app.NoEditHistory)
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {

@@ -403,8 +403,9 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						if m.EditedTimestamp.IsValid() {
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutEditHistory(gtx, m) }),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutContent(gtx, m) }),
-								layout.Rigid(label(th, 11, colorMuted, "(edited)").Layout),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutEditedMark(gtx, m) }),
 							)
 						}
 						return c.layoutContent(gtx, m)

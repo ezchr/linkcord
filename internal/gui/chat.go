@@ -133,6 +133,10 @@ type chatView struct {
 	// localEdits are what the user changed others' messages to say, only
 	// on their screen.
 	localEdits map[discord.MessageID]string
+	// edits are what messages said before they were edited, and showEdits
+	// those whose earlier words show.
+	edits     map[discord.MessageID][]editVersion
+	showEdits map[discord.MessageID]bool
 	// games are the games of Discord's list running, the newest first.
 	games        []playing
 	gamesWatched bool
@@ -1144,6 +1148,7 @@ func (c *chatView) apply(ev gateway.Event) {
 	case *gateway.MessageUpdateEvent:
 		for i := range c.messages {
 			if c.messages[i].ID == ev.ID {
+				c.noteEdit(c.messages[i], ev.Message)
 				c.messages[i] = ev.Message
 				delete(c.selectables, ev.ID)
 				delete(c.richStates, ev.ID)
