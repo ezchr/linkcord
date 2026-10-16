@@ -71,6 +71,9 @@ type appSettings struct {
 	// SplitLong sends text too long for a message as several messages,
 	// rather than as message.txt.
 	SplitLong bool `json:"split_long,omitempty"`
+	// Platform is what the others see the user connected from, see
+	// platformChoices; empty is the web, as Linkcord is.
+	Platform string `json:"platform,omitempty"`
 	// NoGameDetection stops showing the games of Discord's list that run
 	// as being played.
 	NoGameDetection bool `json:"no_game_detection,omitempty"`
@@ -198,6 +201,7 @@ type generalView struct {
 	fakeMuteBtn, fakeDeafenBtn               widget.Clickable
 	splitBtn                                 widget.Clickable
 	activityBtns                             map[string]*widget.Clickable
+	platform                                 platformView
 	font                                     fontView
 	startup, minimized, tray                 widget.Clickable
 	langs                                    [2]widget.Clickable
@@ -307,6 +311,7 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 		}
 	}
 	c.updateHiddenActivities(gtx)
+	c.updatePlatform(gtx)
 	if g.splitBtn.Clicked(gtx) {
 		u.app.SplitLong = !u.app.SplitLong
 		u.saveAppSettings()
@@ -450,6 +455,8 @@ func (c *chatView) featureRows() []layout.Widget {
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		c.hiddenActivityRows,
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		c.platformRows,
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.fakeMuteBtn, "Fake Mute",

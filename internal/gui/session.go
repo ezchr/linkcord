@@ -65,7 +65,7 @@ func init() {
 func newState(token string) *ningen.State {
 	id := gateway.NewIdentifier(gateway.IdentifyCommand{
 		Token:      token,
-		Properties: http.IdentifyProperties(),
+		Properties: withPlatform(http.IdentifyProperties()),
 		Capabilities: gateway.LazyUserNotes |
 			gateway.VersionedReadStates |
 			gateway.VersionedUserGuildSetttings |

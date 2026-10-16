@@ -177,6 +177,7 @@ func newUI(w *app.Window) *ui {
 	_, statErr := os.Stat(appSettingsPath())
 	firstRun := errors.Is(statErr, os.ErrNotExist)
 	settings := loadAppSettings()
+	identifyPlatform.Store(settings.Platform)
 	// The first time, Linkcord speaks the language Windows is in; the
 	// choice is kept, and can be changed in the settings. Who used it
 	// before keeps English.
