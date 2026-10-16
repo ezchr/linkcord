@@ -70,6 +70,10 @@ func (u *ui) startDemo() {
 			// Beto boosts the server.
 			m.BoostedSince = discord.NewTimestamp(time.Now().Add(-30 * 24 * time.Hour))
 		}
+		if user.Username == "fer" {
+			// Fer is timed out, which Show Timeouts shows.
+			m.CommunicationDisabledUntil = discord.NewTimestamp(time.Now().Add(3*time.Hour + 20*time.Minute))
+		}
 		cab.MemberSet(guild.ID, &m, false)
 		p := presences[i]
 		p.User, p.GuildID = user, guild.ID

@@ -165,7 +165,7 @@ func (c *chatView) schedule(at time.Time) {
 	c.composer.SetText("")
 	c.comp.mentions = nil
 	s.open, s.err = false, ""
-	c.showNotice(fmt.Sprintf(tr("Scheduled for %s"), formatTime(at)))
+	c.showNotice(fmt.Sprintf(tr("Scheduled for %s"), tr(formatTime(at))))
 	gtxFocus(c)
 }
 

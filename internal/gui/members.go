@@ -6,6 +6,7 @@ import (
 	"image"
 	"slices"
 	"strings"
+	"time"
 
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -255,7 +256,16 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 						col := nameColor
 						rows := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return c.layoutMemberName(gtx, m, guildID, label(th, 15, col, name), roleColored)
+							until := time.Time{}
+							if !c.u.app.NoModInfo {
+								until = memberTimeout(m)
+							}
+							return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+								layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+									return c.layoutMemberName(gtx, m, guildID, label(th, 15, col, name), roleColored)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutTimeoutMark(gtx, until) }),
+							)
 						})}
 						if !offline {
 							if line := activityLine(presence); line != "" {

@@ -390,6 +390,9 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 								})
 							}),
 							layout.Rigid(c.linkcordBadge(m.Author.ID, 16)),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return c.layoutTimeoutMark(gtx, c.timeoutUntil(guildID, m.Author.ID))
+							}),
 							layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 							layout.Rigid(label(th, 12, colorMuted, formatTime(m.Timestamp.Time())).Layout),
 						)

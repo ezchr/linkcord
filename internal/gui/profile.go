@@ -762,6 +762,14 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 					layout.Rigid(label(th, 13, colorText, formatDate(d.GuildMember.JoinedAt.Time())).Layout),
 				)
 			}
+			// A timeout, which Discord shows only to moderators.
+			if until := c.timeoutUntil(p.guildID, user.ID); !until.IsZero() {
+				rows = append(rows,
+					layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+					layout.Rigid(bold(label(th, 12, colorRed, "Timed out")).Layout),
+					layout.Rigid(label(th, 13, colorText, fmt.Sprintf(tr("Until %s (%s left)"), tr(formatTime(until)), formatLeft(until))).Layout),
+				)
+			}
 			// What time it is for them, where the user said they live.
 			if user.ID != c.me.ID && !user.Bot {
 				rows = append(rows,

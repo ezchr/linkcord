@@ -75,6 +75,9 @@ type appSettings struct {
 	NoEditHistory bool `json:"no_edit_history,omitempty"`
 	// NoWhoReacted stops showing who reacted in reactions.
 	NoWhoReacted bool `json:"no_who_reacted,omitempty"`
+	// NoModInfo hides who is timed out, which Discord shows only to
+	// moderators.
+	NoModInfo bool `json:"no_mod_info,omitempty"`
 	// TimeZones are where the user said people live, by user ID, for their
 	// profiles to say what time it is for them.
 	TimeZones map[string]string `json:"time_zones,omitempty"`
@@ -218,6 +221,7 @@ type generalView struct {
 	splitBtn                                 widget.Clickable
 	editHistoryBtn                           widget.Clickable
 	whoReactedBtn                            widget.Clickable
+	modInfoBtn                               widget.Clickable
 	rejoinBtn, narratorBtn, statsBtn         widget.Clickable
 	statsResetBtn                            widget.Clickable
 	hiddenChBtn                              widget.Clickable
@@ -353,6 +357,10 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 	}
 	if g.statsBtn.Clicked(gtx) {
 		u.app.NoVoiceStats = !u.app.NoVoiceStats
+		u.saveAppSettings()
+	}
+	if g.modInfoBtn.Clicked(gtx) {
+		u.app.NoModInfo = !u.app.NoModInfo
 		u.saveAppSettings()
 	}
 	if g.whoReactedBtn.Clicked(gtx) {
@@ -496,6 +504,11 @@ func (c *chatView) featureRows() []layout.Widget {
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.deletedBtn, "Show Deleted Messages",
 				"Messages others delete while Linkcord is open stay in their place, marked with a red bin. Only you see them.", !c.u.app.HideDeleted)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.modInfoBtn, "Show Timeouts",
+				"Who is timed out, which Discord shows only to moderators, shows to you too: a red clock with how long is left beside their name, and until when in their profile.", !c.u.app.NoModInfo)
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
