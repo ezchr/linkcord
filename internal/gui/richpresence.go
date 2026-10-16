@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ayn2op/arikawa/v3/api"
@@ -94,7 +95,10 @@ func (c *chatView) setRPCActivity(conn, clientID string, activity json.RawMessag
 func (c *chatView) pushPresence() {
 	acts := make([]rpcActivity, 0, len(c.rpcActivities))
 	for _, a := range c.rpcActivities {
-		acts = append(acts, a)
+		// Those the user hides stay off their status.
+		if !c.activityHidden(a.clientID) {
+			acts = append(acts, a)
+		}
 	}
 	status := discord.OnlineStatus
 	var custom []json.RawMessage
@@ -146,6 +150,16 @@ type rpcApp struct {
 	once   sync.Once
 	name   string
 	assets map[string]string
+	// loaded is set once name and assets are.
+	loaded atomic.Bool
+}
+
+// loadedName is the application's name, once Discord said it.
+func (a *rpcApp) loadedName() string {
+	if !a.loaded.Load() {
+		return ""
+	}
+	return a.name
 }
 
 // app returns the application clientID, asking Discord the first time.
@@ -169,6 +183,7 @@ func (c *chatView) app(clientID string) *rpcApp {
 				app.assets[strings.ToLower(a.Name)] = a.ID
 			}
 		}
+		app.loaded.Store(true)
 	})
 	return app
 }

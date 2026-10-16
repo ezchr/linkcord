@@ -223,6 +223,9 @@ func (c *chatView) gameActivities() []json.RawMessage {
 	}
 	var out []json.RawMessage
 	for _, p := range c.games {
+		if c.activityHidden(p.game.ID) {
+			continue
+		}
 		if slices.ContainsFunc(mapValues(c.rpcActivities), func(a rpcActivity) bool { return a.clientID == p.game.ID }) {
 			continue
 		}

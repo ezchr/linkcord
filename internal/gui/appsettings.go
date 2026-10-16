@@ -74,6 +74,9 @@ type appSettings struct {
 	// NoGameDetection stops showing the games of Discord's list that run
 	// as being played.
 	NoGameDetection bool `json:"no_game_detection,omitempty"`
+	// HiddenActivities are the applications, by ID, never shown on the
+	// user's status, with their names.
+	HiddenActivities map[string]string `json:"hidden_activities,omitempty"`
 	// EditOthers lets the user change what others' messages say, only on
 	// their screen.
 	EditOthers bool `json:"edit_others,omitempty"`
@@ -194,6 +197,7 @@ type generalView struct {
 	gamesBtn                                 widget.Clickable
 	fakeMuteBtn, fakeDeafenBtn               widget.Clickable
 	splitBtn                                 widget.Clickable
+	activityBtns                             map[string]*widget.Clickable
 	font                                     fontView
 	startup, minimized, tray                 widget.Clickable
 	langs                                    [2]widget.Clickable
@@ -302,6 +306,7 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 			c.pushPresence()
 		}
 	}
+	c.updateHiddenActivities(gtx)
 	if g.splitBtn.Clicked(gtx) {
 		u.app.SplitLong = !u.app.SplitLong
 		u.saveAppSettings()
@@ -443,6 +448,8 @@ func (c *chatView) featureRows() []layout.Widget {
 			return switchRow(gtx, th, &g.gamesBtn, "Show Games You Play",
 				"Games Discord knows show on your profile while they run, as Discord's app shows them, from Discord's own list of games, updated daily.", !c.u.app.NoGameDetection)
 		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		c.hiddenActivityRows,
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.fakeMuteBtn, "Fake Mute",
