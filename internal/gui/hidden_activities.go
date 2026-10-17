@@ -60,21 +60,26 @@ func (c *chatView) updateHiddenActivities(gtx layout.Context) {
 		g.activityBtns = make(map[string]*widget.Clickable)
 	}
 	for _, a := range c.knownActivities() {
-		if !clickOf(g.activityBtns, a.id).Clicked(gtx) {
-			continue
+		if clickOf(g.activityBtns, a.id).Clicked(gtx) {
+			c.toggleActivityHidden(a.id, a.name)
 		}
-		app := &c.u.app
-		if c.activityHidden(a.id) {
-			delete(app.HiddenActivities, a.id)
-		} else {
-			if app.HiddenActivities == nil {
-				app.HiddenActivities = make(map[string]string)
-			}
-			app.HiddenActivities[a.id] = a.name
+	}
+}
+
+// toggleActivityHidden keeps the application id, called name, off the
+// status, or shows it again.
+func (c *chatView) toggleActivityHidden(id, name string) {
+	app := &c.u.app
+	if c.activityHidden(id) {
+		delete(app.HiddenActivities, id)
+	} else {
+		if app.HiddenActivities == nil {
+			app.HiddenActivities = make(map[string]string)
 		}
-		c.u.saveAppSettings()
-		if !c.demo {
-			c.pushPresence()
-		}
+		app.HiddenActivities[id] = name
+	}
+	c.u.saveAppSettings()
+	if !c.demo {
+		c.pushPresence()
 	}
 }

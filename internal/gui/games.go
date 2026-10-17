@@ -181,8 +181,9 @@ func (c *chatView) watchGames() {
 					if c.closed {
 						return
 					}
+					old := c.games
 					c.games = games
-					c.noteSeenGames()
+					c.noteSeenGames(old, games)
 					c.pushPresence()
 				})
 			}

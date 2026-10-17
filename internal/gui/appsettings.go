@@ -105,8 +105,8 @@ type appSettings struct {
 	HiddenActivities map[string]string `json:"hidden_activities,omitempty"`
 	// CustomGames are programs the user added as games, and SeenGames the
 	// games detected before, by application ID, with their names.
-	CustomGames []customGame      `json:"custom_games,omitempty"`
-	SeenGames   map[string]string `json:"seen_games,omitempty"`
+	CustomGames []customGame        `json:"custom_games,omitempty"`
+	SeenGames   map[string]seenGame `json:"seen_games,omitempty"`
 	// EditOthers lets the user change what others' messages say, only on
 	// their screen.
 	EditOthers bool `json:"edit_others,omitempty"`
