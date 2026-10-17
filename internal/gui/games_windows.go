@@ -32,6 +32,45 @@ func runningExecutables() []string {
 	return out
 }
 
+var (
+	procIsWindowVisible          = windows.NewLazySystemDLL("user32.dll").NewProc("IsWindowVisible")
+	procInternalGetWindowText    = windows.NewLazySystemDLL("user32.dll").NewProc("InternalGetWindowText")
+	procGetWindowThreadProcessId = windows.NewLazySystemDLL("user32.dll").NewProc("GetWindowThreadProcessId")
+)
+
+// windowExecutables are the paths of the programs with a window shown, with
+// a title, as those a person uses rather than those in the background, but
+// Linkcord. The titles are read without sending the windows messages, which
+// a window that does not answer, or Linkcord's own, would wait on.
+func windowExecutables() []string {
+	self := windows.GetCurrentProcessId()
+	pids := make(map[uint32]bool)
+	var title [2]uint16
+	cb := windows.NewCallback(func(hwnd windows.HWND, _ uintptr) uintptr {
+		var pid uint32
+		procGetWindowThreadProcessId.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&pid)))
+		if pid == 0 || pid == self || pids[pid] {
+			return 1
+		}
+		if v, _, _ := procIsWindowVisible.Call(uintptr(hwnd)); v == 0 {
+			return 1
+		}
+		if n, _, _ := procInternalGetWindowText.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&title[0])), uintptr(len(title))); n == 0 {
+			return 1
+		}
+		pids[pid] = true
+		return 1
+	})
+	windows.EnumWindows(cb, nil)
+	var out []string
+	for pid := range pids {
+		if p := processPath(pid); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func processPath(pid uint32) string {
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {

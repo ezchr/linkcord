@@ -165,6 +165,9 @@ type chatView struct {
 	showEdits map[discord.MessageID]bool
 	// games are the games of Discord's list running, the newest first.
 	games        []playing
+	// customGames are the programs the user added as games, for the
+	// detection's goroutine.
+	customGames atomic.Pointer[gameList]
 	gamesWatched bool
 	// myStatus is the status the user chose here, kept over what the
 	// sessions say.
@@ -649,6 +652,7 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 		c.u.startRPC()
 		if !c.gamesWatched {
 			c.gamesWatched = true
+			c.applyCustomGames()
 			c.watchGames()
 			c.watchVoiceStats()
 			c.watchScheduled()

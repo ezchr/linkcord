@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"gioui.org/layout"
-	"gioui.org/unit"
 	"gioui.org/widget"
 )
 
@@ -78,31 +77,4 @@ func (c *chatView) updateHiddenActivities(gtx layout.Context) {
 			c.pushPresence()
 		}
 	}
-}
-
-// hiddenActivityRows lists the games and programs showing or hidden, each
-// with whether it shows on the status.
-func (c *chatView) hiddenActivityRows(gtx layout.Context) layout.Dimensions {
-	th := c.u.th
-	g := &c.settings.general
-	if g.activityBtns == nil {
-		g.activityBtns = make(map[string]*widget.Clickable)
-	}
-	rows := []layout.Widget{
-		label(th, 16, colorHeader, "Activities on Your Status").Layout,
-		label(th, 14, colorMuted, "Games and programs showing now, or hidden before: those turned off never show on your status.").Layout,
-		layout.Spacer{Height: unit.Dp(8)}.Layout,
-	}
-	acts := c.knownActivities()
-	if len(acts) == 0 {
-		rows = append(rows, label(th, 14, colorMuted, "Nothing is showing now.").Layout)
-	}
-	for _, a := range acts {
-		rows = append(rows, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return switchRow(gtx, th, clickOf(g.activityBtns, a.id), a.name, "", !c.activityHidden(a.id))
-			})
-		})
-	}
-	return stacked(rows...)(gtx)
 }

@@ -163,7 +163,12 @@ func (c *chatView) watchGames() {
 		tick := time.NewTicker(15 * time.Second)
 		defer tick.Stop()
 		for {
-			games := scanGames(list, runningExecutables(), since, time.Now())
+			// The programs the user added first, then Discord's list.
+			var custom gameList
+			if p := c.customGames.Load(); p != nil {
+				custom = *p
+			}
+			games := scanGames(runningExecutables(), since, time.Now(), custom, list)
 			ids := make([]string, len(games))
 			for i, p := range games {
 				ids[i] = p.game.ID
@@ -177,6 +182,7 @@ func (c *chatView) watchGames() {
 						return
 					}
 					c.games = games
+					c.noteSeenGames()
 					c.pushPresence()
 				})
 			}
@@ -191,11 +197,14 @@ func (c *chatView) watchGames() {
 
 // scanGames are the games of list among the executables running, the newest
 // first. since keeps when each started, and forgets those closed.
-func scanGames(list gameList, exes []string, since map[string]time.Time, now time.Time) []playing {
+func scanGames(exes []string, since map[string]time.Time, now time.Time, lists ...gameList) []playing {
 	found := make(map[string]*knownGame)
 	for _, exe := range exes {
-		if g := list.match(exe); g != nil {
-			found[g.ID] = g
+		for _, list := range lists {
+			if g := list.match(exe); g != nil {
+				found[g.ID] = g
+				break
+			}
 		}
 	}
 	for id := range since {
@@ -229,10 +238,15 @@ func (c *chatView) gameActivities() []json.RawMessage {
 		if slices.ContainsFunc(mapValues(c.rpcActivities), func(a rpcActivity) bool { return a.clientID == p.game.ID }) {
 			continue
 		}
-		data, err := json.Marshal(map[string]any{
+		act := map[string]any{
 			"type": 0, "name": p.game.Name, "application_id": p.game.ID,
 			"timestamps": map[string]any{"start": p.since.UnixMilli()},
-		})
+		}
+		// A program the user added has no application of Discord's.
+		if strings.HasPrefix(p.game.ID, customPrefix) {
+			delete(act, "application_id")
+		}
+		data, err := json.Marshal(act)
 		if err == nil {
 			out = append(out, data)
 		}

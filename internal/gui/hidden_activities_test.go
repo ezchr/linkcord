@@ -26,3 +26,19 @@ func TestHiddenActivities(t *testing.T) {
 		t.Fatalf("listed: %s", got)
 	}
 }
+
+func TestCustomGame(t *testing.T) {
+	custom := customList([]customGame{{Exe: "minecraft.exe", Name: "Minecraft"}})
+	discordList := indexGames([]knownGame{{ID: "1", Name: "Other", Paths: []string{"minecraft.exe"}}})
+	since := make(map[string]time.Time)
+	games := scanGames([]string{`C:\Games\minecraft.exe`}, since, time.Now(), custom, discordList)
+	if len(games) != 1 || games[0].game.Name != "Minecraft" {
+		t.Fatalf("the program added was not found first: %+v", games)
+	}
+	c := &chatView{u: &ui{}}
+	c.games = games
+	sent := c.gameActivities()
+	if len(sent) != 1 || strings.Contains(string(sent[0]), "application_id") || !strings.Contains(string(sent[0]), "Minecraft") {
+		t.Fatalf("sent %s", sent)
+	}
+}

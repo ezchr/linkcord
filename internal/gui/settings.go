@@ -42,6 +42,7 @@ const (
 	pageAppearance
 	pageAccessibility
 	pageGeneral
+	pageActivity
 	pageFeatures
 	pageAdvanced
 	settingsPages
@@ -51,7 +52,7 @@ var settingsPageNames = [settingsPages]string{
 	"My Account", "Profiles", "Content & Social", "Data & Privacy",
 	"Ignore & Block", "Nitro & Subscriptions", "Server Boost",
 	"Voice & Video", "Keybinds", "Sounds", "Appearance", "Accessibility",
-	"Windows Settings", "Linkcord Features", "Advanced",
+	"Windows Settings", "Activity Status", "Linkcord Features", "Advanced",
 }
 
 // settingsView is the screen of the user's settings, over the whole window,
@@ -95,6 +96,8 @@ type settingsView struct {
 	acct accountView
 	// General and Accessibility.
 	general generalView
+	// activity is the Activity Status page.
+	activity activityView
 	// Ignore & Block, Nitro and Server Boost.
 	billing      billingView
 	keybindsLink widget.Clickable
@@ -341,6 +344,7 @@ func (c *chatView) updateSettings(gtx layout.Context) {
 	c.updateAppearance(gtx)
 	c.updateAccount(gtx)
 	c.updateGeneral(gtx)
+	c.updateActivityPage(gtx)
 	c.updateBilling(gtx)
 	if s.agcBtn.Clicked(gtx) {
 		settings.NoAutoGain = !settings.NoAutoGain
@@ -589,6 +593,8 @@ func (c *chatView) layoutSettingsPage(gtx layout.Context) layout.Dimensions {
 		rows = c.accessibilityRows()
 	case pageGeneral:
 		rows = c.generalRows()
+	case pageActivity:
+		rows = c.activityRows()
 	case pageFeatures:
 		rows = c.featureRows()
 	case pageAdvanced:

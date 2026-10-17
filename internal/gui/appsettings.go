@@ -103,6 +103,10 @@ type appSettings struct {
 	// HiddenActivities are the applications, by ID, never shown on the
 	// user's status, with their names.
 	HiddenActivities map[string]string `json:"hidden_activities,omitempty"`
+	// CustomGames are programs the user added as games, and SeenGames the
+	// games detected before, by application ID, with their names.
+	CustomGames []customGame      `json:"custom_games,omitempty"`
+	SeenGames   map[string]string `json:"seen_games,omitempty"`
 	// EditOthers lets the user change what others' messages say, only on
 	// their screen.
 	EditOthers bool `json:"edit_others,omitempty"`
@@ -548,13 +552,6 @@ func (c *chatView) featureRows() []layout.Widget {
 			return switchRow(gtx, th, &g.ghostBtn, "Read Without Marking as Read",
 				"Opening a channel does not tell Discord you saw it: it stays unread in Discord's app, and in Linkcord too. Right-click Mark As Read still marks it. Sending a message there marks it, as Discord does.", c.u.app.GhostRead)
 		},
-		layout.Spacer{Height: unit.Dp(16)}.Layout,
-		func(gtx layout.Context) layout.Dimensions {
-			return switchRow(gtx, th, &g.gamesBtn, "Show Games You Play",
-				"Games Discord knows show on your profile while they run, as Discord's app shows them, from Discord's own list of games, updated daily.", !c.u.app.NoGameDetection)
-		},
-		layout.Spacer{Height: unit.Dp(16)}.Layout,
-		c.hiddenActivityRows,
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		c.platformRows,
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
