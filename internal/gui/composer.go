@@ -53,6 +53,12 @@ type pendingFile struct {
 	thumb        *paint.ImageOp
 	thumbLoading bool
 	edit         widget.Clickable
+	// An audio file shows its sound, audio, to trim and hear with
+	// audioPlay.
+	audio        *audioTrim
+	audioLoading bool
+	audioErr     string
+	audioPlay    widget.Clickable
 }
 
 // mentionItem is a person or role offered when typing @.
@@ -262,6 +268,7 @@ func (c *chatView) updateComposer(gtx layout.Context) {
 	}
 	for i := 0; i < len(cs.files); i++ {
 		if cs.files[i].remove.Clicked(gtx) {
+			c.stopAudioPreviews()
 			cs.files = slices.Delete(cs.files, i, i+1)
 			i--
 		}
@@ -686,6 +693,14 @@ func (c *chatView) layoutPendingFiles(gtx layout.Context) layout.Dimensions {
 			}))
 			continue
 		}
+		if isAudioFile(f.path) {
+			cards = append(cards, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Right: unit.Dp(8), Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return c.layoutAudioChip(gtx, f)
+				})
+			}))
+			continue
+		}
 		cards = append(cards, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Right: unit.Dp(8), Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Max.X = gtx.Dp(220)
@@ -786,7 +801,13 @@ func (c *chatView) send() {
 		}
 	}
 	content := c.withMarkup(text)
-	files := cs.files
+	// Audio files trimmed go as the part kept.
+	c.stopAudioPreviews()
+	files, err := c.trimmedFiles(cs.files)
+	if err != nil {
+		c.sendErr = tr("Could not trim the audio: ") + tr(err.Error())
+		return
+	}
 	parts := []string{content}
 	if limit := c.messageLimit(); utf8.RuneCountInString(content) > limit {
 		if c.u.app.SplitLong {
