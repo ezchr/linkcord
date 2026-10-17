@@ -153,6 +153,9 @@ type chatView struct {
 	stats     *voiceStats
 	// sched is the window to schedule messages, and those waiting.
 	sched scheduleView
+	// lostVoice is the bar of a voice channel left as Linkcord closed
+	// unexpectedly.
+	lostVoice lostVoiceView
 	// sbPlaying is until when the sound each played on the soundboard
 	// sounds, for the blue ring around their picture.
 	sbPlaying map[discord.UserID]time.Time
@@ -656,6 +659,7 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 			c.watchGames()
 			c.watchVoiceStats()
 			c.watchScheduled()
+			c.checkLostVoice()
 		}
 	}
 	c.startCommunity()
@@ -1452,7 +1456,16 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 			return pane(gtx, colorSidebar, members, c.layoutMembers)
 		}))
 	}
-	dims := layout.Flex{}.Layout(gtx, children...)
+	var dims layout.Dimensions
+	if c.lostVoice.ch != nil {
+		// The bar of a voice channel lost goes over the columns.
+		dims = layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(c.layoutLostVoice),
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Flex{}.Layout(gtx, children...) }),
+		)
+	} else {
+		dims = layout.Flex{}.Layout(gtx, children...)
+	}
 	c.channelResize.layout(gtx, messageX)
 	if showMembers {
 		c.memberResize.layout(gtx, gtx.Constraints.Max.X-members)

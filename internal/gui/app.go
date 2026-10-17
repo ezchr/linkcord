@@ -325,6 +325,8 @@ func (u *ui) loop() error {
 			if u.chat != nil {
 				u.chat.close()
 			}
+			// Closed as it should: no voice channel was lost.
+			forgetVoiceChannel()
 			return e.Err
 		case app.ViewEvent:
 			u.viewEvent(e)

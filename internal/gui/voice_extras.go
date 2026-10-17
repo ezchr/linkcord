@@ -23,6 +23,7 @@ import (
 func (c *chatView) voiceExtras(ev *gateway.VoiceStateUpdateEvent) {
 	u := c.u
 	if ev.UserID == c.me.ID {
+		c.noteVoiceChannel(ev.VoiceState)
 		if ev.ChannelID.IsValid() {
 			c.lastVoice = ev.VoiceState
 			return

@@ -1061,6 +1061,8 @@ var spanish = map[string]string{
 	"Show Games You Play": "Mostrar los juegos a los que juegas",
 	"Fake Mute": "Silencio falso",
 	"Activity Status": "Estado de actividad",
+	"Your voice was disconnected from %s because Linkcord closed unexpectedly.": "Tu voz se desconectó de %s porque Linkcord se cerró inesperadamente.",
+	"Reconnect": "Reconectar",
 	"Current Game": "Juego actual",
 	"No game detected": "No se detectó ningún juego",
 	"Not seeing your game?": "¿No ves tu juego?",
