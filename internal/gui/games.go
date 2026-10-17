@@ -168,7 +168,13 @@ func (c *chatView) watchGames() {
 			if p := c.customGames.Load(); p != nil {
 				custom = *p
 			}
-			games := scanGames(runningExecutables(), since, time.Now(), custom, list)
+			var games []playing
+			// With the register off, nothing is looked for.
+			if !c.gamesOff.Load() {
+				games = scanGames(runningExecutables(), since, time.Now(), custom, list)
+			} else {
+				clear(since)
+			}
 			ids := make([]string, len(games))
 			for i, p := range games {
 				ids[i] = p.game.ID

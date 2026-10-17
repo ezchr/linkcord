@@ -339,7 +339,12 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 	}
 	if g.gamesBtn.Clicked(gtx) {
 		u.app.NoGameDetection = !u.app.NoGameDetection
+		c.gamesOff.Store(u.app.NoGameDetection)
 		u.saveAppSettings()
+		if u.app.NoGameDetection {
+			// Nothing is detected nor registered until it is on again.
+			c.games = nil
+		}
 		if !c.demo {
 			c.pushPresence()
 		}

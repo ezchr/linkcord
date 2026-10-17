@@ -1064,6 +1064,8 @@ var spanish = map[string]string{
 	"Your voice was disconnected from %s because Linkcord closed unexpectedly.": "Tu voz se desconectó de %s porque Linkcord se cerró inesperadamente.",
 	"Reconnect": "Reconectar",
 	"Current Game": "Juego actual",
+	"Register Games": "Registrar juegos",
+	"Games are added to the list below the first time you open them, and show on your status while they run; turn one off below for it not to show. Off, no game is detected nor registered.": "Los juegos se añaden solos a la lista de abajo la primera vez que los abres, y salen en tu estado mientras están abiertos; apaga uno abajo para que no salga. Apagado, no se detecta ni se registra ningún juego.",
 	"No game detected": "No se detectó ningún juego",
 	"Not seeing your game?": "¿No ves tu juego?",
 	"Add it!": "¡Agrégalo!",

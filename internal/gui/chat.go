@@ -171,6 +171,9 @@ type chatView struct {
 	// customGames are the programs the user added as games, for the
 	// detection's goroutine.
 	customGames atomic.Pointer[gameList]
+	// gamesOff is that games are not detected nor registered, for the
+	// detection's goroutine.
+	gamesOff atomic.Bool
 	gamesWatched bool
 	// myStatus is the status the user chose here, kept over what the
 	// sessions say.
@@ -656,6 +659,7 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 		if !c.gamesWatched {
 			c.gamesWatched = true
 			c.applyCustomGames()
+			c.gamesOff.Store(c.u.app.NoGameDetection)
 			c.watchGames()
 			c.watchVoiceStats()
 			c.watchScheduled()

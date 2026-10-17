@@ -273,7 +273,16 @@ func (c *chatView) activityRows() []layout.Widget {
 			current = append(current, act)
 		}
 	}
-	rows := []layout.Widget{heading(tr("Current Game")), layout.Spacer{Height: unit.Dp(12)}.Layout}
+	// Games register themselves the first time they run; this turns the
+	// detection and the register off whole.
+	rows := []layout.Widget{
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.gamesBtn, "Register Games",
+				"Games are added to the list below the first time you open them, and show on your status while they run; turn one off below for it not to show. Off, no game is detected nor registered.", !c.u.app.NoGameDetection)
+		},
+		layout.Spacer{Height: unit.Dp(24)}.Layout,
+		heading(tr("Current Game")), layout.Spacer{Height: unit.Dp(12)}.Layout,
+	}
 	if len(current) == 0 {
 		rows = append(rows, settingsCard(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -348,13 +357,6 @@ func (c *chatView) activityRows() []layout.Widget {
 			})
 		})
 	}
-	rows = append(rows,
-		layout.Spacer{Height: unit.Dp(12)}.Layout,
-		func(gtx layout.Context) layout.Dimensions {
-			return switchRow(gtx, th, &g.gamesBtn, "Show Games You Play",
-				"Games show on your status while they run, as Discord's app shows them, from Discord's own list of games, updated daily, and the programs you add.", !c.u.app.NoGameDetection)
-		},
-	)
 	return rows
 }
 
