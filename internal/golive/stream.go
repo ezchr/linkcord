@@ -381,7 +381,8 @@ func (s *Stream) loop(capt *capturer) {
 	stats := time.NewTicker(5 * time.Second)
 	defer stats.Stop()
 	var frames, idrs, empty, failed, bytes int
-	var encodeTime time.Duration
+	var encodeTime, grabTime time.Duration
+	grabs := 0
 	var (
 		enc        *encoder
 		ow, oh     int
@@ -416,11 +417,13 @@ func (s *Stream) loop(capt *capturer) {
 				avg = encodeTime / time.Duration(frames)
 			}
 			s.log.Info("stream stats", "frames", frames, "idr", idrs, "kbytes", bytes/1024, "no_picture", empty, "failed", failed,
-				"encode_avg", avg.Round(time.Millisecond), "size", fmt.Sprintf("%dx%d", ow, oh),
+				"encode_avg", avg.Round(time.Millisecond),
+				"grab_avg", (grabTime / time.Duration(max(grabs, 1))).Round(time.Millisecond), "with", capt.method(),
+				"size", fmt.Sprintf("%dx%d", ow, oh),
 				"dave_ready", st.Ready, "dave_epoch", st.EpochID, "dave_version", st.ProtocolVersion,
 				"passthrough", ds.PassthroughFrames, "encrypt_failures", ds.EncryptFailures,
 				"rtcp_in", s.med.rtcpSummary(), "packets", s.med.packetCount())
-			frames, idrs, empty, failed, bytes, encodeTime = 0, 0, 0, 0, 0, 0
+			frames, idrs, empty, failed, bytes, encodeTime, grabTime, grabs = 0, 0, 0, 0, 0, 0, 0, 0
 			continue
 		case next := <-s.source:
 			capt.close()
@@ -444,7 +447,10 @@ func (s *Stream) loop(capt *capturer) {
 		case <-tick.C:
 		}
 
+		g0 := time.Now()
 		pic, ok, gone := capt.grab()
+		grabTime += time.Since(g0)
+		grabs++
 		if gone {
 			s.end(ErrSourceGone)
 			return

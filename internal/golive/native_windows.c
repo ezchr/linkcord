@@ -291,6 +291,9 @@ struct lc_capture {
 	// dupl duplicates the screen, unless nodupl, where GDI captures it.
 	lc_dupl *dupl;
 	int nodupl;
+	// For a window: dmx, dmy is the top left of the screen dupl
+	// duplicates, set when dmset.
+	int dmx, dmy, dmset;
 	HDC mem;
 	HBITMAP bmp;
 	HGDIOBJ old;
@@ -424,6 +427,82 @@ static int gdi_screen(lc_capture *c) {
 	return 1;
 }
 
+// uncovered reports whether the window shows on the screen at the points of
+// its client area at sx, sy, w by h, unhidden by any other window.
+static int uncovered(HWND hwnd, int sx, int sy, int w, int h) {
+	HWND root = GetAncestor(hwnd, GA_ROOT);
+	int xs[3] = {sx + 2, sx + w / 2, sx + w - 3};
+	int ys[3] = {sy + 2, sy + h / 2, sy + h - 3};
+	for (int i = 0; i < 3; i++) {
+		for (int j = 0; j < 3; j++) {
+			POINT p = {xs[i], ys[j]};
+			HWND at = WindowFromPoint(p);
+			if (!at || GetAncestor(at, GA_ROOT) != root) {
+				return 0;
+			}
+		}
+	}
+	return 1;
+}
+
+// window_from_screen copies the window's client area, at sx, sy, w by h,
+// from a duplication of its screen: many times faster than PrintWindow,
+// which takes tens of milliseconds a picture for games and browsers, and
+// capped such streams near 10 pictures a second. It reports whether it
+// could; the window must be uncovered and wholly on one screen.
+static int window_from_screen(lc_capture *c, int sx, int sy, int w, int h) {
+	if (c->nodupl || !uncovered(c->hwnd, sx, sy, w, h)) {
+		return 0;
+	}
+	MONITORINFO mi;
+	memset(&mi, 0, sizeof mi);
+	mi.cbSize = sizeof mi;
+	if (!GetMonitorInfoW(MonitorFromWindow(c->hwnd, MONITOR_DEFAULTTONEAREST), &mi)) {
+		return 0;
+	}
+	RECT m = mi.rcMonitor;
+	if (sx < m.left || sy < m.top || sx + w > m.right || sy + h > m.bottom) {
+		return 0;
+	}
+	// The window moved to another screen: that one is duplicated.
+	if (c->dupl && (!c->dmset || c->dmx != m.left || c->dmy != m.top)) {
+		lc_dupl_close(c->dupl);
+		c->dupl = NULL;
+	}
+	if (!c->dupl) {
+		c->dupl = lc_dupl_open(m.left, m.top);
+		c->dmset = 1;
+		c->dmx = m.left;
+		c->dmy = m.top;
+	}
+	const uint8_t *pix;
+	int pw, ph;
+	int r = lc_dupl_grab(c->dupl, &pix, &pw, &ph);
+	if (r < 0) {
+		lc_dupl_close(c->dupl);
+		c->dupl = NULL;
+		c->nodupl = 1;
+		return 0;
+	}
+	if (r == 0) {
+		return 0;
+	}
+	int ox = sx - m.left, oy = sy - m.top;
+	if (ox < 0 || oy < 0 || ox + w > pw || oy + h > ph) {
+		return 0;
+	}
+	HDC sdc = GetDC(NULL);
+	int ok = ensure(c, sdc, w, h);
+	ReleaseDC(NULL, sdc);
+	if (!ok) {
+		return 0;
+	}
+	for (int y = 0; y < h; y++) {
+		memcpy(c->bits + (size_t)y * w * 4, pix + ((size_t)(oy + y) * pw + ox) * 4, (size_t)w * 4);
+	}
+	return 1;
+}
+
 static const uint8_t *grab(lc_capture *c, int *w, int *h, int *stride, int *gone) {
 	*gone = 0;
 	if (c->hwnd) {
@@ -437,6 +516,14 @@ static const uint8_t *grab(lc_capture *c, int *w, int *h, int *stride, int *gone
 		RECT r;
 		if (!GetClientRect(c->hwnd, &r) || r.right <= 0 || r.bottom <= 0) {
 			return NULL;
+		}
+		POINT so = {0, 0};
+		ClientToScreen(c->hwnd, &so);
+		if (window_from_screen(c, so.x, so.y, r.right, r.bottom)) {
+			if (c->cursor) {
+				draw_cursor(c, so.x, so.y);
+			}
+			goto done;
 		}
 		HDC wdc = GetDC(c->hwnd);
 		if (!ensure(c, wdc, r.right, r.bottom)) {
@@ -491,6 +578,7 @@ static const uint8_t *grab(lc_capture *c, int *w, int *h, int *stride, int *gone
 	} else if (!gdi_screen(c)) {
 		return NULL;
 	}
+done:
 	GdiFlush();
 	*w = c->bw;
 	*h = c->bh;

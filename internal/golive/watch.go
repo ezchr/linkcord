@@ -81,6 +81,9 @@ type Watch struct {
 	// lastPacket is when the last video packet came, in Unix nanoseconds,
 	// and paused whether the streamer paused the stream.
 	lastPacket atomic.Int64
+	// lastDecrypted is when a picture was last decrypted end to end, and
+	// firstPacket when the first video packet came, in Unix nanoseconds.
+	lastDecrypted, firstPacket atomic.Int64
 	paused     atomic.Bool
 	// overflows are pictures the decoder had no room for; keyframes are
 	// the keyframe requests sent; deepest is the longest decode queue seen
@@ -783,6 +786,7 @@ func (w *Watch) receive() {
 		}
 		w.packets.Add(1)
 		w.lastPacket.Store(time.Now().UnixNano())
+		w.firstPacket.CompareAndSwap(0, time.Now().UnixNano())
 		if hdr[0]&0x20 != 0 {
 			w.padded.Add(1)
 		}
@@ -828,6 +832,7 @@ func (w *Watch) decode(au []byte) {
 		return
 	}
 	pic := out[:n]
+	w.lastDecrypted.Store(time.Now().UnixNano())
 	// After a picture is missing, the ones built on it would smear: they
 	// wait for a keyframe, which starts afresh.
 	if w.needIDR.Load() {
@@ -1325,4 +1330,19 @@ func (w *Watch) decrypt(au, out []byte) (int, error) {
 		}
 	}
 	return n, err
+}
+
+// Undecryptable reports how long video has come that cannot be decrypted:
+// the keys for it never came, as when the streamer's client did not welcome
+// this one. 0 while pictures decrypt, or before any video.
+func (w *Watch) Undecryptable() time.Duration {
+	first := w.firstPacket.Load()
+	if first == 0 || w.paused.Load() || w.Stalled() > 2*time.Second {
+		return 0
+	}
+	since := first
+	if last := w.lastDecrypted.Load(); last > since {
+		since = last
+	}
+	return time.Since(time.Unix(0, since))
 }

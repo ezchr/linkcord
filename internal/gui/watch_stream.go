@@ -325,6 +325,17 @@ func (c *chatView) watchStall(w *golive.Watch, vs discord.VoiceState) {
 	defer t.Stop()
 	for range t.C {
 		stalled := w.Stalled()
+		// Video that comes but never decrypts has no keys: joining again
+		// asks for them anew.
+		if locked := w.Undecryptable(); locked >= 10*time.Second {
+			slog.Warn("the stream cannot be decrypted; watching it again", "streamer", vs.UserID, "for", locked)
+			c.u.post(func() {
+				if c.watch.w == w {
+					c.startWatching(vs)
+				}
+			})
+			return
+		}
 		if stalled < 6*time.Second {
 			if w.Ended() {
 				return

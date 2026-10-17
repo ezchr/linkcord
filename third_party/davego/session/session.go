@@ -792,14 +792,34 @@ func (s *Session) processAndCommitProposalBatchLocked(proposals []byte) {
 	// commits, as when everyone uses this client.
 	if d := commitDelay(); d > 0 {
 		s.commitGen++
-		gen := s.commitGen
+		groupID := append([]byte(nil), s.groupID...)
+		before, err := s.mlsClient.client.Epoch(context.Background(), groupID)
+		if err != nil {
+			s.commitAfterDelayLocked(proposals)
+			return
+		}
 		time.AfterFunc(d, func() {
 			s.mu.Lock()
 			defer s.mu.Unlock()
-			if s.commitGen != gen || s.pendingEpoch != nil {
-				s.logger.Info("mls proposals committed by another member")
+			// Only a commit applied in the meantime, another member's or a
+			// welcome, moves the group past the epoch the proposals were
+			// for: then they are committed. Anything else, such as more
+			// proposals arriving, leaves them waiting for a commit, which
+			// this member sends, or a newcomer is never welcomed.
+			if s.mlsClient == nil || !bytes.Equal(s.groupID, groupID) {
+				s.logger.Info("mls proposals: group replaced before commit")
 				return
 			}
+			now, err := s.mlsClient.client.Epoch(context.Background(), groupID)
+			if err == nil && now != before {
+				s.logger.Info("mls proposals committed by another member", "epoch", now)
+				return
+			}
+			if s.pendingEpoch != nil && len(s.pendingCommitBytes) > 0 {
+				s.logger.Info("mls proposals: own commit already in flight")
+				return
+			}
+			s.logger.Info("mls proposals: nobody committed, committing", "epoch", before)
 			s.commitAfterDelayLocked(proposals)
 		})
 		return
