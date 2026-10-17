@@ -700,7 +700,7 @@ func (u *ui) updateVoice(gtx layout.Context) {
 			c.openCall(*ch)
 		}
 	}
-	if v.bugBtn.Clicked(gtx) {
+	if u.isDev() && v.bugBtn.Clicked(gtx) {
 		v.bugOn = !v.bugOn
 		session.SetCommitImmediately(v.bugOn)
 		slog.Warn("debug: instant DAVE commits", "on", v.bugOn)
@@ -834,8 +834,12 @@ func (u *ui) layoutVoicePanel(gtx layout.Context) layout.Dimensions {
 						gap,
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return panelButton(gtx, &v.soundBtn, iconSoundboard) }),
 						gap,
-						// Debug: reproduces the broken channel; red while on.
+						// Debug, developers only: reproduces the broken
+						// channel; red while on.
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							if !u.isDev() {
+								return layout.Dimensions{}
+							}
 							if v.bugOn {
 								return panelButtonColored(gtx, &v.bugBtn, iconBug, colorHeader, colorRed)
 							}
