@@ -94,9 +94,10 @@ func probeVideo(ctx context.Context, executable, path string) (videoMetadata, er
 	return meta, nil
 }
 
-// streamFormats are the containers a streamed video may use; formats such as
-// playlists, which point the decoder at other addresses, are not allowed.
-const streamFormats = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,ogg,flv"
+// streamFormats are the containers a streamed video or audio file may use;
+// formats such as playlists, which point the decoder at other addresses, are
+// not allowed.
+const streamFormats = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts,ogg,flv,wav,w64,mp3,flac,aac,asf,aiff"
 
 // mediaInput gives the decoder its input: a local file, or a video streamed
 // from this program on the loopback address while it downloads.
