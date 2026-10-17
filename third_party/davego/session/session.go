@@ -732,6 +732,17 @@ func (s *Session) OnDaveMLSProposals(proposals []byte) {
 // commitDelay is how long a commit waits for another member's.
 var commitDelay = 1500 * time.Millisecond
 
+// SetCommitImmediately commits at once, as before the wait: it brings back
+// the race in which Discord's own clients reject this client's commit and
+// the keys of the whole channel reset, to reproduce and study it.
+func SetCommitImmediately(on bool) {
+	if on {
+		commitDelay = 0
+	} else {
+		commitDelay = 1500 * time.Millisecond
+	}
+}
+
 // processAndCommitProposalBatchLocked processes a proposal batch and commits.
 // Must be called with s.mu held.
 func (s *Session) processAndCommitProposalBatchLocked(proposals []byte) {

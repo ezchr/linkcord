@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/thomas-vilte/dave-go/session"
 	"image"
 	"log/slog"
 	"os"
@@ -103,6 +104,12 @@ type voiceState struct {
 
 	muteBtn, deafBtn, leaveBtn, settingsBtn              widget.Clickable
 	channelBtn, camBtn, screenBtn, activityBtn, soundBtn widget.Clickable
+	// onlyBtn makes the user heard by Linkcord users only, or by everyone.
+	onlyBtn widget.Clickable
+	// bugBtn brings back the old instant commits, to reproduce the broken
+	// voice channel and log it.
+	bugBtn widget.Clickable
+	bugOn  bool
 	// clipBtn makes a clip of the voice channel, when clips are kept.
 	clipBtn widget.Clickable
 }
@@ -693,6 +700,27 @@ func (u *ui) updateVoice(gtx layout.Context) {
 			c.openCall(*ch)
 		}
 	}
+	if v.bugBtn.Clicked(gtx) {
+		v.bugOn = !v.bugOn
+		session.SetCommitImmediately(v.bugOn)
+		slog.Warn("debug: instant DAVE commits", "on", v.bugOn)
+		if v.bugOn {
+			u.voiceInfo("Bug mode on: keys commit at once (rejoin to apply)")
+		} else {
+			u.voiceInfo("Bug mode off")
+		}
+	}
+	if v.onlyBtn.Clicked(gtx) {
+		s := u.voiceSettings()
+		s.VoiceLinkcordOnly = !s.VoiceLinkcordOnly
+		u.applyVoiceSettings()
+		u.saveVoiceSettings()
+		if s.VoiceLinkcordOnly {
+			u.voiceInfo("Only Linkcord users hear you")
+		} else {
+			u.voiceInfo("Everyone hears you")
+		}
+	}
 	if v.camBtn.Clicked(gtx) {
 		u.voiceInfo("The camera is not supported yet")
 	}
@@ -805,6 +833,22 @@ func (u *ui) layoutVoicePanel(gtx layout.Context) layout.Dimensions {
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return panelButton(gtx, &v.activityBtn, iconActivity) }),
 						gap,
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return panelButton(gtx, &v.soundBtn, iconSoundboard) }),
+						gap,
+						// Debug: reproduces the broken channel; red while on.
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							if v.bugOn {
+								return panelButtonColored(gtx, &v.bugBtn, iconBug, colorHeader, colorRed)
+							}
+							return panelButton(gtx, &v.bugBtn, iconBug)
+						}),
+						gap,
+						// Lit while only Linkcord users hear the user.
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							if u.voiceSettings().VoiceLinkcordOnly {
+								return panelButtonColored(gtx, &v.onlyBtn, iconLock, colorHeader, colorAccent)
+							}
+							return panelButton(gtx, &v.onlyBtn, iconLock)
+						}),
 						// The clip of the voice channel, when clips are kept.
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							if u.app.ClipMinutes == 0 {
@@ -884,3 +928,6 @@ func (u *ui) layoutVoiceButtons(gtx layout.Context) layout.Dimensions {
 		}),
 	)
 }
+
+// iconBug is the debug button that reproduces the broken voice channel.
+var iconBug = mustIcon(icons.ActionBugReport)

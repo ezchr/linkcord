@@ -988,6 +988,8 @@ var spanish = map[string]string{
 	"Turn on voice clips in Settings to clip the voice channel": "Activa los clips de voz en Ajustes para hacer clips del canal de voz",
 	"Saving the clip…": "Guardando el clip…",
 	"Nobody said anything in the last minute": "Nadie dijo nada en el último minuto",
+	"Only Linkcord users hear you": "Solo te oyen los usuarios de Linkcord",
+	"Everyone hears you": "Todos te oyen",
 	"Only Linkcord Users Hear You": "Solo te oyen los usuarios de Linkcord",
 	"In voice channels and calls, Discord's own apps cannot play what you say; people using Linkcord hear you as usual.": "En canales de voz y llamadas, las apps de Discord no pueden reproducir lo que dices; quienes usan Linkcord te oyen como siempre.",
 	"Change Stream": "Cambiar transmisión",
