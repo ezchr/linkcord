@@ -702,6 +702,9 @@ func (c *chatView) layoutAttachment(gtx layout.Context, a discord.Attachment) la
 	if isVoiceMessage(a) {
 		return c.layoutVoiceMessage(gtx, a)
 	}
+	if isAudioAttachment(a) {
+		return c.layoutAudioAttachment(gtx, a)
+	}
 	if isImage(a) {
 		c.noteMediaBytes(string(a.URL), a.Size)
 		return c.layoutMedia(gtx, string(a.Proxy), string(a.URL), int(a.Width), int(a.Height), string(a.URL))

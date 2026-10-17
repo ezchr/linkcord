@@ -1060,6 +1060,7 @@ var spanish = map[string]string{
 	"Type Without Showing Typing": "Escribir sin mostrar que escribes",
 	"Show Games You Play": "Mostrar los juegos a los que juegas",
 	"Fake Mute": "Silencio falso",
+	"reading its sound…": "leyendo su sonido…",
 	"Could not read the sound: ": "No se pudo leer el sonido: ",
 	"this kind of audio needs FFmpeg, which Linkcord downloads the first time a stream is watched": "este tipo de audio necesita FFmpeg, que Linkcord descarga la primera vez que ves una transmisión",
 	"Trimmed: only the part kept is sent, as a WAV": "Recortado: solo se envía la parte elegida, como WAV",

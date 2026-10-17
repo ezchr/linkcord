@@ -179,6 +179,10 @@ func (u *ui) startDemo() {
 	add(channels[0].ID, guild.ID, users[0], 95*time.Minute, "the logs from yesterday", func(m *discord.Message) {
 		m.Attachments = []discord.Attachment{{Filename: "server-log.txt", URL: discord.URL(avatar), Size: 18 * 1024, ContentType: "text/plain"}}
 	})
+	// An audio file, which plays in the chat with the bars of its sound.
+	add(channels[0].ID, guild.ID, users[2], 93*time.Minute, "the song I told you about", func(m *discord.Message) {
+		m.Attachments = []discord.Attachment{{Filename: "song.mp3", URL: "https://example.test/song.mp3", Size: 3 << 20, ContentType: "audio/mpeg"}}
+	})
 	// A voice message to test with, from LINKCORD_DEMO_VOICE.
 	if voice := os.Getenv("LINKCORD_DEMO_VOICE"); voice != "" {
 		add(channels[0].ID, guild.ID, users[1], 92*time.Minute, "", func(m *discord.Message) {

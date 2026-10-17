@@ -185,6 +185,8 @@ type chatView struct {
 	// voice is the voice message playing, and voiceCtl the widgets of each.
 	voice    *voicePlayer
 	voiceCtl map[string]*voiceControls
+	// audioPreviews are the bars and lengths of audio files sent, by URL.
+	audioPreviews map[string]*audioPreview
 	// deleted keeps deleted messages, shown in their place with a sign.
 	deleted *deletedLog
 	// The video volume chosen last, kept for the next video.
