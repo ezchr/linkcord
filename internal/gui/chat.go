@@ -174,6 +174,8 @@ type chatView struct {
 	// gamesOff is that games are not detected nor registered, for the
 	// detection's goroutine.
 	gamesOff atomic.Bool
+	// admins are each server's admin roles, for the crowns beside names.
+	admins map[discord.GuildID]adminRoles
 	gamesWatched bool
 	// myStatus is the status the user chose here, kept over what the
 	// sessions say.

@@ -2,6 +2,7 @@ package gui
 
 import (
 	"image"
+	"time"
 
 	"gioui.org/f32"
 	"gioui.org/layout"
@@ -15,8 +16,8 @@ import (
 )
 
 // Beside names: where someone is connected from, as Vencord's
-// PlatformIndicators shows, and a crown for the server's owner, admins and
-// those who manage it, as BetterDiscord's StaffTag does.
+// PlatformIndicators shows, and a crown for the server's owner and admins,
+// as BetterDiscord's StaffTag does.
 
 var (
 	iconDesktop = mustIcon(icons.HardwareDesktopWindows)
@@ -72,23 +73,52 @@ func (c *chatView) layoutPlatforms(gtx layout.Context, p *discord.Presence) layo
 	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
 }
 
-// staffRank is how high id stands in the server: the owner, an admin, one
-// who manages it, or none.
+// staffRank is how high id stands in the server: an admin, one of those of
+// its highest admin role or its owner, or none.
 type staffRank int
 
 const (
 	staffNone staffRank = iota
-	staffManager
 	staffAdmin
-	staffOwner
+	staffTop
 )
 
-// managePermissions are those of who manages a server, below its admins.
-const managePermissions = discord.PermissionManageGuild | discord.PermissionManageChannels | discord.PermissionManageRoles |
-	discord.PermissionKickMembers | discord.PermissionBanMembers | discord.PermissionModerateMembers | discord.PermissionManageMessages
+// adminRoles are a server's roles with Administrator, but bots' own, and
+// the highest of them, worked out at most every second, as names ask for
+// them each frame.
+type adminRoles struct {
+	at    time.Time
+	roles map[discord.RoleID]bool
+	top   discord.RoleID
+}
 
-// staffRankOf is how high id stands in guildID, by its owner and the
-// permissions of their roles.
+// adminRolesOf are guildID's admin roles, but those of bots and @everyone.
+func (c *chatView) adminRolesOf(guildID discord.GuildID) adminRoles {
+	if a, ok := c.admins[guildID]; ok && time.Since(a.at) < time.Second {
+		return a
+	}
+	a := adminRoles{at: time.Now(), roles: make(map[discord.RoleID]bool)}
+	roles, _ := c.st.Cabinet.Roles(guildID)
+	topPos := -1
+	for _, r := range roles {
+		if !r.Permissions.Has(discord.PermissionAdministrator) || r.Managed || r.Tags.BotID.IsValid() || r.ID == discord.RoleID(guildID) {
+			continue
+		}
+		a.roles[r.ID] = true
+		if r.Position > topPos || (r.Position == topPos && r.ID < a.top) {
+			topPos, a.top = r.Position, r.ID
+		}
+	}
+	if c.admins == nil {
+		c.admins = make(map[discord.GuildID]adminRoles)
+	}
+	c.admins[guildID] = a
+	return a
+}
+
+// staffRankOf is how high id stands in guildID: its owner and those with
+// its highest admin role at the top, the other admins below; bots' roles
+// do not count.
 func (c *chatView) staffRankOf(guildID discord.GuildID, id discord.UserID) staffRank {
 	if c.u.app.NoStaffTags || !guildID.IsValid() {
 		return staffNone
@@ -98,47 +128,39 @@ func (c *chatView) staffRankOf(guildID discord.GuildID, id discord.UserID) staff
 		return staffNone
 	}
 	if g.OwnerID == id {
-		return staffOwner
+		return staffTop
 	}
 	m, err := c.st.Cabinet.Member(guildID, id)
 	if err != nil {
 		return staffNone
 	}
-	var perms discord.Permissions
-	if everyone, err := c.st.Cabinet.Role(guildID, discord.RoleID(guildID)); err == nil {
-		perms |= everyone.Permissions
-	}
+	admins := c.adminRolesOf(guildID)
+	rank := staffNone
 	for _, rid := range m.RoleIDs {
-		if r, err := c.st.Cabinet.Role(guildID, rid); err == nil {
-			perms |= r.Permissions
+		switch {
+		case rid == admins.top:
+			return staffTop
+		case admins.roles[rid]:
+			rank = staffAdmin
 		}
 	}
-	switch {
-	case perms.Has(discord.PermissionAdministrator):
-		return staffAdmin
-	case perms&managePermissions != 0:
-		return staffManager
-	}
-	return staffNone
+	return rank
 }
 
-// Crowns: gold for the owner, silver for admins, bronze for who manages.
+// Crowns: gold for the owner and the highest admins, gray for the others.
 var (
-	colorCrownOwner   = rgb(0xf0b232)
-	colorCrownAdmin   = rgb(0xc0c7d1)
-	colorCrownManager = rgb(0xc77d3a)
+	colorCrownTop   = rgb(0xf0b232)
+	colorCrownAdmin = rgb(0xb5bac1)
 )
 
 // layoutStaffTag is the crown of id's rank in guildID, or nothing.
 func (c *chatView) layoutStaffTag(gtx layout.Context, guildID discord.GuildID, id discord.UserID) layout.Dimensions {
 	var col colorT
 	switch c.staffRankOf(guildID, id) {
-	case staffOwner:
-		col = colorCrownOwner
+	case staffTop:
+		col = colorCrownTop
 	case staffAdmin:
 		col = colorCrownAdmin
-	case staffManager:
-		col = colorCrownManager
 	default:
 		return layout.Dimensions{}
 	}

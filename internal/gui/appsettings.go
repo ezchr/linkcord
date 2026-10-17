@@ -535,7 +535,7 @@ func (c *chatView) featureRows() []layout.Widget {
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.staffTagsBtn, "Staff Crowns",
-				"A crown beside the names of a server's staff: gold for its owner, silver for admins, bronze for those who manage it.", !c.u.app.NoStaffTags)
+				"A crown beside the names of a server's admins: gold for its owner and those of its highest admin role, gray for the other admins. Bots' roles do not count.", !c.u.app.NoStaffTags)
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {

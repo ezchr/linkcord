@@ -1100,7 +1100,7 @@ var spanish = map[string]string{
 	"Platform Icons": "Iconos de plataforma",
 	"Beside names, where each person is connected from: a computer, a phone, the web or a console, in the color of their status there.": "Junto a los nombres, desde dónde está conectado cada uno: ordenador, móvil, web o consola, en el color de su estado ahí.",
 	"Staff Crowns": "Coronas del staff",
-	"A crown beside the names of a server's staff: gold for its owner, silver for admins, bronze for those who manage it.": "Una corona junto a los nombres del staff de un servidor: dorada para el dueño, plateada para los admins y de bronce para quienes lo gestionan.",
+	"A crown beside the names of a server's admins: gold for its owner and those of its highest admin role, gray for the other admins. Bots' roles do not count.": "Una corona junto a los nombres de los admins de un servidor: dorada para el dueño y quienes tienen el rol de admin más alto, gris para los demás admins. Los roles de bots no cuentan.",
 	"Timed out": "Aislado",
 	"Until %s (%s left)": "Hasta %s (quedan %s)",
 	"Show Timeouts": "Ver aislamientos",
