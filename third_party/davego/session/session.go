@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/disgoorg/godave"
@@ -729,17 +730,24 @@ func (s *Session) OnDaveMLSProposals(proposals []byte) {
 	s.processAndCommitProposalBatchLocked(proposals)
 }
 
+// commitDelayMS is how long a commit waits for another member's, in
+// milliseconds. It is read on the DAVE goroutine and set from the UI, so it
+// is atomic.
+var commitDelayMS atomic.Int64
+
+func init() { commitDelayMS.Store(1500) }
+
 // commitDelay is how long a commit waits for another member's.
-var commitDelay = 1500 * time.Millisecond
+func commitDelay() time.Duration { return time.Duration(commitDelayMS.Load()) * time.Millisecond }
 
 // SetCommitImmediately commits at once, as before the wait: it brings back
 // the race in which Discord's own clients reject this client's commit and
 // the keys of the whole channel reset, to reproduce and study it.
 func SetCommitImmediately(on bool) {
 	if on {
-		commitDelay = 0
+		commitDelayMS.Store(0)
 	} else {
-		commitDelay = 1500 * time.Millisecond
+		commitDelayMS.Store(1500)
 	}
 }
 
@@ -782,10 +790,10 @@ func (s *Session) processAndCommitProposalBatchLocked(proposals []byte) {
 	// place of ours. Ours winning the race had their clients reject it and
 	// reset the keys of the whole channel. It is sent only when nobody else
 	// commits, as when everyone uses this client.
-	if commitDelay > 0 {
+	if d := commitDelay(); d > 0 {
 		s.commitGen++
 		gen := s.commitGen
-		time.AfterFunc(commitDelay, func() {
+		time.AfterFunc(d, func() {
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			if s.commitGen != gen || s.pendingEpoch != nil {

@@ -705,9 +705,9 @@ func (u *ui) updateVoice(gtx layout.Context) {
 		session.SetCommitImmediately(v.bugOn)
 		slog.Warn("debug: instant DAVE commits", "on", v.bugOn)
 		if v.bugOn {
-			u.voiceInfo("Bug mode on: keys commit at once (rejoin to apply)")
+			u.voiceInfo("Debug: keys commit at once — the channel may break on the next join")
 		} else {
-			u.voiceInfo("Bug mode off")
+			u.voiceInfo("Debug: keys wait as usual")
 		}
 	}
 	if v.onlyBtn.Clicked(gtx) {
