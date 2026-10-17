@@ -36,6 +36,16 @@ type clipTrack struct {
 	user  discord.UserID
 	pcm   []int16
 	saved string
+	// trim is the part of it kept, which plays and is saved.
+	trim *audioTrim
+}
+
+// keptPCM is the part of the clip kept, all of it if not trimmed.
+func (t *clipTrack) keptPCM() []int16 {
+	if t.trim == nil {
+		return t.pcm
+	}
+	return t.trim.kept()
 }
 
 // clipView is the window that makes clips of the voice channel: who and
@@ -147,6 +157,9 @@ func (c *chatView) makeClip() {
 			}
 			slices.SortFunc(people, func(a, b clipTrack) int { return strings.Compare(strings.ToLower(a.name), strings.ToLower(b.name)) })
 			v.tracks = append(tracks, people...)
+			for i := range v.tracks {
+				v.tracks[i].trim = newAudioTrim(v.tracks[i].pcm)
+			}
 			v.plays = make([]widget.Clickable, len(v.tracks))
 			v.saves = make([]widget.Clickable, len(v.tracks))
 			v.playing = -1
@@ -158,7 +171,7 @@ func (c *chatView) makeClip() {
 func (c *chatView) saveClip(t *clipTrack) {
 	name := fmt.Sprintf("Linkcord clip %s - %s.wav", time.Now().Format("2006-01-02 15-04-05"), safeFileName(t.name))
 	p := freeName(filepath.Join(downloadsDir(), name))
-	if err := os.WriteFile(p, wavFile(t.pcm), 0o644); err != nil {
+	if err := os.WriteFile(p, wavFile(t.keptPCM()), 0o644); err != nil {
 		c.clips.err = "Could not save the clip: " + err.Error()
 		return
 	}
@@ -230,7 +243,7 @@ func (c *chatView) updateClips(gtx layout.Context) {
 		c.makeClip()
 	}
 	if v.playing >= 0 && (u.voice.effects == nil || !u.voice.effects.Playing()) {
-		v.playing = -1
+		c.stopClip()
 	}
 	for i := range v.plays {
 		if v.plays[i].Clicked(gtx) {
@@ -241,8 +254,11 @@ func (c *chatView) updateClips(gtx layout.Context) {
 			c.stopClip()
 			u.soundLibrary()
 			settings := u.voiceSettings()
-			u.voice.effects.Play(v.tracks[i].pcm, settings.Output, settings.outputVolume())
+			u.voice.effects.Play(v.tracks[i].keptPCM(), settings.Output, settings.outputVolume())
 			v.playing = i
+			if t := v.tracks[i].trim; t != nil {
+				t.playing = time.Now()
+			}
 		}
 		if v.saves[i].Clicked(gtx) {
 			c.saveClip(&v.tracks[i])
@@ -258,6 +274,11 @@ func (c *chatView) stopClip() {
 		e.Stop()
 	}
 	c.clips.playing = -1
+	for i := range c.clips.tracks {
+		if t := c.clips.tracks[i].trim; t != nil {
+			t.playing = time.Time{}
+		}
+	}
 }
 
 // layoutClips draws the clip window over everything.
@@ -430,6 +451,9 @@ func (c *chatView) clipResultRows() []layout.Widget {
 		t := &v.tracks[i]
 		rows = append(rows, settingsCard(func(gtx layout.Context) layout.Dimensions {
 			sub := clipLengthName(time.Duration(len(t.pcm)/2) * time.Second / 48000)
+			if t.trim != nil && t.trim.trimmed() {
+				sub = fmt.Sprintf(tr("%s kept of %s"), trimTime(time.Duration(len(t.keptPCM())/2)*time.Second/48000), sub)
+			}
 			if t.saved != "" {
 				sub += " · saved to " + filepath.Base(t.saved)
 			}
@@ -437,17 +461,26 @@ func (c *chatView) clipResultRows() []layout.Widget {
 			if v.playing == i {
 				playIc = iconStop
 			}
-			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return iconBox(gtx, &v.plays[i], playIc, colorHeader) }),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
-				layout.Flexed(1, stacked(
-					bold(label(th, 15, nameCol(i), t.name)).Layout,
-					oneLine(label(th, 12, colorMuted, sub)).Layout,
-				)),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return iconBox(gtx, &v.saves[i], iconDownload, colorHeader)
-				}),
-			)
+			head := func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return iconBox(gtx, &v.plays[i], playIc, colorHeader) }),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+					layout.Flexed(1, stacked(
+						bold(label(th, 15, nameCol(i), t.name)).Layout,
+						oneLine(label(th, 12, colorMuted, sub)).Layout,
+					)),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return iconBox(gtx, &v.saves[i], iconDownload, colorHeader)
+					}),
+				)
+			}
+			if t.trim == nil {
+				return head(gtx)
+			}
+			// Its sound, to keep only a part of it, which plays and is saved.
+			return stacked(head, layout.Spacer{Height: unit.Dp(10)}.Layout, func(gtx layout.Context) layout.Dimensions {
+				return t.trim.layout(gtx, th, 36)
+			})(gtx)
 		}))
 	}
 	return rows

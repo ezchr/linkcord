@@ -585,7 +585,7 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 									layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 									layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 										// A voice message records in place of the text.
-										if cs.voice.rec != nil || cs.voice.sending {
+										if cs.voice.active() {
 											return c.layoutVoiceRecording(gtx)
 										}
 										return layout.Inset{Top: unit.Dp(12), Bottom: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -614,7 +614,7 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 									// With nothing written, a voice message can be
 									// recorded, as on Discord's phones.
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										if cs.voice.rec != nil || cs.voice.sending || c.composer.Len() > 0 || len(cs.files) > 0 {
+										if cs.voice.active() || c.composer.Len() > 0 || len(cs.files) > 0 {
 											return layout.Dimensions{}
 										}
 										return iconButton(gtx, &cs.voice.mic, iconMic, colorMuted, colorHeader)

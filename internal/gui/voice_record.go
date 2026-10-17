@@ -32,7 +32,15 @@ type voiceRecording struct {
 	rec               *voice.Recorder
 	mic, cancel, send widget.Clickable
 	sending           bool
+	// review is what was recorded, to trim, hear and send; stop ends the
+	// recording for it, and play hears the part kept.
+	review     *audioTrim
+	stop, play widget.Clickable
 }
+
+// active reports whether a voice message takes the place of the text: it
+// records, waits to be sent, or is being sent.
+func (r *voiceRecording) active() bool { return r.rec != nil || r.review != nil || r.sending }
 
 func (c *chatView) startVoiceRecording() {
 	r := &c.comp.voice
@@ -57,17 +65,63 @@ func (c *chatView) cancelVoiceRecording() {
 		r.rec.Stop()
 		r.rec = nil
 	}
+	c.stopVoicePreview()
+	r.review = nil
+}
+
+// reviewVoiceRecording ends the recording, to trim it and hear it before
+// sending it.
+func (c *chatView) reviewVoiceRecording() {
+	r := &c.comp.voice
+	if r.rec == nil {
+		return
+	}
+	pcm := r.rec.Stop()
+	r.rec = nil
+	if len(pcm) < samplesPerSecond/5 {
+		// Nothing worth sending was said.
+		return
+	}
+	r.review = newAudioTrim(pcm)
+}
+
+// toggleVoicePreview plays the part kept of the voice message, or stops.
+func (c *chatView) toggleVoicePreview() {
+	r := &c.comp.voice
+	if r.review == nil {
+		return
+	}
+	if !r.review.playing.IsZero() {
+		c.stopVoicePreview()
+		return
+	}
+	u := c.u
+	u.soundLibrary()
+	settings := u.voiceSettings()
+	u.voice.effects.Play(r.review.kept(), settings.Output, settings.outputVolume())
+	r.review.playing = time.Now()
+}
+
+func (c *chatView) stopVoicePreview() {
+	r := &c.comp.voice
+	if r.review != nil && !r.review.playing.IsZero() {
+		if e := c.u.voice.effects; e != nil {
+			e.Stop()
+		}
+		r.review.playing = time.Time{}
+	}
 }
 
 // sendVoiceRecording sends what was recorded as a voice message, with its
 // waveform, as a reply if one is being written.
 func (c *chatView) sendVoiceRecording() {
 	r := &c.comp.voice
-	if r.rec == nil || c.selChannel == nil {
+	if r.review == nil || c.selChannel == nil {
 		return
 	}
-	pcm := r.rec.Stop()
-	r.rec, r.sending = nil, true
+	c.stopVoicePreview()
+	pcm := r.review.kept()
+	r.review, r.sending = nil, true
 	ch := c.selChannel.ID
 	reply := c.act.replyTo
 	c.act.replyTo = nil
@@ -135,6 +189,12 @@ func (c *chatView) updateVoiceRecording(gtx layout.Context) {
 	if r.cancel.Clicked(gtx) {
 		c.cancelVoiceRecording()
 	}
+	if r.stop.Clicked(gtx) {
+		c.reviewVoiceRecording()
+	}
+	if r.play.Clicked(gtx) {
+		c.toggleVoicePreview()
+	}
 	if r.send.Clicked(gtx) {
 		c.sendVoiceRecording()
 	}
@@ -150,6 +210,9 @@ func (c *chatView) layoutVoiceRecording(gtx layout.Context) layout.Dimensions {
 	r := &c.comp.voice
 	if r.sending {
 		return layout.Inset{Top: unit.Dp(12), Bottom: unit.Dp(12)}.Layout(gtx, label(th, 15, colorMuted, "Sending the voice message…").Layout)
+	}
+	if r.review != nil {
+		return c.layoutVoiceReview(gtx)
 	}
 	d := r.rec.Elapsed()
 	level := r.rec.Level()
@@ -170,6 +233,40 @@ func (c *chatView) layoutVoiceRecording(gtx layout.Context) layout.Dimensions {
 				lw := int(float32(w) * min(1, level*1.5))
 				paint.FillShape(gtx.Ops, colorGreen, clip.UniformRRect(image.Rect(0, 0, lw, h), h/2).Op(gtx.Ops))
 				return layout.Dimensions{Size: image.Pt(w, h)}
+			}),
+			layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				// Ends the recording, to trim and hear it before sending.
+				return iconButton(gtx, &r.stop, iconStop, colorAccent, colorHeader)
+			}),
+		)
+	})
+}
+
+// layoutVoiceReview is a voice message recorded: its sound to trim between
+// two handles, to hear, and to send or throw away.
+func (c *chatView) layoutVoiceReview(gtx layout.Context) layout.Dimensions {
+	th := c.u.th
+	r := &c.comp.voice
+	if !r.review.playing.IsZero() && (c.u.voice.effects == nil || !c.u.voice.effects.Playing()) {
+		r.review.playing = time.Time{}
+	}
+	playIc := iconPlay
+	if !r.review.playing.IsZero() {
+		playIc = iconStop
+	}
+	return layout.Inset{Top: unit.Dp(8), Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return iconButton(gtx, &r.cancel, iconClose, colorMuted, colorRed)
+			}),
+			layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return iconButton(gtx, &r.play, playIc, colorHeader, colorAccent)
+			}),
+			layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				return r.review.layout(gtx, th, 32)
 			}),
 			layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {

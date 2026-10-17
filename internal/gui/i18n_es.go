@@ -1060,6 +1060,7 @@ var spanish = map[string]string{
 	"Type Without Showing Typing": "Escribir sin mostrar que escribes",
 	"Show Games You Play": "Mostrar los juegos a los que juegas",
 	"Fake Mute": "Silencio falso",
+	"%s kept of %s": "%s de %s",
 	"Platform Icons": "Iconos de plataforma",
 	"Beside names, where each person is connected from: a computer, a phone, the web or a console, in the color of their status there.": "Junto a los nombres, desde dónde está conectado cada uno: ordenador, móvil, web o consola, en el color de su estado ahí.",
 	"Staff Crowns": "Coronas del staff",
