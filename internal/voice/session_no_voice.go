@@ -28,6 +28,7 @@ func (*Session) SetSensitivity(float64)            {}
 func (*Session) SetInputVolume(float32)            {}
 func (*Session) SetOutputVolume(float32)           {}
 func (*Session) SetPushToTalk(bool)                {}
+func (*Session) SetLinkcordOnly(bool)              {}
 func (*Session) SetTalking(bool)                   {}
 func (*Session) SetNoiseSuppression(bool)          {}
 func (*Session) SetAutoGain(bool)                  {}

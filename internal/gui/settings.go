@@ -82,6 +82,8 @@ type settingsView struct {
 	checkBtn       widget.Clickable
 	vadBtn, pttBtn widget.Clickable
 	nsBtn, agcBtn  widget.Clickable
+	// voiceOnlyBtn makes the user heard by Linkcord users only.
+	voiceOnlyBtn widget.Clickable
 	soundsBtn      widget.Clickable
 	// nsStrength is how much of the noise is removed.
 	nsStrength slider
@@ -346,6 +348,11 @@ func (c *chatView) updateSettings(gtx layout.Context) {
 	c.updateGeneral(gtx)
 	c.updateActivityPage(gtx)
 	c.updateBilling(gtx)
+	if s.voiceOnlyBtn.Clicked(gtx) {
+		settings.VoiceLinkcordOnly = !settings.VoiceLinkcordOnly
+		u.applyVoiceSettings()
+		u.saveVoiceSettings()
+	}
 	if s.agcBtn.Clicked(gtx) {
 		settings.NoAutoGain = !settings.NoAutoGain
 		u.applyVoiceSettings()
@@ -748,6 +755,10 @@ func (c *chatView) voiceSettingsRows() []layout.Widget {
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &s.agcBtn, "Automatic Gain Control", "Evens out how loud you are, raising a quiet microphone and lowering a loud one.", !settings.NoAutoGain)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &s.voiceOnlyBtn, "Only Linkcord Users Hear You", "In voice channels and calls, Discord's own apps cannot play what you say; people using Linkcord hear you as usual.", settings.VoiceLinkcordOnly)
 		},
 		func(gtx layout.Context) layout.Dimensions { return settingsDivider(gtx, 24) },
 		settingsHeading(th, "INPUT MODE"),

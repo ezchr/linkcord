@@ -71,6 +71,8 @@ type MainSession interface {
 // Session is a single voice session that wraps around the voice gateway and UDP
 // connection.
 type Session struct {
+	// veil makes what is sent heard by Linkcord only, when on.
+	veil veiled
 	*handler.Handler
 	session MainSession
 	events  *handler.Handler
@@ -565,6 +567,9 @@ func (s *Session) Write(b []byte) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to encrypt end to end: %w", err)
 	}
+	if s.veil.on.Load() {
+		flipTag(s.sendBuf[:n])
+	}
 	if _, err := s.udpManager.Write(s.sendBuf[:n]); err != nil {
 		return 0, err
 	}
@@ -603,6 +608,14 @@ func (s *Session) ReadPacket() (*udp.Packet, error) {
 	s.recvBuf = slices.Grow(s.recvBuf[:0], dave.MaxDecryptedFrameSize(user, len(p.Opus)))
 	n, err := dave.Decrypt(user, p.Opus, s.recvBuf[:cap(s.recvBuf)])
 	if err != nil {
+		// Voice for Linkcord only: its tag flipped back. A failed try
+		// changes nothing in the session.
+		if copy := slices.Clone(p.Opus); flipTag(copy) {
+			if n2, err2 := dave.Decrypt(user, copy, s.recvBuf[:cap(s.recvBuf)]); err2 == nil {
+				p.Opus = s.recvBuf[:n2]
+				return p, nil
+			}
+		}
 		return nil, &DecryptError{SSRC: p.SSRC(), Err: err}
 	}
 	p.Opus = s.recvBuf[:n]

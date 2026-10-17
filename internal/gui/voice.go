@@ -127,6 +127,9 @@ type voiceSettings struct {
 	// StreamLinkcordOnly streams so that only Linkcord shows it, not
 	// Discord's own clients.
 	StreamLinkcordOnly bool `json:"stream_linkcord_only,omitempty"`
+	// VoiceLinkcordOnly makes what the user says heard by Linkcord users
+	// only.
+	VoiceLinkcordOnly bool `json:"voice_linkcord_only,omitempty"`
 	// InputVolume and OutputVolume are how many times as loud the
 	// microphone is sent and calls are played, from 0 to 2; nil is 1.
 	InputVolume  *float32 `json:"input_volume,omitempty"`
@@ -212,6 +215,7 @@ func (u *ui) applyVoiceSettings() {
 		vs.SetNoiseSuppression(!s.NoNoiseSuppression)
 		vs.SetNoiseStrength(s.noiseStrength())
 		vs.SetAutoGain(!s.NoAutoGain)
+		vs.SetLinkcordOnly(s.VoiceLinkcordOnly)
 	}
 	if c := u.chat; c != nil && c.settings.test != nil {
 		c.settings.test.SetInputVolume(s.inputVolume())

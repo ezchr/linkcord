@@ -116,6 +116,9 @@ type Session struct {
 	// pendingFromSet whether there is one.
 	pendingFrom    uint16
 	pendingFromSet bool
+	// commitGen counts proposal batches and commits seen, so that a commit
+	// waiting to be sent is dropped once another member's arrives.
+	commitGen uint64
 
 	epochReady chan struct{}
 
@@ -726,6 +729,9 @@ func (s *Session) OnDaveMLSProposals(proposals []byte) {
 	s.processAndCommitProposalBatchLocked(proposals)
 }
 
+// commitDelay is how long a commit waits for another member's.
+var commitDelay = 1500 * time.Millisecond
+
 // processAndCommitProposalBatchLocked processes a proposal batch and commits.
 // Must be called with s.mu held.
 func (s *Session) processAndCommitProposalBatchLocked(proposals []byte) {
@@ -760,6 +766,31 @@ func (s *Session) processAndCommitProposalBatchLocked(proposals []byte) {
 
 		return
 	}
+	// Committing waits a little: members on Discord's own clients commit at
+	// once, and their commit, which Discord then announces, is taken in
+	// place of ours. Ours winning the race had their clients reject it and
+	// reset the keys of the whole channel. It is sent only when nobody else
+	// commits, as when everyone uses this client.
+	if commitDelay > 0 {
+		s.commitGen++
+		gen := s.commitGen
+		time.AfterFunc(commitDelay, func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if s.commitGen != gen || s.pendingEpoch != nil {
+				s.logger.Info("mls proposals committed by another member")
+				return
+			}
+			s.commitAfterDelayLocked(proposals)
+		})
+		return
+	}
+	s.commitAfterDelayLocked(proposals)
+}
+
+// commitAfterDelayLocked commits the proposals processed. Must be called
+// with s.mu held.
+func (s *Session) commitAfterDelayLocked(proposals []byte) {
 	if err := s.commitProposalsLocked(); err != nil {
 		s.logger.Error("failed to commit proposals", "error", err)
 
@@ -827,6 +858,8 @@ func (s *Session) OnDaveMLSPrepareCommitTransition(transitionID uint16, commitMe
 		"pending_epoch_set", s.pendingEpoch != nil,
 		"commit_hex_prefix", fmt.Sprintf("%x", commitMessage[:minInt(32, len(commitMessage))]))
 	s.pendingTransitionID = transitionID
+	// Another member's commit came first: ours, waiting, is not sent.
+	s.commitGen++
 	if err := s.ensureMLSClientLocked(); err != nil {
 		s.logger.Error("failed to init mls client", "error", err)
 
@@ -877,6 +910,7 @@ func (s *Session) OnDaveMLSWelcome(transitionID uint16, welcomeMessage []byte) {
 
 	s.logger.Debug("OnDaveMLSWelcome", "transition_id", transitionID, "welcome_size", len(welcomeMessage))
 	s.pendingTransitionID = transitionID
+	s.commitGen++
 
 	// If we have a pending epoch it means we previously committed. A Welcome
 	// arriving means Discord DS chose another member's commit over ours — our

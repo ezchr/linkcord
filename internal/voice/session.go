@@ -188,6 +188,11 @@ type Session struct {
 	// leftAt is when this end last left a voice channel itself, in Unix
 	// nanoseconds.
 	leftAt atomic.Int64
+	// linkcordOnly makes what the user says heard by Linkcord only.
+	linkcordOnly atomic.Bool
+	// healedDAVE is when the channel was last joined again for keys that
+	// stayed broken, in Unix nanoseconds.
+	healedDAVE atomic.Int64
 	failedAt     time.Time
 }
 
@@ -443,6 +448,7 @@ func (s *Session) Join(channelID discord.ChannelID) (err error) {
 			return e2ee
 		}
 		session.AddHandler(func(event *ws.BackgroundErrorEvent) { slog.Debug("voice gateway error", "err", event.Err) })
+		session.SetLinkcordOnly(s.linkcordOnly.Load())
 		s.session.Store(session)
 
 		go s.receive(session)
@@ -719,6 +725,17 @@ func (s *Session) watchDevices() {
 		if !s.Status().Joined {
 			continue
 		}
+		// Keys that stay broken send what is said with keys the others no
+		// longer have: Discord's own clients hear nothing. Joining again
+		// gets new ones.
+		if e2ee := s.e2ee.Load(); e2ee != nil {
+			if since := e2ee.State().DegradedSince; !since.IsZero() && time.Since(since) > 20*time.Second &&
+				time.Since(time.Unix(0, s.healedDAVE.Load())) > 2*time.Minute {
+				s.healedDAVE.Store(time.Now().UnixNano())
+				slog.Warn("the voice channel's keys stayed broken; joining it again", "since", since)
+				go s.rejoin()
+			}
+		}
 		s.mu.Lock()
 		restart := func(device **malgo.Device, kind malgo.DeviceType, id string, data func(output, input []byte), name string) {
 			if *device == nil || (*device).IsStarted() {
@@ -833,5 +850,14 @@ func (s *Session) send(session *voice.Session) {
 				s.setSpeaking(me.ID, quiet < hangover)
 			}
 		}
+	}
+}
+
+// SetLinkcordOnly makes what the user says heard by Linkcord users only, or
+// by everyone: Discord's own clients cannot decrypt it.
+func (s *Session) SetLinkcordOnly(on bool) {
+	s.linkcordOnly.Store(on)
+	if session := s.session.Load(); session != nil {
+		session.SetLinkcordOnly(on)
 	}
 }
