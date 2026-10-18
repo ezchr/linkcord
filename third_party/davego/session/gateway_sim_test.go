@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/disgoorg/godave"
+	daveframe "github.com/thomas-vilte/dave-go/frame"
 	"github.com/thomas-vilte/mls-go/ciphersuite"
 	"github.com/thomas-vilte/mls-go/framing"
 	"github.com/thomas-vilte/mls-go/group"
@@ -718,12 +719,11 @@ func TestSimTimerRecoveryBreaks(t *testing.T) {
 	if testing.Short() {
 		t.Skip("reproduces a known bug")
 	}
-	timerRecovery.Store(true)
-	t.Cleanup(func() { timerRecovery.Store(false) })
+	// As the debug button does.
+	SetTimerRecovery(true)
+	t.Cleanup(func() { SetTimerRecovery(false) })
 	broke := 0
 	for run := 0; run < 4 && broke == 0; run++ {
-		inner := &testing.T{}
-		_ = inner
 		g := newSimGateway(t)
 		for i := 0; i < 3; i++ {
 			g.join(uidN(i), 0)
@@ -744,6 +744,98 @@ func TestSimTimerRecoveryBreaks(t *testing.T) {
 		}
 	}
 	if broke == 0 {
-		t.Log("the old resets did not break the channel in these runs")
+		t.Fatal("the old behaviour did not break the channel: the debug button reproduces nothing")
 	}
+}
+
+// linkcordVeil flips the tag of an end-to-end encrypted frame as Linkcord
+// does for Linkcord-only voice (arikawa voice.flipTag) and streams (golive
+// veil): the same mask at the same place.
+func linkcordVeil(f []byte) bool {
+	mask := [8]byte{'L', 'i', 'n', 'k', 'c', 'o', 'r', 'd'}
+	p, err := daveframe.Parse(f)
+	if err != nil {
+		return false
+	}
+	at := len(f) - int(p.SupplementalSize)
+	if at < 0 || at+len(mask) > len(f) {
+		return false
+	}
+	for i := range mask {
+		f[at+i] ^= mask[i]
+	}
+	return true
+}
+
+// TestSimLinkcordOnlyMedia checks Linkcord-only voice and streams in a
+// channel whose keys came through the gateway: a veiled frame fails for a
+// receiver decrypting as Discord's clients do, and decrypts for one that
+// unveils it, as Linkcord does; also after people join and leave.
+func TestSimLinkcordOnlyMedia(t *testing.T) {
+	g := newSimGateway(t)
+	for i := 0; i < 3; i++ {
+		g.join(uidN(i), 0)
+		g.settle(1500 * time.Millisecond)
+	}
+	check := func(when string) {
+		done := make(chan error, 1)
+		g.do(func() {
+			from, to := g.members[uidN(0)], g.members[uidN(1)]
+			opus := []byte("an opus frame of voice, long enough to carry a tag")
+			h264 := append([]byte{0, 0, 0, 1, 0x65, 0x88, 0x80}, []byte("a keyframe of the stream, long enough")...)
+			for _, media := range []struct {
+				name string
+				enc  func() ([]byte, error)
+				want []byte
+			}{
+				{"voice", func() ([]byte, error) {
+					out := make([]byte, from.s.MaxEncryptedFrameSize(len(opus)))
+					n, err := from.s.Encrypt(from.ssrc, opus, out)
+					return out[:n], err
+				}, opus},
+				{"stream", func() ([]byte, error) { return from.s.EncryptH264(h264) }, nil},
+			} {
+				f, err := media.enc()
+				if err != nil {
+					done <- fmt.Errorf("%s: encrypt: %v", media.name, err)
+					return
+				}
+				if !daveframe.LooksLikeDAVEFrame(f) {
+					done <- fmt.Errorf("%s: not end-to-end encrypted", media.name)
+					return
+				}
+				veiled := append([]byte(nil), f...)
+				if !linkcordVeil(veiled) {
+					done <- fmt.Errorf("%s: could not veil", media.name)
+					return
+				}
+				out := make([]byte, to.s.MaxDecryptedFrameSize(godave.UserID(from.uid), len(veiled)))
+				if _, err := to.s.Decrypt(godave.UserID(from.uid), veiled, out); err == nil {
+					done <- fmt.Errorf("%s: a veiled frame decrypted as Discord's clients decrypt", media.name)
+					return
+				}
+				unveiled := append([]byte(nil), veiled...)
+				linkcordVeil(unveiled)
+				n, err := to.s.Decrypt(godave.UserID(from.uid), unveiled, out)
+				if err != nil {
+					done <- fmt.Errorf("%s: Linkcord could not decrypt a veiled frame: %v", media.name, err)
+					return
+				}
+				if media.want != nil && string(out[:n]) != string(media.want) {
+					done <- fmt.Errorf("%s: decrypted to something else", media.name)
+					return
+				}
+			}
+			done <- nil
+		})
+		if err := <-done; err != nil {
+			t.Fatalf("%s: %v", when, err)
+		}
+	}
+	check("three in the channel")
+	g.leave(uidN(2))
+	g.join(uidN(3), 0)
+	g.join(uidN(4), 0)
+	g.settle(3 * time.Second)
+	check("after one left and two joined at once")
 }
