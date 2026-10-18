@@ -14,6 +14,8 @@ import (
 // After the fix, commitProposalsLocked resets epochReady first, so the watchdog
 // waits for THIS commit's activation and fires recovery on timeout.
 func TestCommitRecovery_ArmsAfterSoleMemberActivation(t *testing.T) {
+	timerRecovery.Store(true)
+	t.Cleanup(func() { timerRecovery.Store(false) })
 	cb := &countingCallbacks{}
 	pkg, extPriv := buildExternalSenderPackageWithKey(t)
 

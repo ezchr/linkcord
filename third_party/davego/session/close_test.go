@@ -39,6 +39,8 @@ func TestClose_Idempotent(t *testing.T) {
 // pending recovery watchdog from re-arming after the timeout, which
 // is the exact zombie session behavior.
 func TestClose_StopsRecoveryWatchdog(t *testing.T) {
+	timerRecovery.Store(true)
+	t.Cleanup(func() { timerRecovery.Store(false) })
 	cb := &countingCallbacks{}
 	s := newRecoveryTestSession(t, cb)
 

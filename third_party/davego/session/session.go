@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/disgoorg/godave"
@@ -117,9 +116,6 @@ type Session struct {
 	// pendingFromSet whether there is one.
 	pendingFrom    uint16
 	pendingFromSet bool
-	// commitGen counts proposal batches and commits seen, so that a commit
-	// waiting to be sent is dropped once another member's arrives.
-	commitGen uint64
 
 	epochReady chan struct{}
 
@@ -160,6 +156,7 @@ type config struct {
 	sendRetentionTTL time.Duration
 	hook             func(*Session)
 }
+
 
 // Option configures a Session at construction time. Pass Options to New, or
 // to CreateFunc to have them applied to every session the voice layer creates.
@@ -720,6 +717,21 @@ func (s *Session) OnDaveMLSProposals(proposals []byte) {
 	// batch instead of committing immediately. Committing again would advance
 	// the local group state past what Discord DS has accepted, causing the
 	// intermediate epoch to be overwritten and audio keys to diverge.
+	// Our own commit is out but not announced: Discord's gateway takes only
+	// a commit referencing every proposal of the epoch, so with this batch
+	// it will never announce ours. As libdave does, the group goes back to
+	// before our commit, keeping the proposals, takes this batch too, and
+	// commits again. Waiting for the old commit had the session give up on
+	// it after the recovery timeout and reset its keys.
+	if s.pendingEpoch != nil && len(s.pendingCommitBytes) > 0 && !timerRecovery.Load() {
+		if err := s.restorePreCommitStateLocked(); err != nil {
+			s.logger.Error("could not take back our commit for new proposals", "error", err)
+		} else {
+			s.logger.Info("new proposals before our commit was announced: committing again", "size", len(proposals))
+			s.processAndCommitProposalBatchLocked(proposals)
+			return
+		}
+	}
 	if s.pendingEpoch != nil {
 		s.logger.Debug("OnDaveMLSProposals: pendingEpoch in flight, queuing proposals", "queue_len", len(s.proposalQueue)+1)
 		s.proposalQueue = append(s.proposalQueue, append([]byte(nil), proposals...))
@@ -730,26 +742,11 @@ func (s *Session) OnDaveMLSProposals(proposals []byte) {
 	s.processAndCommitProposalBatchLocked(proposals)
 }
 
-// commitDelayMS is how long a commit waits for another member's, in
-// milliseconds. It is read on the DAVE goroutine and set from the UI, so it
-// is atomic.
-var commitDelayMS atomic.Int64
-
-func init() { commitDelayMS.Store(1500) }
-
-// commitDelay is how long a commit waits for another member's.
-func commitDelay() time.Duration { return time.Duration(commitDelayMS.Load()) * time.Millisecond }
-
-// SetCommitImmediately commits at once, as before the wait: it brings back
-// the race in which Discord's own clients reject this client's commit and
-// the keys of the whole channel reset, to reproduce and study it.
-func SetCommitImmediately(on bool) {
-	if on {
-		commitDelayMS.Store(0)
-	} else {
-		commitDelayMS.Store(1500)
-	}
-}
+// SetTimerRecovery brings back, or takes away again, the old behaviour that
+// broke voice channels, to reproduce the bug and study it: resets driven by
+// timers (see timerRecovery), and waiting on a commit of ours that new
+// proposals made stale instead of committing again.
+func SetTimerRecovery(on bool) { timerRecovery.Store(on) }
 
 // processAndCommitProposalBatchLocked processes a proposal batch and commits.
 // Must be called with s.mu held.
@@ -785,51 +782,13 @@ func (s *Session) processAndCommitProposalBatchLocked(proposals []byte) {
 
 		return
 	}
-	// Committing waits a little: members on Discord's own clients commit at
-	// once, and their commit, which Discord then announces, is taken in
-	// place of ours. Ours winning the race had their clients reject it and
-	// reset the keys of the whole channel. It is sent only when nobody else
-	// commits, as when everyone uses this client.
-	if d := commitDelay(); d > 0 {
-		s.commitGen++
-		groupID := append([]byte(nil), s.groupID...)
-		before, err := s.mlsClient.client.Epoch(context.Background(), groupID)
-		if err != nil {
-			s.commitAfterDelayLocked(proposals)
-			return
-		}
-		time.AfterFunc(d, func() {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			// Only a commit applied in the meantime, another member's or a
-			// welcome, moves the group past the epoch the proposals were
-			// for: then they are committed. Anything else, such as more
-			// proposals arriving, leaves them waiting for a commit, which
-			// this member sends, or a newcomer is never welcomed.
-			if s.mlsClient == nil || !bytes.Equal(s.groupID, groupID) {
-				s.logger.Info("mls proposals: group replaced before commit")
-				return
-			}
-			now, err := s.mlsClient.client.Epoch(context.Background(), groupID)
-			if err == nil && now != before {
-				s.logger.Info("mls proposals committed by another member", "epoch", now)
-				return
-			}
-			if s.pendingEpoch != nil && len(s.pendingCommitBytes) > 0 {
-				s.logger.Info("mls proposals: own commit already in flight")
-				return
-			}
-			s.logger.Info("mls proposals: nobody committed, committing", "epoch", before)
-			s.commitAfterDelayLocked(proposals)
-		})
-		return
-	}
-	s.commitAfterDelayLocked(proposals)
+	// Committed at once, as Discord's libdave does.
+	s.commitProcessedLocked(proposals)
 }
 
-// commitAfterDelayLocked commits the proposals processed. Must be called
+// commitProcessedLocked commits the proposals processed. Must be called
 // with s.mu held.
-func (s *Session) commitAfterDelayLocked(proposals []byte) {
+func (s *Session) commitProcessedLocked(proposals []byte) {
 	if err := s.commitProposalsLocked(); err != nil {
 		s.logger.Error("failed to commit proposals", "error", err)
 
@@ -897,8 +856,6 @@ func (s *Session) OnDaveMLSPrepareCommitTransition(transitionID uint16, commitMe
 		"pending_epoch_set", s.pendingEpoch != nil,
 		"commit_hex_prefix", fmt.Sprintf("%x", commitMessage[:minInt(32, len(commitMessage))]))
 	s.pendingTransitionID = transitionID
-	// Another member's commit came first: ours, waiting, is not sent.
-	s.commitGen++
 	if err := s.ensureMLSClientLocked(); err != nil {
 		s.logger.Error("failed to init mls client", "error", err)
 
@@ -949,7 +906,6 @@ func (s *Session) OnDaveMLSWelcome(transitionID uint16, welcomeMessage []byte) {
 
 	s.logger.Debug("OnDaveMLSWelcome", "transition_id", transitionID, "welcome_size", len(welcomeMessage))
 	s.pendingTransitionID = transitionID
-	s.commitGen++
 
 	// If we have a pending epoch it means we previously committed. A Welcome
 	// arriving means Discord DS chose another member's commit over ours — our

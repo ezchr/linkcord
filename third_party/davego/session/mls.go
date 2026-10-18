@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/disgoorg/godave"
@@ -416,7 +417,13 @@ func (s *Session) processProposalBatchLocked(proposals []byte) (bool, error) {
 			"remaining_bytes", len(remaining),
 			"wire_hex", fmt.Sprintf("%x", remaining[:minInt(64, len(remaining))]))
 
-		msg, err := framing.UnmarshalMLSMessage(remaining)
+		// The batch holds the proposals back to back; the parser takes one
+		// message whole, and fails with more after it.
+		first, err := firstMLSMessage(remaining)
+		if err != nil {
+			return acceptedAny, fmt.Errorf("parse proposal message: %w", err)
+		}
+		msg, err := framing.UnmarshalMLSMessage(first)
 		if err != nil {
 			return acceptedAny, fmt.Errorf("parse proposal message: %w", err)
 		}
@@ -815,11 +822,27 @@ func newEpochAddsSender(oldEpoch, newEpoch *epochState) bool {
 }
 
 func (s *Session) drainProposalQueueLocked() {
-	for len(s.proposalQueue) > 0 && s.pendingEpoch == nil {
+	// Every batch queued is taken before committing, and the commit covers
+	// them all, as libdave's does: Discord's gateway announces only a commit
+	// referencing every proposal of the epoch. Committing after the first
+	// left the rest queued behind a commit that was never announced.
+	for len(s.proposalQueue) > 1 && s.pendingEpoch == nil {
 		next := s.proposalQueue[0]
 		s.proposalQueue = s.proposalQueue[1:]
 		s.logger.Debug("draining queued proposal batch", "size", len(next), "remaining_queue", len(s.proposalQueue))
-		s.processAndCommitProposalBatchLocked(next)
+		if err := s.ensureMLSClientLocked(); err != nil {
+			s.logger.Error("failed to init mls client", "error", err)
+			return
+		}
+		if _, err := s.processProposalBatchLocked(next); err != nil {
+			s.logger.Error("failed to process proposals", "error", err, "size", len(next))
+		}
+	}
+	if len(s.proposalQueue) == 1 && s.pendingEpoch == nil {
+		last := s.proposalQueue[0]
+		s.proposalQueue = nil
+		s.logger.Debug("draining last queued proposal batch, committing", "size", len(last))
+		s.processAndCommitProposalBatchLocked(last)
 	}
 }
 
@@ -931,8 +954,20 @@ func (s *Session) invalidateAndResendKeyPackageLocked() {
 		}
 		s.logger.Error("failed to send new key package after invalid commit/welcome", "error", err)
 	}
-	s.watchRecoveryLocked()
+	if timerRecovery.Load() {
+		s.watchRecoveryLocked()
+	}
 }
+
+// timerRecovery turns on resets driven by timers: a commit not announced in
+// time, or no new epoch after a reset, flags the keys invalid again. Discord's
+// own libdave has neither: it flags only a commit or welcome it cannot
+// process, and after flagging waits to be welcomed again. Discord's gateway
+// announces only commits that reference every proposal of the epoch, so a
+// commit of ours waits while proposals keep coming, and members who gave up on
+// it after the timeout reset their keys just before the winning commit came,
+// which broke the channel for everyone. Off, as in libdave.
+var timerRecovery atomic.Bool
 
 // watchRecoveryLocked supervises recovery after an MLS state invalidation.
 // The DAVE spec expects Discord to re-add us via a fresh Welcome after we
@@ -1082,6 +1117,10 @@ func (s *Session) commitProposalsLocked() error {
 		return err
 	}
 
+	if !timerRecovery.Load() {
+		return nil
+	}
+
 	// Start a background recovery goroutine. If Discord does not confirm our
 	// commit via op:29 within the timeout, the epoch will never activate.
 	// The goroutine either exits early when epochReady is closed (normal path)
@@ -1099,6 +1138,9 @@ func (s *Session) commitProposalsLocked() error {
 	ready := s.epochReady
 	transitionID := s.pendingTransitionID
 	timeout := s.recoveryTimeout
+	// The commit watched: one replaced by a newer commit of ours is not
+	// awaited any more.
+	watched := append([]byte(nil), s.pendingCommitBytes...)
 	go func() {
 		select {
 		case <-ready:
@@ -1114,7 +1156,7 @@ func (s *Session) commitProposalsLocked() error {
 		if s.shutdownCtx.Err() != nil {
 			return
 		}
-		if s.pendingEpoch == nil {
+		if s.pendingEpoch == nil || !bytes.Equal(s.pendingCommitBytes, watched) {
 			return
 		}
 		s.logger.Warn("commit not confirmed by Discord, triggering recovery", "transition_id", transitionID)
@@ -1181,4 +1223,29 @@ func (s *Session) processRevokeProposalsLocked(payload []byte) error {
 		"ref_count", len(refs))
 
 	return nil
+}
+
+// firstMLSMessage is the first of the MLS messages back to back in data. The
+// parser reads a message whole, finding where its body ends by what follows,
+// so it is given each candidate prefix ending where another message could
+// begin (protocol version 1, then a wire format), and the first one that
+// reads back to the same bytes is the message.
+func firstMLSMessage(data []byte) ([]byte, error) {
+	if msg, err := framing.UnmarshalMLSMessage(data); err == nil && bytes.Equal(msg.Marshal(), data) {
+		return data, nil
+	}
+	for n := 4; n < len(data)-4; n++ {
+		if data[n] != 0 || data[n+1] != 1 || data[n+2] != 0 || data[n+3] < 1 || data[n+3] > 5 {
+			continue
+		}
+		msg, err := framing.UnmarshalMLSMessage(data[:n])
+		if err == nil && bytes.Equal(msg.Marshal(), data[:n]) {
+			return data[:n], nil
+		}
+	}
+	_, err := framing.UnmarshalMLSMessage(data)
+	if err == nil {
+		err = fmt.Errorf("no MLS message boundary found in %d bytes", len(data))
+	}
+	return nil, err
 }

@@ -66,6 +66,8 @@ func eventually(t *testing.T, cond func() bool, msg string) {
 }
 
 func TestRecoveryWatchdogRetriesThenGivesUp(t *testing.T) {
+	timerRecovery.Store(true)
+	t.Cleanup(func() { timerRecovery.Store(false) })
 	cb := &countingCallbacks{}
 	s := newRecoveryTestSession(t, cb)
 

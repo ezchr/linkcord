@@ -106,8 +106,8 @@ type voiceState struct {
 	channelBtn, camBtn, screenBtn, activityBtn, soundBtn widget.Clickable
 	// onlyBtn makes the user heard by Linkcord users only, or by everyone.
 	onlyBtn widget.Clickable
-	// bugBtn brings back the old instant commits, to reproduce the broken
-	// voice channel and log it.
+	// bugBtn brings back the old resets driven by timers, to reproduce the
+	// broken voice channel and log it.
 	bugBtn widget.Clickable
 	bugOn  bool
 	// clipBtn makes a clip of the voice channel, when clips are kept.
@@ -702,12 +702,12 @@ func (u *ui) updateVoice(gtx layout.Context) {
 	}
 	if u.isDev() && v.bugBtn.Clicked(gtx) {
 		v.bugOn = !v.bugOn
-		session.SetCommitImmediately(v.bugOn)
-		slog.Warn("debug: instant DAVE commits", "on", v.bugOn)
+		session.SetTimerRecovery(v.bugOn)
+		slog.Warn("debug: timer-driven DAVE resets", "on", v.bugOn)
 		if v.bugOn {
-			u.voiceInfo("Debug: keys commit at once — the channel may break on the next join")
+			u.voiceInfo("Debug: old key resets on — the channel may break when people join and leave together")
 		} else {
-			u.voiceInfo("Debug: keys wait as usual")
+			u.voiceInfo("Debug: old key resets off")
 		}
 	}
 	if v.onlyBtn.Clicked(gtx) {
