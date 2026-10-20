@@ -323,7 +323,20 @@ func (c *chatView) saveStreamClip(d time.Duration) {
 func (c *chatView) watchStall(w *golive.Watch, vs discord.VoiceState) {
 	t := time.NewTicker(2 * time.Second)
 	defer t.Stop()
+	logged := false
 	for range t.C {
+		// Pictures coming but not drawn: the window stopped redrawing,
+		// as after the screen turned off and on. A paint from Windows
+		// draws anyway and lets invalidations through again.
+		if undrawn := w.Undrawn(); undrawn >= 2*time.Second {
+			state := c.u.win.Repaint()
+			if !logged {
+				slog.Warn("the stream is not being drawn; repainting", "for", undrawn, "window", state)
+				logged = true
+			}
+		} else {
+			logged = false
+		}
 		stalled := w.Stalled()
 		// Video that comes but never decrypts has no keys: joining again
 		// asks for them anew.

@@ -92,6 +92,9 @@ type Watch struct {
 	// taken is the picture last handed to the GUI, which is not written
 	// over while it may still be drawn. Guarded by mu.
 	taken *image.RGBA
+	// waiting is since when a picture is waiting for the GUI, zero when it
+	// took the latest.
+	waiting time.Time
 	// view is the size the picture is shown at, width<<32|height, set by
 	// SetView; 0 is unknown.
 	view            atomic.Uint64
@@ -1014,6 +1017,9 @@ func (w *Watch) startDecoder(sw, sh int) error {
 			current := w.decoder == cmd
 			if current {
 				w.frame = img
+				if w.waiting.IsZero() {
+					w.waiting = time.Now()
+				}
 			}
 			w.mu.Unlock()
 			if !current {
@@ -1239,7 +1245,19 @@ func (w *Watch) Frame() *image.RGBA {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.taken = w.frame
+	w.waiting = time.Time{}
 	return w.frame
+}
+
+// Undrawn is how long a decoded picture has waited without the GUI taking
+// it, 0 when it took the latest.
+func (w *Watch) Undrawn() time.Duration {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.waiting.IsZero() {
+		return 0
+	}
+	return time.Since(w.waiting)
 }
 
 // Streamer is who is watched.
