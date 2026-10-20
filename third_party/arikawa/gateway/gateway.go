@@ -86,6 +86,9 @@ type Gateway struct {
 	beatMutex  sync.Mutex
 	sentBeat   time.Time
 	echoBeat   time.Time
+	// helloBeat is when the connection said hello: with no heartbeat
+	// acknowledged since, it is how long the connection has gone silent.
+	helloBeat time.Time
 	retryTimer lazytime.Timer
 }
 
@@ -377,6 +380,7 @@ func (g *gatewayImpl) OnOp(ctx context.Context, op ws.Op) bool {
 		// Reset gateway times.
 		g.echoBeat = time.Time{}
 		g.sentBeat = time.Time{}
+		g.helloBeat = now
 		// Set the last sent beat time so we can treat sending an Identify or
 		// Resume as sending a heartbeat.
 		g.lastSentBeat = now
@@ -462,14 +466,23 @@ func (g *gatewayImpl) isDead() bool {
 	g.beatMutex.Lock()
 	defer g.beatMutex.Unlock()
 
-	if g.echoBeat.IsZero() {
-		// No ack received yet. We wait for a bit.
+	// Allow 2 beats to miss before we declare dead. A connection that
+	// never acknowledged one counts from its hello: one that dies before
+	// its first acknowledgement (the network changing again right after a
+	// reconnect) would otherwise wait forever.
+	last := g.echoBeat
+	if last.IsZero() {
+		last = g.helloBeat
+	}
+	if last.IsZero() {
 		return false
 	}
-
-	// Allow 2 beats to miss before we declare dead.
-	return g.lastSentBeat.Sub(g.echoBeat) > 2*g.heartrate
+	return g.lastSentBeat.Sub(last) > 2*g.heartrate
 }
+
+// Reconnect has the gateway drop its connection and connect again,
+// resuming the session; see ws.Gateway.RequestReconnect.
+func (g *Gateway) Reconnect() { g.gateway.RequestReconnect() }
 
 // SendHeartbeat sends a heartbeat with the gateway's current sequence.
 func (g *gatewayImpl) SendHeartbeat(ctx context.Context) {

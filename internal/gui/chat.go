@@ -92,7 +92,7 @@ type channelRow struct {
 
 type chatView struct {
 	// watch is the stream of someone else being watched.
-	watch streamWatch
+	watch watchSet
 	// mediaBytes is the file size of the attachments drawn, by URL, which
 	// the fullscreen viewer tells.
 	mediaBytes map[string]uint64
@@ -1525,10 +1525,13 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 	c.layoutSearchMenu(gtx)
 	c.layoutClips(gtx)
 	c.layoutLiveHover(gtx)
-	if c.u.voice.picker.open {
-		c.layoutStreamPicker(gtx)
+	// What the popped-out call opened shows in its window.
+	if !c.u.popped() || !c.u.popout.overlay {
+		if c.u.voice.picker.open {
+			c.layoutStreamPicker(gtx)
+		}
+		c.layoutMenu(gtx)
 	}
-	c.layoutMenu(gtx)
 	c.watchPointer(gtx)
 }
 

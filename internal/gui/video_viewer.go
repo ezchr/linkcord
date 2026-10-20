@@ -27,6 +27,10 @@ var (
 	iconReplay     = mustIcon(icons.AVReplay)
 	iconFullscreen = mustIcon(icons.NavigationFullscreen)
 	iconExitFull   = mustIcon(icons.NavigationFullscreenExit)
+	// iconPopOut pops the call out into its own window, iconPopIn brings
+	// it back.
+	iconPopOut = mustIcon(icons.ActionOpenInNew)
+	iconPopIn  = mustIcon(icons.ActionInput)
 )
 
 // videoViewer plays one video, in its tile in the chat or in the fullscreen

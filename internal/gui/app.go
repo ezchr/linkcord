@@ -143,6 +143,13 @@ type ui struct {
 
 	voice  voiceState
 	images *images
+	// frameMu is held while a window handles an event: the call popped out
+	// draws from the same state as the main window.
+	frameMu sync.Mutex
+	popout  popoutState
+	// watchingAny reports whether a stream is watched, for the pop-out's
+	// redraws.
+	watchingAny atomic.Bool
 	// appearance are the colors the user chose.
 	appearance appearanceSettings
 	// app is how Linkcord looks and behaves otherwise.
@@ -218,6 +225,7 @@ func newUI(w *app.Window) *ui {
 			})
 		}()
 	}
+	go u.watchNetwork()
 	// How the download of FFmpeg goes shows as the voice's messages do.
 	mediaNotify = func(s string) { u.post(func() { u.voiceInfo(s) }) }
 	if os.Getenv(demoEnvVar) == "1" {
@@ -298,7 +306,9 @@ func (u *ui) loop() error {
 	u.soundLibrary()
 	var ops op.Ops
 	for {
-		switch e := u.win.Event().(type) {
+		ev := u.win.Event()
+		u.frameMu.Lock()
+		switch e := ev.(type) {
 		case *app.ClosingEvent:
 			// Closing the window leaves Linkcord running in the
 			// notification area, as Discord does, unless quitting.
@@ -327,6 +337,7 @@ func (u *ui) loop() error {
 			}
 			// Closed as it should: no voice channel was lost.
 			forgetVoiceChannel()
+			u.frameMu.Unlock()
 			return e.Err
 		case app.ViewEvent:
 			u.viewEvent(e)
@@ -361,6 +372,7 @@ func (u *ui) loop() error {
 			// what is posted, as by a keybind, is still woken up for.
 			u.runPending()
 		}
+		u.frameMu.Unlock()
 	}
 }
 

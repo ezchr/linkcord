@@ -498,7 +498,7 @@ func nameCol(i int) colorT {
 // the voice channel, as the keybind for it does.
 func (c *chatView) clipLastMinute() {
 	u := c.u
-	if c.watch.w != nil {
+	if c.mainWatch() != nil {
 		if u.app.StreamClipMinutes <= 0 {
 			u.voiceInfo("Turn on stream clips in Settings to clip streams")
 			return

@@ -30,6 +30,9 @@ const groupWindow = 7 * time.Minute
 func (c *chatView) layoutMessages(gtx layout.Context) layout.Dimensions {
 	th := c.u.th
 	if c.call.open {
+		if c.u.popped() && !c.u.popout.drawing {
+			return c.layoutPoppedCall(gtx)
+		}
 		return c.layoutCall(gtx)
 	}
 	if c.selChannel == nil {

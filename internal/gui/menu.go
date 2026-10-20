@@ -79,6 +79,7 @@ type menuState struct {
 func (c *chatView) openMenu(pos image.Point, width unit.Dp, items func() []menuItem) {
 	m := &c.menu
 	m.open, m.pos, m.width, m.items = true, pos, width, items
+	c.u.popout.overlay = c.u.popout.drawing
 	m.list.Axis = layout.Vertical
 	m.list.Position = layout.Position{}
 	if m.clicks == nil {

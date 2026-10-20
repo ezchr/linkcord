@@ -242,6 +242,9 @@ func (g *Gateway) Connect(ctx context.Context, h Handler) <-chan Op {
 	if !g.outer.started {
 		g.outer.started = true
 		g.outer.ch = make(chan Op, 1)
+		// The first connect is a reconnect from nothing.
+		g.reconnect = make(chan struct{}, 1)
+		g.reconnect <- struct{}{}
 		go g.spin(ctx, h)
 	}
 
@@ -290,6 +293,22 @@ func (g *Gateway) QueueReconnect() {
 	g.heart.Stop()
 }
 
+// RequestReconnect has the running gateway drop its connection and connect
+// again (resuming the session), as after the network changed: the old
+// connection may be dead without either side knowing yet. It is safe to call
+// from any goroutine; it does nothing when the gateway isn't running.
+func (g *Gateway) RequestReconnect() {
+	g.outer.Lock()
+	defer g.outer.Unlock()
+	if !g.outer.started {
+		return
+	}
+	select {
+	case g.reconnect <- struct{}{}:
+	default:
+	}
+}
+
 // ResetHeartbeat resets the heartbeat to be the given duration.
 func (g *Gateway) ResetHeartbeat(d time.Duration) {
 	g.heart.Reset(d)
@@ -319,9 +338,6 @@ func (g *Gateway) spin(ctx context.Context, h Handler) {
 
 	var retryTimer lazytime.Timer
 	defer retryTimer.Stop()
-
-	g.reconnect = make(chan struct{}, 1)
-	g.reconnect <- struct{}{}
 
 	for {
 		select {
@@ -357,6 +373,9 @@ func (g *Gateway) spin(ctx context.Context, h Handler) {
 			h.SendHeartbeat(ctx)
 
 		case <-g.reconnect:
+			// No heartbeats until the new connection says hello.
+			g.heart.Stop()
+
 			// Close the previous connection if it's not already. Ignore the
 			// already closed error.
 			if err := g.ws.Close(); err != nil && !errors.Is(err, ErrWebsocketClosed) {

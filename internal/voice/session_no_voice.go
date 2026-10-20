@@ -108,3 +108,6 @@ func (*Recorder) Stop() []int16                      { return nil }
 
 // VoiceMessage makes nothing.
 func VoiceMessage([]int16) ([]byte, float64, []byte, error) { return nil, 0, nil, errNoVoice }
+
+// Reconnect does nothing without voice.
+func (s *Session) Reconnect() {}

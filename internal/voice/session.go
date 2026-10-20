@@ -690,6 +690,10 @@ func (s *Session) receive(session *voice.Session) {
 	}
 }
 
+// Reconnect joins the voice channel again on fresh connections, as after
+// the network changed; it does nothing when no channel is joined.
+func (s *Session) Reconnect() { s.rejoin() }
+
 // rejoin leaves the voice channel joined and joins it again, muted and
 // deafened as the user was, which gets new keys from Discord.
 func (s *Session) rejoin() {

@@ -86,6 +86,7 @@ func (c *chatView) openStreamPicker() {
 	sp := &u.voice.picker
 	settings := u.voiceSettings()
 	*sp = streamPicker{open: true, loading: true, chosen: -1, height: 720, fps: 30}
+	u.popout.overlay = u.popout.drawing
 	if settings.StreamHeight != 0 || settings.StreamFPS != 0 {
 		sp.height, sp.fps = settings.StreamHeight, settings.StreamFPS
 	}

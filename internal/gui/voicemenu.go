@@ -209,7 +209,8 @@ func (c *chatView) userMenuItems() []menuItem {
 				menuItem{w: c.layoutSoundboardVolumeItem},
 			)
 			// The sound of their stream, when it is watched.
-			if w := c.watch.w; w != nil && c.watch.streamer == id {
+			if s := c.watched(id); s != nil && s.w != nil {
+				w := s.w
 				items = append(items,
 					menuItem{sep: true},
 					menuItem{w: c.layoutStreamVolumeItem},
@@ -379,10 +380,11 @@ func (c *chatView) layoutVolumeItem(gtx layout.Context) layout.Dimensions {
 func (c *chatView) layoutStreamVolumeItem(gtx layout.Context) layout.Dimensions {
 	th := c.u.th
 	um := &c.umenu
-	w := c.watch.w
-	if w == nil {
+	s := c.watched(um.user.ID)
+	if s == nil || s.w == nil {
 		return layout.Dimensions{}
 	}
+	w := s.w
 	if r := um.streamVolume.update(gtx); r.changed || r.released {
 		vol := snapVolume(r.value * 2)
 		w.SetAudioVolume(vol)

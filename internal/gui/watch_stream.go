@@ -22,8 +22,8 @@ import (
 	"golang.org/x/exp/shiny/materialdesign/icons"
 )
 
-// streamWatch is the stream of someone else being watched: one at a time,
-// as on Discord.
+// streamWatch is the stream of someone else being watched. Several can be
+// watched at once, as on Discord.
 type streamWatch struct {
 	w        *golive.Watch
 	streamer discord.UserID
@@ -32,11 +32,44 @@ type streamWatch struct {
 	// new one.
 	op    paint.ImageOp
 	shown *image.RGBA
-	// buttons are the "Watch Stream" buttons, by streamer.
-	buttons map[discord.UserID]*widget.Clickable
 	// hover is the pointer over the stream, which shows its size and
 	// pictures a second.
 	hover gesture.Hover
+}
+
+// watchSet is the streams watched, by streamer.
+type watchSet struct {
+	list map[discord.UserID]*streamWatch
+	// buttons are the "Watch Stream" buttons, by streamer.
+	buttons map[discord.UserID]*widget.Clickable
+}
+
+// watched is the stream of id watched or starting, or nil.
+func (c *chatView) watched(id discord.UserID) *streamWatch {
+	return c.watch.list[id]
+}
+
+// anyWatched reports whether a stream is watched or starting.
+func (c *chatView) anyWatched() bool { return len(c.watch.list) > 0 }
+
+// mainWatch is the stream that the call's stream buttons (clip, stop) act
+// on: the one shown big, else the first by streamer.
+func (c *chatView) mainWatch() *streamWatch {
+	if s := c.watch.list[c.call.focus]; s != nil && s.w != nil {
+		return s
+	}
+	var best *streamWatch
+	for _, s := range c.watch.list {
+		if s.w != nil && (best == nil || s.streamer < best.streamer) {
+			best = s
+		}
+	}
+	return best
+}
+
+// watchesChanged keeps what other goroutines read of the streams watched.
+func (c *chatView) watchesChanged() {
+	c.u.watchingAny.Store(c.anyWatched())
 }
 
 // iconStopWatching is the button that stops watching a stream.
@@ -44,7 +77,8 @@ var iconStopWatching = mustIcon(icons.ActionVisibilityOff)
 
 // watching reports whether the stream of id is watched or starting.
 func (c *chatView) watching(id discord.UserID) bool {
-	return c.watch.streamer == id && (c.watch.w != nil || c.watch.starting)
+	s := c.watched(id)
+	return s != nil && (s.w != nil || s.starting)
 }
 
 // startWatching watches the stream of vs's user, who shares their screen in
@@ -55,7 +89,8 @@ func (c *chatView) startWatching(vs discord.VoiceState) {
 		u.voiceInfo("Join the voice channel to watch the stream")
 		return
 	}
-	c.stopWatching()
+	// Only their stream starts over; the others keep playing.
+	c.stopWatchingOne(vs.UserID)
 	ffmpeg, err := mediaExecutable("ffmpeg")
 	if err != nil && runtime.GOOS == "windows" {
 		// Downloaded once, then the stream opens.
@@ -82,7 +117,12 @@ func (c *chatView) startWatching(vs discord.VoiceState) {
 	if ch, err := c.st.Cabinet.Channel(vs.ChannelID); err == nil {
 		guildID = ch.GuildID
 	}
-	c.watch.streamer, c.watch.starting = vs.UserID, true
+	if c.watch.list == nil {
+		c.watch.list = make(map[discord.UserID]*streamWatch)
+	}
+	s := &streamWatch{streamer: vs.UserID, starting: true}
+	c.watch.list[vs.UserID] = s
+	c.watchesChanged()
 	var w *golive.Watch
 	params := golive.WatchParams{
 		Main:       c.st,
@@ -96,8 +136,9 @@ func (c *chatView) startWatching(vs discord.VoiceState) {
 		OnFrame:    u.win.Invalidate,
 		OnEnd: func(err error) {
 			u.post(func() {
-				if c.watch.w != nil && c.watch.w == w {
-					c.watch.w, c.watch.shown = nil, nil
+				if c.watched(vs.UserID) == s && s.w != nil && s.w == w {
+					delete(c.watch.list, vs.UserID)
+					c.watchesChanged()
 					if err != nil {
 						u.voiceInfo("The stream ended: " + err.Error())
 					}
@@ -110,20 +151,22 @@ func (c *chatView) startWatching(vs discord.VoiceState) {
 		defer cancel()
 		started, err := golive.StartWatching(ctx, params)
 		u.post(func() {
-			if !c.watch.starting || c.watch.streamer != vs.UserID {
+			if c.watched(vs.UserID) != s || !s.starting {
 				// Given up meanwhile.
 				if started != nil {
 					go started.Stop()
 				}
 				return
 			}
-			c.watch.starting = false
+			s.starting = false
 			if err != nil {
+				delete(c.watch.list, vs.UserID)
+				c.watchesChanged()
 				u.voiceFailed("Could not watch the stream", err)
 				return
 			}
 			w = started
-			c.watch.w = started
+			s.w = started
 			// As loud as last chosen for them.
 			if vol, ok := c.streamVolumes[vs.UserID]; ok {
 				started.SetAudioVolume(vol)
@@ -135,33 +178,46 @@ func (c *chatView) startWatching(vs discord.VoiceState) {
 	}()
 }
 
-// stopWatching stops watching, if a stream is watched.
+// stopWatching stops watching every stream watched.
 func (c *chatView) stopWatching() {
-	if w := c.watch.w; w != nil {
-		go w.Stop()
+	for id := range c.watch.list {
+		c.stopWatchingOne(id)
 	}
-	c.watch = streamWatch{buttons: c.watch.buttons, hover: c.watch.hover}
+}
+
+// stopWatchingOne stops watching the stream of id, if it is watched.
+func (c *chatView) stopWatchingOne(id discord.UserID) {
+	s := c.watch.list[id]
+	if s == nil {
+		return
+	}
+	if s.w != nil {
+		go s.w.Stop()
+	}
+	delete(c.watch.list, id)
+	c.watchesChanged()
 }
 
 // watchedFrame is the picture of the watched stream of id, or nil.
 func (c *chatView) watchedFrame(id discord.UserID) *paint.ImageOp {
-	if c.watch.streamer != id || c.watch.w == nil {
+	s := c.watched(id)
+	if s == nil || s.w == nil {
 		return nil
 	}
-	img := c.watch.w.Frame()
+	img := s.w.Frame()
 	if img == nil {
 		return nil
 	}
-	if img != c.watch.shown {
-		c.watch.op, c.watch.shown = paint.NewImageOp(img), img
+	if img != s.shown {
+		s.op, s.shown = paint.NewImageOp(img), img
 	}
-	return &c.watch.op
+	return &s.op
 }
 
 // layoutStreamInfo is the size and pictures a second of the watched stream,
 // small in the top left corner.
-func (c *chatView) layoutStreamInfo(gtx layout.Context) {
-	w, h, fps := c.watch.w.Info()
+func (c *chatView) layoutStreamInfo(gtx layout.Context, s *streamWatch) {
+	w, h, fps := s.w.Info()
 	if w == 0 {
 		return
 	}
@@ -182,8 +238,9 @@ func (c *chatView) layoutStreamInfo(gtx layout.Context) {
 // asked for. The button to watch it is returned to be drawn over the
 // avatar's card, at y, under the avatar.
 func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, size image.Point, radius, y int) (bool, func()) {
-	if c.watch.streamer == vs.UserID && c.watch.w != nil {
-		c.watch.w.SetView(size.X, size.Y)
+	s := c.watched(vs.UserID)
+	if s != nil && s.w != nil {
+		s.w.SetView(size.X, size.Y)
 	}
 	if frame := c.watchedFrame(vs.UserID); frame != nil {
 		defer clip.UniformRRect(image.Rectangle{Max: size}, radius).Push(gtx.Ops).Pop()
@@ -193,12 +250,12 @@ func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, 
 		b := frame.Size()
 		scale := min(float32(size.X)/float32(b.X), float32(size.Y)/float32(b.Y)) / gtx.Metric.PxPerDp
 		widget.Image{Src: *frame, Fit: widget.Contain, Scale: scale}.Layout(igtx)
-		if c.watch.hover.Update(gtx.Source) {
-			c.layoutStreamInfo(gtx)
+		if s.hover.Update(gtx.Source) {
+			c.layoutStreamInfo(gtx, s)
 		}
 		area := clip.Rect{Max: size}.Push(gtx.Ops)
 		pass := pointer.PassOp{}.Push(gtx.Ops)
-		c.watch.hover.Add(gtx.Ops)
+		s.hover.Add(gtx.Ops)
 		pass.Pop()
 		area.Pop()
 		if ids, ok := c.streamViewers(vs); ok && len(ids) > 0 {
@@ -224,7 +281,7 @@ func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, 
 	btn := clickOf(c.watch.buttons, vs.UserID)
 	if btn.Clicked(gtx) {
 		if c.watching(vs.UserID) {
-			c.stopWatching()
+			c.stopWatchingOne(vs.UserID)
 		} else {
 			c.startWatching(vs)
 		}
@@ -261,8 +318,10 @@ func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, 
 
 // applyStreamClip keeps the stream watched for clips, as chosen.
 func (c *chatView) applyStreamClip() {
-	if w := c.watch.w; w != nil {
-		w.SetClipLength(time.Duration(c.u.app.StreamClipMinutes) * time.Minute)
+	for _, s := range c.watch.list {
+		if s.w != nil {
+			s.w.SetClipLength(time.Duration(c.u.app.StreamClipMinutes) * time.Minute)
+		}
 	}
 }
 
@@ -288,10 +347,11 @@ func (c *chatView) openStreamClip() {
 // saveStreamClip saves the last d of the stream watched as a video in the
 // downloads, and shows it.
 func (c *chatView) saveStreamClip(d time.Duration) {
-	w := c.watch.w
-	if w == nil {
+	s := c.mainWatch()
+	if s == nil {
 		return
 	}
+	w := s.w
 	u := c.u
 	name := "stream"
 	if guildID := c.selGuild; true {
@@ -343,7 +403,7 @@ func (c *chatView) watchStall(w *golive.Watch, vs discord.VoiceState) {
 		if locked := w.Undecryptable(); locked >= 10*time.Second {
 			slog.Warn("the stream cannot be decrypted; watching it again", "streamer", vs.UserID, "for", locked)
 			c.u.post(func() {
-				if c.watch.w == w {
+				if s := c.watched(vs.UserID); s != nil && s.w == w {
 					c.startWatching(vs)
 				}
 			})
@@ -357,7 +417,7 @@ func (c *chatView) watchStall(w *golive.Watch, vs discord.VoiceState) {
 		}
 		slog.Warn("the stream stopped coming; watching it again", "streamer", vs.UserID, "for", stalled)
 		c.u.post(func() {
-			if c.watch.w == w {
+			if s := c.watched(vs.UserID); s != nil && s.w == w {
 				c.startWatching(vs)
 			}
 		})

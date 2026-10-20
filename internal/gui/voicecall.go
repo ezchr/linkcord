@@ -44,6 +44,9 @@ type callView struct {
 	channel discord.ChannelID
 
 	join, invite, fullBtn, leave widget.Clickable
+	// popBtn pops the call out into its own window or brings it back;
+	// popBack is the main window's button to bring it back.
+	popBtn, popBack widget.Clickable
 	// stopWatch stops watching someone's stream, beside the button to hang
 	// up while one is watched.
 	stopWatch widget.Clickable
@@ -150,7 +153,12 @@ func (c *chatView) updateCall(gtx layout.Context) {
 		c.openStreamClip()
 	}
 	if cv.stopWatch.Clicked(gtx) {
-		c.stopWatching()
+		// The stream shown big, or else all of them.
+		if s := c.watched(cv.focus); s != nil {
+			c.stopWatchingOne(s.streamer)
+		} else {
+			c.stopWatching()
+		}
 	}
 	if cv.mic.Clicked(gtx) {
 		u.toggleVoice(false)
@@ -198,16 +206,24 @@ func (c *chatView) updateCall(gtx layout.Context) {
 		}
 		if ke, ok := e.(key.Event); ok && ke.State == key.Press {
 			cv.full = false
-			u.win.Option(app.Windowed.Option())
+			u.callWindow().Option(app.Windowed.Option())
 		}
 	}
 	if cv.fullBtn.Clicked(gtx) {
 		cv.full = !cv.full
 		if cv.full {
-			u.win.Option(app.Fullscreen.Option())
+			u.callWindow().Option(app.Fullscreen.Option())
 		} else {
-			u.win.Option(app.Windowed.Option())
+			u.callWindow().Option(app.Windowed.Option())
 		}
+	}
+	if cv.popBtn.Clicked(gtx) {
+		// Full screen belongs to the window left.
+		if cv.full {
+			cv.full = false
+			u.callWindow().Option(app.Windowed.Option())
+		}
+		u.togglePopout()
 	}
 }
 
@@ -430,9 +446,9 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 			}
 			return layout.Dimensions{Size: size}
 		}
-	} else if c.watch.streamer == vs.UserID && !vs.SelfStream {
+	} else if c.watched(vs.UserID) != nil && !vs.SelfStream {
 		// They stopped sharing.
-		c.stopWatching()
+		c.stopWatchingOne(vs.UserID)
 	}
 	dp := unit.Dp(float32(px) / gtx.Metric.PxPerDp)
 	center := op.Offset(image.Pt((size.X-px)/2, (size.Y-px)/2)).Push(gtx.Ops)
@@ -562,7 +578,19 @@ func (c *chatView) layoutCallBar(gtx layout.Context, joined bool) layout.Dimensi
 					if cv.full {
 						ic = iconExitFull
 					}
-					return callButton(gtx, &cv.fullBtn, ic, colorText, callBarColor, 44)
+					pop := iconPopOut
+					if c.u.popped() {
+						pop = iconPopIn
+					}
+					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return callButton(gtx, &cv.popBtn, pop, colorText, callBarColor, 44)
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return callButton(gtx, &cv.fullBtn, ic, colorText, callBarColor, 44)
+						}),
+					)
 				})
 			}),
 			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
@@ -621,7 +649,7 @@ func (c *chatView) layoutCallBar(gtx layout.Context, joined bool) layout.Dimensi
 						// While a stream is watched, a button stops watching
 						// it, beside the one that hangs up.
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if !c.watch.streamer.IsValid() {
+							if !c.anyWatched() {
 								return layout.Dimensions{}
 							}
 							return layout.Inset{Right: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
