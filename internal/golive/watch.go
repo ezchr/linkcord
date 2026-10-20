@@ -16,7 +16,9 @@ import (
 	"log/slog"
 	"math/big"
 	"net"
+	"os"
 	"os/exec"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -30,6 +32,7 @@ import (
 	"github.com/disgoorg/godave"
 	"github.com/thomas-vilte/dave-go/frame"
 	"golang.org/x/crypto/chacha20poly1305"
+	"golang.org/x/sys/windows"
 )
 
 // WatchParams is what watching someone's stream needs.
@@ -77,14 +80,14 @@ type Watch struct {
 	inspected atomic.Int64
 	// veiled is set once the stream turns out to be for Linkcord only.
 	veiled atomic.Bool
-	padded    atomic.Int64
+	padded atomic.Int64
 	// lastPacket is when the last video packet came, in Unix nanoseconds,
 	// and paused whether the streamer paused the stream.
 	lastPacket atomic.Int64
 	// lastDecrypted is when a picture was last decrypted end to end, and
 	// firstPacket when the first video packet came, in Unix nanoseconds.
 	lastDecrypted, firstPacket atomic.Int64
-	paused     atomic.Bool
+	paused                     atomic.Bool
 	// overflows are pictures the decoder had no room for; keyframes are
 	// the keyframe requests sent; deepest is the longest decode queue seen
 	// since the last log.
@@ -900,6 +903,30 @@ const maxWatchW, maxWatchH = 1920, 1080
 // oldFFmpeg is set once FFmpeg turned out to be older than 5.1.
 var oldFFmpeg atomic.Bool
 
+// noHardwareDecode is set once FFmpeg failed with -hwaccel, as one built
+// without it does: the decoder starts again without.
+var noHardwareDecode atomic.Bool
+
+// decodeAccel is FFmpeg's -hwaccel for watching, "" for none. Measured with
+// 1080p60 on an RX 6650 XT, CPU time per 10 seconds, with the copy back and
+// the RGBA conversion: software 7.6 s, D3D11VA 4.9 s, DXVA2 8.8 s, and
+// "auto" took DXVA2. So D3D11VA where Windows has it (8 and later). On 7,
+// DXVA2's copy back costs a strong processor more than decoding itself, but
+// spares a weak one, which cannot decode 1080p60 alone.
+func decodeAccel() string {
+	if os.Getenv("LINKCORD_NO_HW_DECODER") != "" {
+		return ""
+	}
+	maj, min, _ := windows.RtlGetNtVersionNumbers()
+	if maj > 6 || maj == 6 && min >= 2 {
+		return "d3d11va"
+	}
+	if runtime.NumCPU() <= 4 {
+		return "dxva2"
+	}
+	return ""
+}
+
 func (w *Watch) startDecoder(sw, sh int) error {
 	ow, oh := sw, sh
 	if ow > maxWatchW || oh > maxWatchH {
@@ -907,8 +934,13 @@ func (w *Watch) startDecoder(sw, sh int) error {
 		ow, oh = int(float64(ow)*k)&^1, int(float64(oh)*k)&^1
 	}
 	args := []string{"-hide_banner", "-loglevel", "error",
-		"-fflags", "nobuffer", "-flags", "low_delay", "-probesize", "32", "-analyzeduration", "0",
-		"-f", "h264", "-i", "pipe:0"}
+		"-fflags", "nobuffer", "-flags", "low_delay", "-probesize", "32", "-analyzeduration", "0"}
+	// The graphics card decodes, as Discord's client has it do, where that
+	// costs less: see decodeAccel. FFmpeg decodes in software where it fails.
+	if a := decodeAccel(); a != "" && !noHardwareDecode.Load() {
+		args = append(args, "-hwaccel", a)
+	}
+	args = append(args, "-f", "h264", "-i", "pipe:0")
 	if ow != sw || oh != sh {
 		args = append(args, "-vf", fmt.Sprintf("scale=%d:%d:flags=bicubic", ow, oh))
 	}
@@ -971,7 +1003,12 @@ func (w *Watch) startDecoder(sw, sh int) error {
 					w.log.Info("decoder stopped", "err", err, "ffmpeg", msg)
 					// An FFmpeg too old for -fps_mode (before 5.1) is started
 					// again with -vsync, from a keyframe asked for at once.
-					if strings.Contains(msg, "fps_mode") && !oldFFmpeg.Swap(true) {
+					retry := strings.Contains(msg, "fps_mode") && !oldFFmpeg.Swap(true)
+					// One that cannot take -hwaccel starts again without it.
+					if strings.Contains(msg, "hwaccel") && !noHardwareDecode.Swap(true) {
+						retry = true
+					}
+					if retry {
 						if err := w.startDecoder(sw, sh); err != nil {
 							w.log.Warn("could not start the decoder", "err", err)
 						}

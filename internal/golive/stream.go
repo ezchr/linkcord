@@ -11,6 +11,7 @@ import (
 	"image"
 	"log/slog"
 	"math/big"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -360,10 +361,50 @@ func (s *Stream) requestKeyframe() {
 	}
 }
 
-// loop captures, encodes, encrypts and sends pictures until the stream
-// stops.
+// keyframeEvery is the longest a stream goes without a keyframe. Viewers
+// that join, lose a picture or get new keys ask for one and get it at once,
+// so, as Discord's own client, this is only a safety net: keyframes are many
+// times the size of other pictures, and fewer of them leave more of the
+// bitrate to the picture.
+const keyframeEvery = 30 * time.Second
+
+// streamFrame is a picture handed from the capture thread to the encoder
+// thread.
+type streamFrame struct {
+	// buf is the picture, w by h, in NV12 if nv12 or else I420; nil to send
+	// the last picture again.
+	buf     []byte
+	w, h    int
+	nv12    bool
+	elapsed time.Duration
+	// idr asks for a keyframe.
+	idr bool
+}
+
+// encodeStats are counted by the encoder thread and logged by the capture
+// loop.
+type encodeStats struct {
+	frames, idrs, failed, bytes, encodeNs atomic.Int64
+	name                                  atomic.Pointer[string]
+}
+
+// loop captures pictures until the stream stops and hands them to
+// encodeLoop, on a thread of its own: capturing and converting the next
+// picture runs while the last one is encoded and sent, and converting splits
+// each picture across the cores.
 func (s *Stream) loop(capt *capturer) {
+	jobs := make(chan streamFrame, 1)
+	free := make(chan []byte, 4)
+	var st encodeStats
+	var wantNV12 atomic.Bool
+	encDone := make(chan struct{})
+	go func() {
+		defer close(encDone)
+		s.encodeLoop(jobs, free, &st, &wantNV12)
+	}()
 	defer func() {
+		close(jobs)
+		<-encDone
 		capt.close()
 		// One handed over as the stream ended is not shared.
 		select {
@@ -380,26 +421,31 @@ func (s *Stream) loop(capt *capturer) {
 
 	stats := time.NewTicker(5 * time.Second)
 	defer stats.Stop()
-	var frames, idrs, empty, failed, bytes int
-	var encodeTime, grabTime time.Duration
-	grabs := 0
+	var empty, grabs int
+	var grabTime, convertTime time.Duration
 	var (
-		enc        *encoder
 		ow, oh     int
 		srcW, srcH int
-		i420       []byte
 		start      = time.Now()
 		lastThumb  time.Time
-		// lastFrame is when a picture was last encoded, haveLast whether
-		// i420 holds one, and wantFrame whether a viewer asked for one.
-		lastFrame           time.Time
-		haveLast, wantFrame bool
+		// lastFrame is when a picture was last handed over, haveLast whether
+		// the encoder has one to send again, wantFrame whether a viewer
+		// asked for one and idr whether as a keyframe.
+		lastFrame                time.Time
+		haveLast, wantFrame, idr bool
 	)
-	defer func() {
-		if enc != nil {
-			enc.close()
+	// buffer returns a picture buffer of n bytes, one the encoder is done
+	// with if there is one: at most four are ever in use.
+	buffer := func(n int) []byte {
+		select {
+		case b := <-free:
+			if cap(b) >= n {
+				return b[:n]
+			}
+		default:
 		}
-	}()
+		return make([]byte, n)
+	}
 	for {
 		select {
 		case <-s.done:
@@ -411,38 +457,37 @@ func (s *Stream) loop(capt *capturer) {
 			continue
 		case <-stats.C:
 			ds := s.conn.dave.Stats()
-			st := s.conn.dave.State()
-			avg := time.Duration(0)
-			if frames > 0 {
-				avg = encodeTime / time.Duration(frames)
+			dst := s.conn.dave.State()
+			frames := st.frames.Swap(0)
+			encodeNs := st.encodeNs.Swap(0)
+			name := ""
+			if n := st.name.Load(); n != nil {
+				name = *n
 			}
-			s.log.Info("stream stats", "frames", frames, "idr", idrs, "kbytes", bytes/1024, "no_picture", empty, "failed", failed,
-				"encode_avg", avg.Round(time.Millisecond),
-				"grab_avg", (grabTime / time.Duration(max(grabs, 1))).Round(time.Millisecond), "with", capt.method(),
+			s.log.Info("stream stats", "frames", frames, "idr", st.idrs.Swap(0), "kbytes", st.bytes.Swap(0)/1024, "no_picture", empty, "failed", st.failed.Swap(0),
+				"encoder", name,
+				"encode_avg", (time.Duration(encodeNs) / time.Duration(max(frames, 1))).Round(100*time.Microsecond),
+				"grab_avg", (grabTime / time.Duration(max(grabs, 1))).Round(100*time.Microsecond),
+				"convert_avg", (convertTime / time.Duration(max(grabs, 1))).Round(100*time.Microsecond),
+				"with", capt.method(),
 				"size", fmt.Sprintf("%dx%d", ow, oh),
-				"dave_ready", st.Ready, "dave_epoch", st.EpochID, "dave_version", st.ProtocolVersion,
+				"dave_ready", dst.Ready, "dave_epoch", dst.EpochID, "dave_version", dst.ProtocolVersion,
 				"passthrough", ds.PassthroughFrames, "encrypt_failures", ds.EncryptFailures,
 				"rtcp_in", s.med.rtcpSummary(), "packets", s.med.packetCount())
-			frames, idrs, empty, failed, bytes, encodeTime, grabTime, grabs = 0, 0, 0, 0, 0, 0, 0, 0
+			empty, grabs, grabTime, convertTime = 0, 0, 0, 0
 			continue
 		case next := <-s.source:
 			capt.close()
 			capt = next
 			s.log.Info("stream capturing", "with", capt.method())
-			// The new picture starts afresh, with a keyframe, and at its
-			// own size if that differs, which a new encoder takes care of.
-			if enc != nil {
-				enc.forceIDR()
-			}
-			haveLast, wantFrame = false, true
+			// The new picture starts afresh, with a keyframe, and at its own
+			// size if that differs, which a new encoder takes care of.
+			haveLast, wantFrame, idr = false, true, true
 			continue
 		case <-s.keyframe:
-			if enc != nil {
-				enc.forceIDR()
-			}
 			// Sent at once, even if the screen did not change: a viewer
 			// waits for it.
-			wantFrame = true
+			wantFrame, idr = true, true
 			continue
 		case <-tick.C:
 		}
@@ -455,39 +500,31 @@ func (s *Stream) loop(capt *capturer) {
 			s.end(ErrSourceGone)
 			return
 		}
+		var job streamFrame
+		// The same picture as the last, which a still screen gives sixty
+		// times a second, is neither converted nor encoded again.
+		if ok && !pic.changed && haveLast && pic.w == srcW && pic.h == srcH {
+			ok = false
+		}
 		if !ok {
 			empty++
 			// Nothing changed on the screen, so the capture has nothing new.
 			// The last picture is sent again when a keyframe is asked for,
 			// and every second, so that a viewer who joins a still screen
 			// sees it at once.
-			if enc == nil || !haveLast || !wantFrame && time.Since(lastFrame) < time.Second {
+			if !haveLast || !wantFrame && time.Since(lastFrame) < time.Second {
 				continue
 			}
 		} else {
-			haveLast = true
-		}
-		if ok {
-			// A window resized gets an encoder of its new size, which starts
-			// with a keyframe.
-			if enc == nil || pic.w != srcW || pic.h != srcH {
+			if pic.w != srcW || pic.h != srcH {
 				srcW, srcH = pic.w, pic.h
 				ow, oh = s.p.Quality.size(srcW, srcH)
-				if enc != nil {
-					enc.close()
-					s.conn.send(context.Background(), s.video(ow, oh))
-				}
-				var err error
-				// A keyframe every two seconds: the stream asks for a fixed
-				// interval, and a viewer who joins waits for the next one
-				// once its keys come.
-				if enc, err = newEncoder(ow, oh, fps, s.p.Quality.bitrate(ow, oh), fps*2); err != nil {
-					s.end(err)
-					return
-				}
-				i420 = make([]byte, ow*oh*3/2)
 			}
-			pic.toI420(i420, ow, oh)
+			c0 := time.Now()
+			nv12 := wantNV12.Load()
+			job = streamFrame{buf: buffer(ow * oh * 3 / 2), w: ow, h: oh, nv12: nv12}
+			pic.toYUV(job.buf, ow, oh, nv12)
+			convertTime += time.Since(c0)
 			if now := time.Now(); now.Sub(lastThumb) >= previewEvery {
 				lastThumb = now
 				tw := min(int(s.previewW.Load()), pic.w)
@@ -496,19 +533,109 @@ func (s *Stream) loop(capt *capturer) {
 				}
 				s.preview.Store(pic.toRGBA(tw, max(tw*pic.h/pic.w, 1)))
 			}
+			haveLast = true
 		}
-		wantFrame, lastFrame = false, time.Now()
-		elapsed := time.Since(start)
+		job.elapsed, job.idr = time.Since(start), idr
+		wantFrame, idr, lastFrame = false, false, time.Now()
+		select {
+		case jobs <- job:
+		case <-s.done:
+			return
+		}
+	}
+}
+
+// encodeLoop encodes, encrypts and sends the pictures of jobs until it is
+// closed, on one OS thread, which the graphics card's encoder needs. Each
+// buffer it is done with goes to free.
+func (s *Stream) encodeLoop(jobs <-chan streamFrame, free chan<- []byte, st *encodeStats, wantNV12 *atomic.Bool) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	fps := max(s.p.Quality.FPS, 1)
+	var (
+		enc     *encoder
+		last    streamFrame
+		scratch []byte
+	)
+	defer func() {
+		if enc != nil {
+			enc.close()
+		}
+	}()
+	done := func(b []byte) {
+		select {
+		case free <- b:
+		default:
+		}
+	}
+	for job := range jobs {
+		if s.stopped.Load() {
+			continue
+		}
+		if job.buf == nil {
+			if last.buf == nil {
+				continue
+			}
+			job.buf, job.w, job.h, job.nv12 = last.buf, last.w, last.h, last.nv12
+		} else {
+			if last.buf != nil {
+				done(last.buf)
+			}
+			last = job
+		}
+		// A new size gets a new encoder, which starts with a keyframe.
+		if enc == nil || enc.w != job.w || enc.h != job.h {
+			resized := enc != nil
+			if enc != nil {
+				enc.close()
+			}
+			var err error
+			if enc, err = newEncoder(job.w, job.h, fps, s.p.Quality.bitrate(job.w, job.h), fps*int(keyframeEvery/time.Second)); err != nil {
+				enc = nil
+				s.end(err)
+				return
+			}
+			if resized {
+				s.conn.send(context.Background(), s.video(job.w, job.h))
+			}
+			wantNV12.Store(enc.nv12())
+			name := enc.name
+			st.name.Store(&name)
+			s.log.Info("stream encoder", "encoder", enc.name, "hardware", enc.hardware(), "size", fmt.Sprintf("%dx%d", job.w, job.h), "fps", fps)
+		}
+		pic := job.buf
+		if job.nv12 != enc.nv12() {
+			// Converted before the capture knew the encoder's layout.
+			scratch = slices.Grow(scratch[:0], len(pic))[:len(pic)]
+			if enc.nv12() {
+				i420ToNV12(scratch, pic, job.w, job.h)
+			} else {
+				nv12ToI420(scratch, pic, job.w, job.h)
+			}
+			pic = scratch
+		}
+		if job.idr {
+			enc.forceIDR()
+		}
 		t0 := time.Now()
-		frame, idr, err := enc.encode(i420, elapsed.Milliseconds())
-		encodeTime += time.Since(t0)
+		frame, tsMs, idr, err := enc.encode(pic, job.elapsed.Milliseconds())
+		st.encodeNs.Add(int64(time.Since(t0)))
 		if err != nil {
-			failed++
-			s.log.Warn("could not encode a picture", "err", err)
+			st.failed.Add(1)
+			if enc.hardware() {
+				// The next picture goes to OpenH264, which always works.
+				s.log.Warn("the graphics card's encoder failed; OpenH264 takes over", "encoder", enc.name, "err", err)
+				hardwareFailed.Store(true)
+				enc.close()
+				enc = nil
+				wantNV12.Store(false)
+			} else {
+				s.log.Warn("could not encode a picture", "err", err)
+			}
 			continue
 		}
 		if idr {
-			idrs++
+			st.idrs.Add(1)
 		}
 		if frame == nil {
 			continue
@@ -525,10 +652,9 @@ func (s *Stream) loop(capt *capturer) {
 		if out == nil {
 			continue
 		}
-		ts := uint32(elapsed * 90000 / time.Second)
-		frames++
-		bytes += len(out)
-		if err := s.med.sendFrame(out, ts); err != nil {
+		st.frames.Add(1)
+		st.bytes.Add(int64(len(out)))
+		if err := s.med.sendFrame(out, uint32(tsMs*90)); err != nil {
 			s.end(fmt.Errorf("could not send the stream: %w", err))
 			return
 		}

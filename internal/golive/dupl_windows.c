@@ -56,6 +56,8 @@ struct lc_dupl {
 	uint8_t *frame;
 	int fw, fh;
 	int have;
+	// seq counts the pictures kept in frame.
+	int seq;
 	// worked reports whether the screen was ever duplicated, and retry when
 	// to try again after it stopped, as it does when a game changes the
 	// resolution or Windows shows its secure desktop.
@@ -179,6 +181,7 @@ static int keep(lc_dupl *d, ID3D11Texture2D *tex) {
 	}
 	ID3D11DeviceContext_Unmap(d->ctx, (ID3D11Resource *)d->staging, 0);
 	d->have = 1;
+	d->seq++;
 	return 1;
 }
 
@@ -251,6 +254,10 @@ last:
 	*w = d->fw;
 	*h = d->fh;
 	return 1;
+}
+
+int lc_dupl_seq(lc_dupl *d) {
+	return d->seq;
 }
 
 void lc_dupl_close(lc_dupl *d) {

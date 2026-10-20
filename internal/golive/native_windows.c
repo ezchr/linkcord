@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <stdlib.h>
 #include <string.h>
+#include <emmintrin.h>
 
 #include "codec_api.h"
 #include "native.h"
@@ -200,6 +201,25 @@ void lc_h264_close(lc_encoder *c) {
 
 // ---- Scaling ---------------------------------------------------------------
 
+// lc_inv[n] is 2^32 / n rounded up: a multiplication and a shift by it
+// divide a sum of up to 64 bytes by n exactly, many times faster than a
+// division, which scaling does three times a pixel.
+static uint32_t lc_inv[65];
+
+// Filled as the program starts, before any thread converts.
+__attribute__((constructor)) static void init_inv(void) {
+	for (int n = 2; n <= 64; n++) {
+		lc_inv[n] = (uint32_t)((((uint64_t)1 << 32) + n - 1) / n);
+	}
+}
+
+static inline unsigned div_n(unsigned s, unsigned n) {
+	if (n == 1) {
+		return s;
+	}
+	return n <= 64 ? (unsigned)(((uint64_t)s * lc_inv[n]) >> 32) : s / n;
+}
+
 // box_average averages the BGRA pixels of src that the destination pixel
 // x, y of a dw by dh picture covers.
 static inline void box_average(const uint8_t *src, int sstride, const int *xs, const int *ys, int x, int y, int *r, int *g, int *b) {
@@ -214,9 +234,9 @@ static inline void box_average(const uint8_t *src, int sstride, const int *xs, c
 		}
 		n += x1 - x0;
 	}
-	*r = sr / n;
-	*g = sg / n;
-	*b = sb / n;
+	*r = div_n(sr, n);
+	*g = div_n(sg, n);
+	*b = div_n(sb, n);
 }
 
 // bounds fills out, of n+1 entries, with where each of n destination
@@ -240,11 +260,126 @@ static int *bounds(int s, int n) {
 	return out;
 }
 
-void lc_bgra_to_i420(const uint8_t *src, int sw, int sh, int sstride, uint8_t *dst, int dw, int dh) {
+#define LC_Y(r, g, b) (uint8_t)(((66 * (r) + 129 * (g) + 25 * (b) + 128) >> 8) + 16)
+#define LC_U(r, g, b) (uint8_t)(((-38 * (r) - 74 * (g) + 112 * (b) + 128) >> 8) + 128)
+#define LC_V(r, g, b) (uint8_t)(((112 * (r) - 94 * (g) - 18 * (b) + 128) >> 8) + 128)
+
+// put_uv writes the chroma of the 2x2 block at column x of chroma row cy.
+static inline void put_uv(uint8_t *U, uint8_t *V, uint8_t *UV, int cw, int cy, int x, int r, int g, int b) {
+	if (UV) {
+		UV[(size_t)cy * cw * 2 + x * 2] = LC_U(r, g, b);
+		UV[(size_t)cy * cw * 2 + x * 2 + 1] = LC_V(r, g, b);
+	} else {
+		U[(size_t)cy * cw + x] = LC_U(r, g, b);
+		V[(size_t)cy * cw + x] = LC_V(r, g, b);
+	}
+}
+
+// lc_simd is cleared by tests, to check the SSE2 code against plain C.
+int lc_simd = 1;
+
+// luma4 is the Y of the 4 BGRA pixels of px, in 32-bit lanes: SSE2, which
+// every 64-bit processor has, Windows 7's oldest included.
+static inline __m128i luma4(__m128i px) {
+	const __m128i zero = _mm_setzero_si128();
+	const __m128i k = _mm_set_epi16(0, 66, 129, 25, 0, 66, 129, 25);
+	__m128i lo = _mm_madd_epi16(_mm_unpacklo_epi8(px, zero), k); // 25B+129G, 66R of pixels 0, 1
+	__m128i hi = _mm_madd_epi16(_mm_unpackhi_epi8(px, zero), k); // of pixels 2, 3
+	lo = _mm_add_epi32(lo, _mm_srli_epi64(lo, 32));
+	hi = _mm_add_epi32(hi, _mm_srli_epi64(hi, 32));
+	__m128i s = _mm_unpacklo_epi64(_mm_shuffle_epi32(lo, _MM_SHUFFLE(3, 3, 2, 0)), _mm_shuffle_epi32(hi, _MM_SHUFFLE(3, 3, 2, 0)));
+	return _mm_add_epi32(_mm_srai_epi32(_mm_add_epi32(s, _mm_set1_epi32(128)), 8), _mm_set1_epi32(16));
+}
+
+// sum2x2 adds the 16-bit B, G, R, A of the 2x2 blocks of pixels a0/a1 over
+// c0/c1 (2 pixels each): blocks 0 and 1, in the low and high halves.
+static inline __m128i sum2x2(__m128i a, __m128i c) {
+	const __m128i zero = _mm_setzero_si128();
+	__m128i lo = _mm_add_epi16(_mm_unpacklo_epi8(a, zero), _mm_unpacklo_epi8(c, zero)); // pixels 0, 1
+	__m128i hi = _mm_add_epi16(_mm_unpackhi_epi8(a, zero), _mm_unpackhi_epi8(c, zero)); // pixels 2, 3
+	lo = _mm_add_epi16(lo, _mm_srli_si128(lo, 8));
+	hi = _mm_add_epi16(hi, _mm_srli_si128(hi, 8));
+	return _mm_unpacklo_epi64(lo, hi);
+}
+
+// chroma2 is U or V (coefficients k) of the two averaged blocks in avg, in
+// the 32-bit lanes 0 and 1.
+static inline __m128i chroma2(__m128i avg, __m128i k) {
+	__m128i m = _mm_madd_epi16(avg, k);
+	m = _mm_add_epi32(m, _mm_srli_epi64(m, 32));
+	m = _mm_shuffle_epi32(m, _MM_SHUFFLE(3, 3, 2, 0));
+	return _mm_add_epi32(_mm_srai_epi32(_mm_add_epi32(m, _mm_set1_epi32(128)), 8), _mm_set1_epi32(128));
+}
+
+// same_size converts rows y0 to y1 of a picture that is not scaled: eight
+// pixels at a time with SSE2, without the averaging of box_average, giving
+// what the plain C below it gives to the bit.
+static void same_size(const uint8_t *src, int sstride, uint8_t *Y, uint8_t *U, uint8_t *V, uint8_t *UV, int dw, int y0, int y1) {
+	int cw = dw / 2;
+	const __m128i ku = _mm_set_epi16(0, -38, -74, 112, 0, -38, -74, 112);
+	const __m128i kv = _mm_set_epi16(0, 112, -94, -18, 0, 112, -94, -18);
+	const __m128i two = _mm_set1_epi16(2);
+	for (int y = y0; y < y1; y += 2) {
+		const uint8_t *a = src + (size_t)y * sstride, *c = a + sstride;
+		uint8_t *ya = Y + (size_t)y * dw, *yc = ya + dw;
+		int x = 0;
+		for (; lc_simd && x + 4 <= cw; x += 4) { // 8 pixels of each row
+			__m128i a0 = _mm_loadu_si128((const __m128i *)(a + x * 8));
+			__m128i a1 = _mm_loadu_si128((const __m128i *)(a + x * 8 + 16));
+			__m128i c0 = _mm_loadu_si128((const __m128i *)(c + x * 8));
+			__m128i c1 = _mm_loadu_si128((const __m128i *)(c + x * 8 + 16));
+			__m128i ylo = _mm_packs_epi32(luma4(a0), luma4(a1));
+			__m128i yhi = _mm_packs_epi32(luma4(c0), luma4(c1));
+			__m128i yy = _mm_packus_epi16(ylo, yhi);
+			_mm_storel_epi64((__m128i *)(ya + x * 2), yy);
+			_mm_storel_epi64((__m128i *)(yc + x * 2), _mm_srli_si128(yy, 8));
+			// Blocks 0, 1 and 2, 3: sums of four pixels, rounded averages.
+			__m128i b01 = _mm_srli_epi16(_mm_add_epi16(sum2x2(a0, c0), two), 2);
+			__m128i b23 = _mm_srli_epi16(_mm_add_epi16(sum2x2(a1, c1), two), 2);
+			__m128i u = _mm_unpacklo_epi64(chroma2(b01, ku), chroma2(b23, ku)); // 4 x 32-bit
+			__m128i v = _mm_unpacklo_epi64(chroma2(b01, kv), chroma2(b23, kv));
+			__m128i u8 = _mm_packus_epi16(_mm_packs_epi32(u, u), _mm_setzero_si128());
+			__m128i v8 = _mm_packus_epi16(_mm_packs_epi32(v, v), _mm_setzero_si128());
+			int cy = y / 2;
+			if (UV) {
+				__m128i uv = _mm_unpacklo_epi8(u8, v8);
+				_mm_storel_epi64((__m128i *)(UV + (size_t)cy * cw * 2 + x * 2), uv);
+			} else {
+				*(int32_t *)(U + (size_t)cy * cw + x) = _mm_cvtsi128_si32(u8);
+				*(int32_t *)(V + (size_t)cy * cw + x) = _mm_cvtsi128_si32(v8);
+			}
+		}
+		for (; x < cw; x++) {
+			const uint8_t *p = a + x * 8, *q = c + x * 8;
+			ya[x * 2] = LC_Y(p[2], p[1], p[0]);
+			ya[x * 2 + 1] = LC_Y(p[6], p[5], p[4]);
+			yc[x * 2] = LC_Y(q[2], q[1], q[0]);
+			yc[x * 2 + 1] = LC_Y(q[6], q[5], q[4]);
+			int r = (p[2] + p[6] + q[2] + q[6] + 2) >> 2;
+			int g = (p[1] + p[5] + q[1] + q[5] + 2) >> 2;
+			int b = (p[0] + p[4] + q[0] + q[4] + 2) >> 2;
+			put_uv(U, V, UV, cw, y / 2, x, r, g, b);
+		}
+	}
+}
+
+void lc_bgra_to_yuv(const uint8_t *src, int sw, int sh, int sstride, uint8_t *dst, int dw, int dh, int nv12, int y0, int y1) {
+	y0 &= ~1;
+	y1 = y1 > dh ? dh : y1;
+	uint8_t *Y = dst, *U = NULL, *V = NULL, *UV = NULL;
+	if (nv12) {
+		UV = dst + (size_t)dw * dh;
+	} else {
+		U = dst + (size_t)dw * dh;
+		V = U + (size_t)(dw / 2) * (dh / 2);
+	}
+	if (sw == dw && sh == dh) {
+		same_size(src, sstride, Y, U, V, UV, dw, y0, y1);
+		return;
+	}
 	int *xs = bounds(sw, dw), *ys = bounds(sh, dh);
 	int *row = malloc(sizeof(int) * dw * 6);
-	uint8_t *Y = dst, *U = dst + dw * dh, *V = U + (dw / 2) * (dh / 2);
-	for (int y = 0; y < dh; y++) {
+	for (int y = y0; y < y1; y++) {
 		int *cur = row + (y & 1) * dw * 3;
 		for (int x = 0; x < dw; x++) {
 			int r, g, b;
@@ -252,7 +387,7 @@ void lc_bgra_to_i420(const uint8_t *src, int sw, int sh, int sstride, uint8_t *d
 			cur[x * 3] = r;
 			cur[x * 3 + 1] = g;
 			cur[x * 3 + 2] = b;
-			Y[y * dw + x] = (uint8_t)(((66 * r + 129 * g + 25 * b + 128) >> 8) + 16);
+			Y[(size_t)y * dw + x] = LC_Y(r, g, b);
 		}
 		if (y & 1) {
 			int *a = row, *c = row + dw * 3;
@@ -261,14 +396,17 @@ void lc_bgra_to_i420(const uint8_t *src, int sw, int sh, int sstride, uint8_t *d
 				int r = (a[i] + a[i + 3] + c[i] + c[i + 3]) / 4;
 				int g = (a[i + 1] + a[i + 4] + c[i + 1] + c[i + 4]) / 4;
 				int b = (a[i + 2] + a[i + 5] + c[i + 2] + c[i + 5]) / 4;
-				U[(y / 2) * (dw / 2) + x] = (uint8_t)(((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128);
-				V[(y / 2) * (dw / 2) + x] = (uint8_t)(((112 * r - 94 * g - 18 * b + 128) >> 8) + 128);
+				put_uv(U, V, UV, dw / 2, y / 2, x, r, g, b);
 			}
 		}
 	}
 	free(row);
 	free(xs);
 	free(ys);
+}
+
+void lc_bgra_to_i420(const uint8_t *src, int sw, int sh, int sstride, uint8_t *dst, int dw, int dh) {
+	lc_bgra_to_yuv(src, sw, sh, sstride, dst, dw, dh, 0, 0, dh);
 }
 
 void lc_bgra_to_rgba(const uint8_t *src, int sw, int sh, int sstride, uint8_t *dst, int dw, int dh) {
@@ -305,6 +443,14 @@ struct lc_capture {
 	HGDIOBJ old;
 	uint8_t *bits;
 	int bw, bh;
+	// changed: the last grab differs from the one before. seq is the
+	// duplication's picture in bits, and cur the pointer drawn over it, at
+	// cx, cy and cw by ch, if drawn.
+	int changed;
+	int seq;
+	int drawn;
+	HCURSOR cur;
+	int cx, cy, cw, ch;
 };
 
 lc_capture *lc_capture_open(uintptr_t hwnd, int x, int y, int w, int h, int cursor) {
@@ -351,30 +497,80 @@ static int ensure(lc_capture *c, HDC ref, int w, int h) {
 	return 1;
 }
 
-// draw_cursor draws the mouse pointer, if it is over the area at ox, oy.
-static void draw_cursor(lc_capture *c, int ox, int oy) {
+// pointer finds the mouse pointer: its cursor, and where and how big it is
+// over the area at ox, oy. It returns 0 when none shows there.
+static int pointer(lc_capture *c, int ox, int oy, HCURSOR *cur, int *x, int *y, int *w, int *h) {
 	CURSORINFO ci;
 	memset(&ci, 0, sizeof ci);
 	ci.cbSize = sizeof ci;
 	if (!GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor) {
-		return;
+		return 0;
 	}
 	ICONINFO ii;
 	if (!GetIconInfo(ci.hCursor, &ii)) {
-		return;
+		return 0;
 	}
-	int x = ci.ptScreenPos.x - ox - (int)ii.xHotspot;
-	int y = ci.ptScreenPos.y - oy - (int)ii.yHotspot;
+	*x = ci.ptScreenPos.x - ox - (int)ii.xHotspot;
+	*y = ci.ptScreenPos.y - oy - (int)ii.yHotspot;
+	BITMAP bm;
+	memset(&bm, 0, sizeof bm);
+	*w = *h = 64;
+	if (ii.hbmColor && GetObject(ii.hbmColor, sizeof bm, &bm)) {
+		*w = bm.bmWidth;
+		*h = bm.bmHeight;
+	} else if (ii.hbmMask && GetObject(ii.hbmMask, sizeof bm, &bm)) {
+		*w = bm.bmWidth;
+		*h = bm.bmHeight / 2; // a black and white pointer's mask is two high
+	}
 	if (ii.hbmMask) {
 		DeleteObject(ii.hbmMask);
 	}
 	if (ii.hbmColor) {
 		DeleteObject(ii.hbmColor);
 	}
-	if (x > c->bw || y > c->bh || x < -64 || y < -64) {
+	*cur = ci.hCursor;
+	return !(*x >= c->bw || *y >= c->bh || *x + *w <= 0 || *y + *h <= 0);
+}
+
+// draw_cursor draws the mouse pointer, if it is over the area at ox, oy,
+// and notes where.
+static void draw_cursor(lc_capture *c, int ox, int oy) {
+	HCURSOR cur;
+	int x, y, w, h;
+	c->drawn = 0;
+	if (!pointer(c, ox, oy, &cur, &x, &y, &w, &h)) {
 		return;
 	}
-	DrawIconEx(c->mem, x, y, ci.hCursor, 0, 0, 0, NULL, DI_NORMAL);
+	DrawIconEx(c->mem, x, y, cur, 0, 0, 0, NULL, DI_NORMAL);
+	c->drawn = 1;
+	c->cur = cur;
+	c->cx = x;
+	c->cy = y;
+	c->cw = w;
+	c->ch = h;
+}
+
+// pointer_moved reports whether the pointer is no longer as drawn last.
+static int pointer_moved(lc_capture *c, int ox, int oy) {
+	HCURSOR cur;
+	int x, y, w, h;
+	int shows = pointer(c, ox, oy, &cur, &x, &y, &w, &h);
+	if (!shows || !c->drawn) {
+		return shows != c->drawn;
+	}
+	return cur != c->cur || x != c->cx || y != c->cy;
+}
+
+// unpaint puts back, from the clean picture pix (rows pw*4 bytes apart),
+// what the pointer last drawn covers.
+static void unpaint(lc_capture *c, const uint8_t *pix, int pw) {
+	int x0 = c->cx < 0 ? 0 : c->cx, y0 = c->cy < 0 ? 0 : c->cy;
+	int x1 = c->cx + c->cw > c->bw ? c->bw : c->cx + c->cw;
+	int y1 = c->cy + c->ch > c->bh ? c->bh : c->cy + c->ch;
+	for (int y = y0; y < y1; y++) {
+		memcpy(c->bits + ((size_t)y * c->bw + x0) * 4, pix + ((size_t)y * pw + x0) * 4, (size_t)(x1 - x0) * 4);
+	}
+	c->drawn = 0;
 }
 
 // dpi_aware has the thread see the screens in their own pixels, rather than
@@ -400,11 +596,13 @@ void lc_dpi_restore(HANDLE old) {
 
 static const uint8_t *grab(lc_capture *c, int *w, int *h, int *stride, int *gone);
 
-const uint8_t *lc_capture_grab(lc_capture *c, int *w, int *h, int *stride, int *gone) {
+const uint8_t *lc_capture_grab(lc_capture *c, int *w, int *h, int *stride, int *gone, int *changed) {
 	// Screens are captured in their own pixels, as the pointer is placed.
 	HANDLE old = lc_dpi_aware();
+	c->changed = 1;
 	const uint8_t *pix = grab(c, w, h, stride, gone);
 	lc_dpi_restore(old);
+	*changed = c->changed;
 	return pix;
 }
 
@@ -569,16 +767,33 @@ static const uint8_t *grab(lc_capture *c, int *w, int *h, int *stride, int *gone
 				return NULL;
 			}
 		} else {
+			int fresh = !(c->bmp && c->bw == pw && c->bh == ph);
 			HDC sdc = GetDC(NULL);
 			int ok = ensure(c, sdc, pw, ph);
 			ReleaseDC(NULL, sdc);
 			if (!ok) {
 				return NULL;
 			}
-			// The picture is kept clean of the pointer, drawn over a copy.
-			memcpy(c->bits, pix, (size_t)pw * ph * 4);
-			if (c->cursor) {
+			// The duplication keeps the picture clean of the pointer, drawn
+			// over a copy. The copy is only made again when the screen
+			// changed; when only the pointer moved, the little it covered
+			// is put back and it is drawn where it is now; when neither,
+			// the picture is the same as the last.
+			int seq = lc_dupl_seq(c->dupl);
+			if (fresh || seq != c->seq) {
+				memcpy(c->bits, pix, (size_t)pw * ph * 4);
+				c->seq = seq;
+				c->drawn = 0;
+				if (c->cursor) {
+					draw_cursor(c, c->x, c->y);
+				}
+			} else if (c->cursor && pointer_moved(c, c->x, c->y)) {
+				if (c->drawn) {
+					unpaint(c, pix, pw);
+				}
 				draw_cursor(c, c->x, c->y);
+			} else {
+				c->changed = 0;
 			}
 		}
 	} else if (!gdi_screen(c)) {
