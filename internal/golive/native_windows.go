@@ -58,6 +58,8 @@ type encoder struct {
 	// name is the graphics card encoder's, or "OpenH264".
 	name string
 	idr  bool
+	// dev is the device whose textures the encoder takes, if any, held.
+	dev unsafe.Pointer
 }
 
 func newEncoder(w, h, fps, bitrate, idr int) (*encoder, error) {
@@ -73,6 +75,133 @@ func newEncoder(w, h, fps, bitrate, idr int) (*encoder, error) {
 		return nil, fmt.Errorf("golive: could not start the H264 encoder (%d)", int(cerr))
 	}
 	return &encoder{c: c, w: w, h: h, name: "OpenH264"}, nil
+}
+
+// newEncoderOn opens the encoder of the graphics card of dev (an
+// ID3D11Device, with a reference the encoder takes over), taking that
+// device's textures; nil where it has none that does.
+func newEncoderOn(dev unsafe.Pointer, w, h, fps, bitrate, idr int) *encoder {
+	if os.Getenv(noHardwareEncoder) != "" || hardwareFailed.Load() {
+		C.lc_com_release(dev)
+		return nil
+	}
+	var name [128]uint16
+	hw := C.lc_hwenc_open_on(dev, C.int(w), C.int(h), C.int(fps), C.int(bitrate), C.int(idr), (*C.uint16_t)(unsafe.Pointer(&name[0])), 128)
+	if hw == nil {
+		C.lc_com_release(dev)
+		return nil
+	}
+	return &encoder{hw: hw, dev: dev, w: w, h: h, name: windows.UTF16ToString(name[:]) + ", converted by the graphics card"}
+}
+
+// textures reports whether the encoder takes textures of dev.
+func (e *encoder) textures(dev unsafe.Pointer) bool { return e.dev != nil && e.dev == dev }
+
+// encodeTexture is encode for an NV12 texture of the encoder's device.
+func (e *encoder) encodeTexture(tex unsafe.Pointer, tsMs int64) ([]byte, int64, bool, error) {
+	var out *C.uint8_t
+	var n, idr C.int
+	var ts C.int64_t
+	force := C.int(0)
+	if e.idr {
+		force, e.idr = 1, false
+	}
+	if r := C.lc_hwenc_encode_texture(e.hw, tex, C.int64_t(tsMs), force, &out, &n, &ts, &idr); r != 0 {
+		return nil, 0, false, fmt.Errorf("golive: the graphics card could not encode a picture (%s)", e.name)
+	}
+	if n == 0 {
+		return nil, 0, false, nil
+	}
+	return C.GoBytes(unsafe.Pointer(out), n), int64(ts), idr != 0, nil
+}
+
+// gpuCapture captures a screen, or an uncovered window, and converts it to
+// NV12 on the graphics card, from Windows 8 (see lc_gpucap in native.h).
+type gpuCapture struct {
+	g *C.lc_gpucap
+}
+
+// gpu statuses of a grab.
+const (
+	gpuPicture = 1
+	gpuNone    = 0
+	gpuThisCPU = -2 // capture this picture with the processor
+	gpuNever   = -1 // the graphics card cannot capture: the processor does from now on
+)
+
+func newGPUCapture(src Source, cursor bool) *gpuCapture {
+	if os.Getenv(noHardwareEncoder) != "" || hardwareFailed.Load() {
+		return nil
+	}
+	cur := C.int(0)
+	if cursor {
+		cur = 1
+	}
+	g := C.lc_gpucap_open(C.uintptr_t(src.Window), C.int(src.X), C.int(src.Y), cur)
+	if g == nil {
+		return nil
+	}
+	return &gpuCapture{g: g}
+}
+
+// grab takes the latest picture: its size, a status, whether it differs
+// from the last, and whether the window shared was closed.
+func (g *gpuCapture) grab() (w, h, status int, changed, gone bool) {
+	var cw, ch, cc, cg C.int
+	r := C.lc_gpucap_grab(g.g, &cw, &ch, &cc, &cg)
+	return int(cw), int(ch), int(r), cc != 0, cg != 0
+}
+
+// convert scales the last picture to ow by oh NV12 and returns the texture
+// and its device, each with a reference of its own for the encoder.
+func (g *gpuCapture) convert(ow, oh int) (tex, dev unsafe.Pointer, err error) {
+	var slot C.int
+	if C.lc_gpucap_convert(g.g, C.int(ow), C.int(oh), &slot) != 0 {
+		return nil, nil, errors.New("golive: the graphics card could not convert the picture")
+	}
+	tex = C.lc_gpucap_texture(g.g, slot)
+	dev = C.lc_gpucap_device(g.g)
+	if tex == nil || dev == nil {
+		releaseCOM(tex)
+		releaseCOM(dev)
+		return nil, nil, errors.New("golive: the graphics card's picture is gone")
+	}
+	return tex, dev, nil
+}
+
+// preview scales the last picture to w by h.
+func (g *gpuCapture) preview(w, h int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	if C.lc_gpucap_preview(g.g, (*C.uint8_t)(unsafe.Pointer(&img.Pix[0])), C.int(w), C.int(h)) != 0 {
+		return nil
+	}
+	return img
+}
+
+func (g *gpuCapture) close() { C.lc_gpucap_close(g.g) }
+
+// readNV12 reads a w by h NV12 texture back, for tests.
+func readNV12(tex unsafe.Pointer, w, h int) []byte {
+	b := make([]byte, w*h*3/2)
+	if C.lc_texture_read_nv12(tex, (*C.uint8_t)(unsafe.Pointer(&b[0])), C.int(w), C.int(h)) != 0 {
+		return nil
+	}
+	return b
+}
+
+// addRefCOM takes another reference to a COM object and returns it.
+func addRefCOM(p unsafe.Pointer) unsafe.Pointer {
+	if p != nil {
+		C.lc_com_addref(p)
+	}
+	return p
+}
+
+// releaseCOM lets go of a reference to a COM object, if any.
+func releaseCOM(p unsafe.Pointer) {
+	if p != nil {
+		C.lc_com_release(p)
+	}
 }
 
 // nv12 reports whether the encoder takes NV12 pictures rather than I420.
@@ -131,6 +260,7 @@ func (e *encoder) setBitrate(bitrate int) {
 func (e *encoder) close() {
 	if e.hw != nil {
 		C.lc_hwenc_close(e.hw)
+		releaseCOM(e.dev)
 		return
 	}
 	C.lc_h264_close(e.c)
@@ -232,6 +362,8 @@ func (p picture) toRGBA(w, h int) *image.RGBA {
 // capturer captures a screen or a window.
 type capturer struct {
 	c *C.lc_capture
+	// src is what it captures.
+	src Source
 }
 
 func newCapturer(src Source, cursor bool) *capturer {
@@ -239,7 +371,7 @@ func newCapturer(src Source, cursor bool) *capturer {
 	if cursor {
 		cur = 1
 	}
-	return &capturer{c: C.lc_capture_open(C.uintptr_t(src.Window), C.int(src.X), C.int(src.Y), C.int(src.W), C.int(src.H), cur)}
+	return &capturer{src: src, c: C.lc_capture_open(C.uintptr_t(src.Window), C.int(src.X), C.int(src.Y), C.int(src.W), C.int(src.H), cur)}
 }
 
 // grab captures a picture, ok false when there is none for now, and gone

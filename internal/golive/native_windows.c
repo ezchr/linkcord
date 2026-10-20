@@ -649,6 +649,10 @@ static int uncovered(HWND hwnd, int sx, int sy, int w, int h) {
 	return 1;
 }
 
+int lc_window_uncovered(uintptr_t hwnd, int sx, int sy, int w, int h) {
+	return uncovered((HWND)hwnd, sx, sy, w, h);
+}
+
 // window_from_screen copies the window's client area, at sx, sy, w by h,
 // from a duplication of its screen: many times faster than PrintWindow,
 // which takes tens of milliseconds a picture for games and browsers, and

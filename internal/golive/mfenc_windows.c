@@ -145,6 +145,8 @@ struct lc_hwenc {
 	ID3D11DeviceContext *ctx;
 	IMFDXGIDeviceManager *mgr;
 	ID3D11Texture2D *staging[LC_HWENC_SLOTS], *tex[LC_HWENC_SLOTS];
+	// ext is the device given to use, the capture's, rather than one made.
+	ID3D11Device *ext;
 };
 
 static void set_u32(ICodecAPI *api, const GUID *g, ULONG v) {
@@ -246,14 +248,21 @@ static int use_d3d(lc_hwenc *c, IMFActivate *act) {
 	if (!mf.create_dxgi_manager || !mf.create_dxgi_buffer || !mf.create_device) {
 		return 0;
 	}
-	IDXGIAdapter *a = adapter(act);
-	HRESULT hr = mf.create_device(a, a ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, NULL,
-	                              D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT, NULL, 0, D3D11_SDK_VERSION, &c->dev, NULL, &c->ctx);
-	if (a) {
-		IDXGIAdapter_Release(a);
-	}
-	if (FAILED(hr)) {
-		return 0;
+	if (c->ext) {
+		// The capture's device, whose textures the encoder is to take.
+		c->dev = c->ext;
+		ID3D11Device_AddRef(c->dev);
+		ID3D11Device_GetImmediateContext(c->dev, &c->ctx);
+	} else {
+		IDXGIAdapter *a = adapter(act);
+		HRESULT hr = mf.create_device(a, a ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, NULL,
+		                              D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT, NULL, 0, D3D11_SDK_VERSION, &c->dev, NULL, &c->ctx);
+		if (a) {
+			IDXGIAdapter_Release(a);
+		}
+		if (FAILED(hr)) {
+			return 0;
+		}
 	}
 	lc_mt *mt = NULL;
 	if (SUCCEEDED(ID3D11Device_QueryInterface(c->dev, &lc_IID_ID3D10Multithread, (void **)&mt))) {
@@ -438,7 +447,40 @@ static int setup(lc_hwenc *c, IMFActivate *act, int bitrate, int idr) {
 	return 1;
 }
 
+static const GUID lc_IID_IDXGIDevice_enc = {0x54ec77fa, 0x1377, 0x44e6, {0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c}};
+
+// device_luid is the graphics card of an ID3D11Device, 0 if unknown.
+static UINT64 device_luid(ID3D11Device *dev) {
+	IDXGIDevice *dd = NULL;
+	UINT64 luid = 0;
+	if (SUCCEEDED(ID3D11Device_QueryInterface(dev, &lc_IID_IDXGIDevice_enc, (void **)&dd))) {
+		IDXGIAdapter *a = NULL;
+		if (SUCCEEDED(IDXGIDevice_GetAdapter(dd, &a))) {
+			DXGI_ADAPTER_DESC d;
+			if (SUCCEEDED(IDXGIAdapter_GetDesc(a, &d))) {
+				luid = (UINT64)(UINT32)d.AdapterLuid.HighPart << 32 | d.AdapterLuid.LowPart;
+			}
+			IDXGIAdapter_Release(a);
+		}
+		IDXGIDevice_Release(dd);
+	}
+	return luid;
+}
+
+static lc_hwenc *open_encoder(ID3D11Device *dev, int w, int h, int fps, int bitrate, int idr, uint16_t *name, int name_len);
+
 lc_hwenc *lc_hwenc_open(int w, int h, int fps, int bitrate, int idr, uint16_t *name, int name_len) {
+	return open_encoder(NULL, w, h, fps, bitrate, idr, name, name_len);
+}
+
+lc_hwenc *lc_hwenc_open_on(void *device, int w, int h, int fps, int bitrate, int idr, uint16_t *name, int name_len) {
+	if (!device) {
+		return NULL;
+	}
+	return open_encoder((ID3D11Device *)device, w, h, fps, bitrate, idr, name, name_len);
+}
+
+static lc_hwenc *open_encoder(ID3D11Device *dev, int w, int h, int fps, int bitrate, int idr, uint16_t *name, int name_len) {
 	if (!mf_load()) {
 		return NULL;
 	}
@@ -446,6 +488,8 @@ lc_hwenc *lc_hwenc_open(int w, int h, int fps, int bitrate, int idr, uint16_t *n
 	c->w = w;
 	c->h = h;
 	c->fps = fps;
+	c->ext = dev;
+	UINT64 luid = dev ? device_luid(dev) : 0;
 	HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
 	c->com = SUCCEEDED(hr);
 
@@ -457,8 +501,12 @@ lc_hwenc *lc_hwenc_open(int w, int h, int fps, int bitrate, int idr, uint16_t *n
 	int ok = 0;
 	if (SUCCEEDED(hr)) {
 		for (UINT32 i = 0; i < n; i++) {
-			if (!ok) {
-				ok = setup(c, acts[i], bitrate, idr);
+			// On a given device, only that graphics card's encoder, and only
+			// taking its textures.
+			UINT64 al = 0;
+			int other = luid && SUCCEEDED(IMFActivate_GetUINT64(acts[i], &lc_MFT_ENUM_ADAPTER_LUID, &al)) && al != luid;
+			if (!ok && !other) {
+				ok = setup(c, acts[i], bitrate, idr) && (!dev || c->d3d);
 				if (!ok) {
 					release(c);
 				}
@@ -610,7 +658,20 @@ static int handle(lc_hwenc *c, int e) {
 	return e < 0 ? -1 : 0;
 }
 
+static int encode(lc_hwenc *c, const uint8_t *nv12, ID3D11Texture2D *tex, int64_t ts_ms, int force_idr, uint8_t **out, int *out_len, int64_t *out_ts_ms, int *idr);
+
 int lc_hwenc_encode(lc_hwenc *c, const uint8_t *nv12, int64_t ts_ms, int force_idr, uint8_t **out, int *out_len, int64_t *out_ts_ms, int *idr) {
+	return encode(c, nv12, NULL, ts_ms, force_idr, out, out_len, out_ts_ms, idr);
+}
+
+int lc_hwenc_encode_texture(lc_hwenc *c, void *texture, int64_t ts_ms, int force_idr, uint8_t **out, int *out_len, int64_t *out_ts_ms, int *idr) {
+	if (!c->d3d || !texture) {
+		return -1;
+	}
+	return encode(c, NULL, (ID3D11Texture2D *)texture, ts_ms, force_idr, out, out_len, out_ts_ms, idr);
+}
+
+static int encode(lc_hwenc *c, const uint8_t *nv12, ID3D11Texture2D *tex, int64_t ts_ms, int force_idr, uint8_t **out, int *out_len, int64_t *out_ts_ms, int *idr) {
 	*out = NULL;
 	*out_len = 0;
 	*idr = 0;
@@ -630,7 +691,23 @@ int lc_hwenc_encode(lc_hwenc *c, const uint8_t *nv12, int64_t ts_ms, int force_i
 	}
 
 	IMFSample *s = NULL;
-	if (c->d3d) {
+	if (tex) {
+		// The texture as it is, converted by the graphics card already.
+		IMFMediaBuffer *b = NULL;
+		if (FAILED(mf.create_dxgi_buffer(&lc_IID_ID3D11Texture2D_enc, (IUnknown *)tex, 0, FALSE, &b))) {
+			return -1;
+		}
+		DWORD max = 0;
+		if (SUCCEEDED(IMFMediaBuffer_GetMaxLength(b, &max))) {
+			IMFMediaBuffer_SetCurrentLength(b, max);
+		}
+		if (FAILED(mf.create_sample(&s))) {
+			IMFMediaBuffer_Release(b);
+			return -1;
+		}
+		IMFSample_AddBuffer(s, b);
+		IMFMediaBuffer_Release(b);
+	} else if (c->d3d) {
 		if (!(s = d3d_sample(c, nv12))) {
 			return -1;
 		}

@@ -5,6 +5,8 @@ package golive
 import (
 	"context"
 	"fmt"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -251,6 +253,219 @@ func BenchmarkGrab(b *testing.B) {
 	n := int64(0)
 	for b.Loop() {
 		capt.grab()
+		n++
+	}
+	b.ReportMetric(float64(processCPU()-cpu0)/float64(max(n, 1)), "cpu-ns/op")
+}
+
+// gpuScreen opens the graphics card's capture of the first screen and waits
+// for its first picture, or skips the test where there is none.
+func gpuScreen(t testing.TB, cursor bool) (*gpuCapture, Source, int, int) {
+	sources := Sources(0, 160)
+	if len(sources) == 0 || sources[0].Kind != Screen || sources[0].Thumb == nil {
+		t.Skip("no screen to capture")
+	}
+	g := newGPUCapture(sources[0], cursor)
+	if g == nil {
+		t.Skip("no Direct3D 11")
+	}
+	for range 40 {
+		w, h, status, _, _ := g.grab()
+		switch status {
+		case gpuPicture:
+			return g, sources[0], w, h
+		case gpuNever:
+			g.close()
+			t.Skip("the graphics card cannot capture here")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	g.close()
+	t.Skip("no picture from the graphics card")
+	return nil, Source{}, 0, 0
+}
+
+// TestGPUConvertEncode converts the screen on the graphics card, checks the
+// colours against the processor's conversion of the same screen, and
+// encodes the textures.
+func TestGPUConvertEncode(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	g, src, w, h := gpuScreen(t, false)
+	defer g.close()
+	ow, oh := w&^1, h&^1
+	tex, dev, err := g.convert(ow, oh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onGPU := readNV12(tex, ow, oh)
+	releaseCOM(tex)
+	if onGPU == nil {
+		t.Fatal("could not read the texture back")
+	}
+	// The reference: the very picture the graphics card converted, read
+	// back, converted by the formulas of the processor's conversion.
+	rgba := g.preview(ow, oh)
+	if rgba == nil {
+		t.Fatal("could not read the picture back")
+	}
+	onCPU := make([]byte, ow*oh*3/2)
+	px := func(x, y int) (int, int, int) {
+		p := rgba.Pix[(y*ow+x)*4:]
+		return int(p[0]), int(p[1]), int(p[2])
+	}
+	for y := 0; y < oh; y++ {
+		for x := 0; x < ow; x++ {
+			r, gg, b := px(x, y)
+			onCPU[y*ow+x] = byte(((66*r + 129*gg + 25*b + 128) >> 8) + 16)
+		}
+	}
+	for y := 0; y < oh/2; y++ {
+		for x := 0; x < ow/2; x++ {
+			var r, gg, b int
+			for _, d := range [4][2]int{{0, 0}, {1, 0}, {0, 1}, {1, 1}} {
+				pr, pg, pb := px(x*2+d[0], y*2+d[1])
+				r, gg, b = r+pr, gg+pg, b+pb
+			}
+			r, gg, b = (r+2)>>2, (gg+2)>>2, (b+2)>>2
+			onCPU[ow*oh+y*ow+x*2] = byte(((-38*r - 74*gg + 112*b + 128) >> 8) + 128)
+			onCPU[ow*oh+y*ow+x*2+1] = byte(((112*r - 94*gg - 18*b + 128) >> 8) + 128)
+		}
+	}
+	_ = src
+	close := func(a, b []byte) float64 {
+		n := 0
+		for i := range a {
+			if d := int(a[i]) - int(b[i]); d >= -3 && d <= 3 {
+				n++
+			}
+		}
+		return float64(n) / float64(len(a))
+	}
+	cy, cuv := close(onGPU[:ow*oh], onCPU[:ow*oh]), close(onGPU[ow*oh:], onCPU[ow*oh:])
+	t.Logf("%dx%d: within 3 of the processor's conversion: Y %.1f%%, UV %.1f%%", ow, oh, cy*100, cuv*100)
+	if dir := os.Getenv("LC_DIAG"); dir != "" {
+		for name, y := range map[string][]byte{"gpu": onGPU, "cpu": onCPU} {
+			img := image.NewGray(image.Rect(0, 0, ow, oh))
+			copy(img.Pix, y[:ow*oh])
+			f, _ := os.Create(filepath.Join(dir, name+".png"))
+			png.Encode(f, img)
+			f.Close()
+		}
+	}
+	var uvErr int
+	for i := ow * oh; i < len(onGPU); i++ {
+		d := int(onGPU[i]) - int(onCPU[i])
+		uvErr += max(d, -d)
+	}
+	meanUV := float64(uvErr) / float64(len(onGPU)-ow*oh)
+	t.Logf("mean colour difference: %.2f", meanUV)
+	// Colour is sampled where H264 puts it, at the left of each pair, where
+	// the formulas average the pair: sharp edges differ a little.
+	if cy < 0.97 || cuv < 0.9 || meanUV > 1.5 {
+		t.Errorf("the graphics card's colours differ from the processor's: Y %.1f%%, UV %.1f%% within 3", cy*100, cuv*100)
+	}
+	ew, eh := Quality{Height: 720}.size(w, h)
+	enc := newEncoderOn(dev, ew, eh, 30, Quality{FPS: 30}.bitrate(ew, eh), 900)
+	if enc == nil {
+		t.Skip("this graphics card has no encoder taking its textures")
+	}
+	defer enc.close()
+	t.Log("encoder:", enc.name)
+	var frames [][]byte
+	var idrs []bool
+	for i := 0; i < 6 && len(frames) < 2; i++ {
+		g.grab()
+		tex, dev, err := g.convert(ew, eh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		frame, _, idr, err := enc.encodeTexture(tex, int64(i*33))
+		releaseCOM(tex)
+		releaseCOM(dev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if frame != nil {
+			frames = append(frames, frame)
+			idrs = append(idrs, idr)
+		}
+	}
+	if len(frames) < 2 {
+		t.Fatalf("%d pictures encoded of 6", len(frames))
+	}
+	if !idrs[0] || idrs[1] {
+		t.Errorf("IDR pictures: %v, want only the first", idrs)
+	}
+	types := map[byte]bool{}
+	for _, nal := range splitNALs(frames[0]) {
+		types[nal[0]&0x1F] = true
+	}
+	for _, typ := range []byte{7, 8, 5} {
+		if !types[typ] {
+			t.Errorf("no NAL unit of type %d in the first picture: %v", typ, types)
+		}
+	}
+	t.Logf("%dx%d: first picture %d bytes, second %d", ew, eh, len(frames[0]), len(frames[1]))
+}
+
+// BenchmarkGPUPipeline is the whole work of a moving picture on the graphics
+// card: grab, convert to 720p NV12, encode.
+func BenchmarkGPUPipeline(b *testing.B) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	g, _, w, h := gpuScreen(b, true)
+	defer g.close()
+	ew, eh := Quality{Height: 720}.size(w, h)
+	_, dev, err := g.convert(ew, eh)
+	if err != nil {
+		b.Fatal(err)
+	}
+	enc := newEncoderOn(dev, ew, eh, 60, Quality{FPS: 60}.bitrate(ew, eh), 3600)
+	if enc == nil {
+		b.Skip("no encoder taking textures")
+	}
+	defer enc.close()
+	cpu0 := processCPU()
+	n := int64(0)
+	for b.Loop() {
+		g.grab()
+		tex, dev, err := g.convert(ew, eh)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if _, _, _, err := enc.encodeTexture(tex, n*16); err != nil {
+			b.Fatal(err)
+		}
+		releaseCOM(tex)
+		releaseCOM(dev)
+		n++
+	}
+	b.ReportMetric(float64(processCPU()-cpu0)/float64(max(n, 1)), "cpu-ns/op")
+}
+
+// BenchmarkCPUPipeline is the same work with the processor converting: what
+// Windows 7 and the fallback do (the encoder still the graphics card's).
+func BenchmarkCPUPipeline(b *testing.B) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	capt, pic := capture(b)
+	defer capt.close()
+	ew, eh := Quality{Height: 720}.size(pic.w, pic.h)
+	enc, err := newEncoder(ew, eh, 60, Quality{FPS: 60}.bitrate(ew, eh), 3600)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer enc.close()
+	buf := make([]byte, ew*eh*3/2)
+	cpu0 := processCPU()
+	n := int64(0)
+	for b.Loop() {
+		pic, _, _ = capt.grab()
+		pic.toYUV(buf, ew, eh, enc.nv12())
+		if _, _, _, err := enc.encode(buf, n*16); err != nil {
+			b.Fatal(err)
+		}
 		n++
 	}
 	b.ReportMetric(float64(processCPU()-cpu0)/float64(max(n, 1)), "cpu-ns/op")

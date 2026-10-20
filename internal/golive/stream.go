@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/utils/ws"
@@ -369,17 +370,23 @@ func (s *Stream) requestKeyframe() {
 const keyframeEvery = 30 * time.Second
 
 // streamFrame is a picture handed from the capture thread to the encoder
-// thread.
+// thread: in buf, converted by the processor, or in tex, converted by the
+// graphics card; neither to send the last picture again.
 type streamFrame struct {
-	// buf is the picture, w by h, in NV12 if nv12 or else I420; nil to send
-	// the last picture again.
-	buf     []byte
-	w, h    int
-	nv12    bool
-	elapsed time.Duration
+	// buf is the picture, w by h, in NV12 if nv12 or else I420.
+	buf  []byte
+	w, h int
+	nv12 bool
+	// tex is the NV12 texture of the device dev, each with a reference the
+	// frame holds until the encoder is done with it.
+	tex, dev unsafe.Pointer
+	elapsed  time.Duration
 	// idr asks for a keyframe.
 	idr bool
 }
+
+// empty reports whether the frame is a request to send the last picture again.
+func (f streamFrame) empty() bool { return f.buf == nil && f.tex == nil }
 
 // encodeStats are counted by the encoder thread and logged by the capture
 // loop.
@@ -390,21 +397,40 @@ type encodeStats struct {
 
 // loop captures pictures until the stream stops and hands them to
 // encodeLoop, on a thread of its own: capturing and converting the next
-// picture runs while the last one is encoded and sent, and converting splits
-// each picture across the cores.
+// picture runs while the last one is encoded and sent. From Windows 8 the
+// graphics card captures, converts and encodes (gpuCapture); otherwise the
+// processor converts, each picture split across the cores.
 func (s *Stream) loop(capt *capturer) {
 	jobs := make(chan streamFrame, 1)
 	free := make(chan []byte, 4)
 	var st encodeStats
 	var wantNV12 atomic.Bool
+	// gpuOK is cleared by the encoder thread when the graphics card cannot
+	// encode its own textures: the processor converts from then on.
+	var gpuOK atomic.Bool
+	gpuOK.Store(true)
+	var gpu *gpuCapture
+	openGPU := func() {
+		if gpu != nil {
+			gpu.close()
+			gpu = nil
+		}
+		if gpuOK.Load() {
+			gpu = newGPUCapture(capt.src, true)
+		}
+	}
+	openGPU()
 	encDone := make(chan struct{})
 	go func() {
 		defer close(encDone)
-		s.encodeLoop(jobs, free, &st, &wantNV12)
+		s.encodeLoop(jobs, free, &st, &wantNV12, &gpuOK)
 	}()
 	defer func() {
 		close(jobs)
 		<-encDone
+		if gpu != nil {
+			gpu.close()
+		}
 		capt.close()
 		// One handed over as the stream ended is not shared.
 		select {
@@ -446,6 +472,19 @@ func (s *Stream) loop(capt *capturer) {
 		}
 		return make([]byte, n)
 	}
+	// resize follows the size of what is captured.
+	resize := func(w, h int) {
+		if w != srcW || h != srcH {
+			srcW, srcH = w, h
+			ow, oh = s.p.Quality.size(srcW, srcH)
+		}
+	}
+	method := func() string {
+		if gpu != nil {
+			return "desktop duplication, converted by the graphics card"
+		}
+		return capt.method()
+	}
 	for {
 		select {
 		case <-s.done:
@@ -469,7 +508,7 @@ func (s *Stream) loop(capt *capturer) {
 				"encode_avg", (time.Duration(encodeNs) / time.Duration(max(frames, 1))).Round(100*time.Microsecond),
 				"grab_avg", (grabTime / time.Duration(max(grabs, 1))).Round(100*time.Microsecond),
 				"convert_avg", (convertTime / time.Duration(max(grabs, 1))).Round(100*time.Microsecond),
-				"with", capt.method(),
+				"with", method(),
 				"size", fmt.Sprintf("%dx%d", ow, oh),
 				"dave_ready", dst.Ready, "dave_epoch", dst.EpochID, "dave_version", dst.ProtocolVersion,
 				"passthrough", ds.PassthroughFrames, "encrypt_failures", ds.EncryptFailures,
@@ -479,7 +518,8 @@ func (s *Stream) loop(capt *capturer) {
 		case next := <-s.source:
 			capt.close()
 			capt = next
-			s.log.Info("stream capturing", "with", capt.method())
+			openGPU()
+			s.log.Info("stream capturing", "with", method())
 			// The new picture starts afresh, with a keyframe, and at its own
 			// size if that differs, which a new encoder takes care of.
 			haveLast, wantFrame, idr = false, true, true
@@ -492,21 +532,95 @@ func (s *Stream) loop(capt *capturer) {
 		case <-tick.C:
 		}
 
-		g0 := time.Now()
-		pic, ok, gone := capt.grab()
-		grabTime += time.Since(g0)
-		grabs++
-		if gone {
-			s.end(ErrSourceGone)
-			return
+		if gpu != nil && !gpuOK.Load() {
+			s.log.Info("the graphics card cannot encode its own pictures; the processor converts them")
+			gpu.close()
+			gpu = nil
 		}
 		var job streamFrame
-		// The same picture as the last, which a still screen gives sixty
-		// times a second, is neither converted nor encoded again.
-		if ok && !pic.changed && haveLast && pic.w == srcW && pic.h == srcH {
-			ok = false
+		// picked: this tick's capture is done, with a new picture in job or
+		// with none.
+		picked, fresh := false, false
+		if gpu != nil {
+			g0 := time.Now()
+			w, h, status, changed, gone := gpu.grab()
+			grabTime += time.Since(g0)
+			grabs++
+			if gone {
+				s.end(ErrSourceGone)
+				return
+			}
+			switch status {
+			case gpuNever:
+				s.log.Info("the graphics card cannot capture this; the processor does")
+				gpu.close()
+				gpu = nil
+			case gpuNone:
+				picked = true
+			case gpuPicture:
+				picked = true
+				// The same picture as the last is not converted or encoded
+				// again.
+				if changed || !haveLast || w != srcW || h != srcH {
+					resize(w, h)
+					c0 := time.Now()
+					tex, dev, err := gpu.convert(ow, oh)
+					convertTime += time.Since(c0)
+					if err != nil {
+						s.log.Info("the graphics card cannot convert this; the processor does", "err", err)
+						gpu.close()
+						gpu = nil
+						picked = false
+						break
+					}
+					job = streamFrame{tex: tex, dev: dev, w: ow, h: oh, nv12: true}
+					fresh = true
+					if now := time.Now(); now.Sub(lastThumb) >= previewEvery {
+						lastThumb = now
+						tw := min(int(s.previewW.Load()), w)
+						if tw <= 0 {
+							tw = 320
+						}
+						if img := gpu.preview(tw, max(tw*h/w, 1)); img != nil {
+							s.preview.Store(img)
+						}
+					}
+				}
+			}
+			// gpuThisCPU: the processor captures this one picture.
 		}
-		if !ok {
+		if !picked {
+			g0 := time.Now()
+			pic, ok, gone := capt.grab()
+			grabTime += time.Since(g0)
+			grabs++
+			if gone {
+				s.end(ErrSourceGone)
+				return
+			}
+			// The same picture as the last, which a still screen gives sixty
+			// times a second, is neither converted nor encoded again.
+			if ok && (pic.changed || !haveLast || pic.w != srcW || pic.h != srcH) {
+				resize(pic.w, pic.h)
+				c0 := time.Now()
+				nv12 := wantNV12.Load()
+				job = streamFrame{buf: buffer(ow * oh * 3 / 2), w: ow, h: oh, nv12: nv12}
+				pic.toYUV(job.buf, ow, oh, nv12)
+				convertTime += time.Since(c0)
+				fresh = true
+				if now := time.Now(); now.Sub(lastThumb) >= previewEvery {
+					lastThumb = now
+					tw := min(int(s.previewW.Load()), pic.w)
+					if tw <= 0 {
+						tw = 320
+					}
+					s.preview.Store(pic.toRGBA(tw, max(tw*pic.h/pic.w, 1)))
+				}
+			}
+		}
+		if fresh {
+			haveLast = true
+		} else {
 			empty++
 			// Nothing changed on the screen, so the capture has nothing new.
 			// The last picture is sent again when a keyframe is asked for,
@@ -515,31 +629,14 @@ func (s *Stream) loop(capt *capturer) {
 			if !haveLast || !wantFrame && time.Since(lastFrame) < time.Second {
 				continue
 			}
-		} else {
-			if pic.w != srcW || pic.h != srcH {
-				srcW, srcH = pic.w, pic.h
-				ow, oh = s.p.Quality.size(srcW, srcH)
-			}
-			c0 := time.Now()
-			nv12 := wantNV12.Load()
-			job = streamFrame{buf: buffer(ow * oh * 3 / 2), w: ow, h: oh, nv12: nv12}
-			pic.toYUV(job.buf, ow, oh, nv12)
-			convertTime += time.Since(c0)
-			if now := time.Now(); now.Sub(lastThumb) >= previewEvery {
-				lastThumb = now
-				tw := min(int(s.previewW.Load()), pic.w)
-				if tw <= 0 {
-					tw = 320
-				}
-				s.preview.Store(pic.toRGBA(tw, max(tw*pic.h/pic.w, 1)))
-			}
-			haveLast = true
 		}
 		job.elapsed, job.idr = time.Since(start), idr
 		wantFrame, idr, lastFrame = false, false, time.Now()
 		select {
 		case jobs <- job:
 		case <-s.done:
+			releaseCOM(job.tex)
+			releaseCOM(job.dev)
 			return
 		}
 	}
@@ -548,7 +645,7 @@ func (s *Stream) loop(capt *capturer) {
 // encodeLoop encodes, encrypts and sends the pictures of jobs until it is
 // closed, on one OS thread, which the graphics card's encoder needs. Each
 // buffer it is done with goes to free.
-func (s *Stream) encodeLoop(jobs <-chan streamFrame, free chan<- []byte, st *encodeStats, wantNV12 *atomic.Bool) {
+func (s *Stream) encodeLoop(jobs <-chan streamFrame, free chan<- []byte, st *encodeStats, wantNV12, gpuOK *atomic.Bool) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	fps := max(s.p.Quality.FPS, 1)
@@ -557,43 +654,65 @@ func (s *Stream) encodeLoop(jobs <-chan streamFrame, free chan<- []byte, st *enc
 		last    streamFrame
 		scratch []byte
 	)
+	// done lets go of what a frame holds.
+	done := func(f streamFrame) {
+		if f.buf != nil {
+			select {
+			case free <- f.buf:
+			default:
+			}
+		}
+		releaseCOM(f.tex)
+		releaseCOM(f.dev)
+	}
 	defer func() {
+		done(last)
 		if enc != nil {
 			enc.close()
 		}
 	}()
-	done := func(b []byte) {
-		select {
-		case free <- b:
-		default:
-		}
-	}
+	idrEvery := fps * int(keyframeEvery/time.Second)
 	for job := range jobs {
 		if s.stopped.Load() {
+			done(job)
 			continue
 		}
-		if job.buf == nil {
-			if last.buf == nil {
+		if job.empty() {
+			if last.empty() {
 				continue
 			}
-			job.buf, job.w, job.h, job.nv12 = last.buf, last.w, last.h, last.nv12
+			// The last picture again; last keeps what it holds.
+			job.buf, job.tex, job.dev, job.w, job.h, job.nv12 = last.buf, last.tex, last.dev, last.w, last.h, last.nv12
 		} else {
-			if last.buf != nil {
-				done(last.buf)
-			}
+			done(last)
 			last = job
 		}
-		// A new size gets a new encoder, which starts with a keyframe.
-		if enc == nil || enc.w != job.w || enc.h != job.h {
-			resized := enc != nil
+		onGPU := job.tex != nil
+		// A new size gets a new encoder, which starts with a keyframe; so
+		// does a texture of another device, as after a change of resolution.
+		if enc == nil || enc.w != job.w || enc.h != job.h || onGPU && !enc.textures(job.dev) {
+			resized := enc != nil && (enc.w != job.w || enc.h != job.h)
 			if enc != nil {
 				enc.close()
-			}
-			var err error
-			if enc, err = newEncoder(job.w, job.h, fps, s.p.Quality.bitrate(job.w, job.h), fps*int(keyframeEvery/time.Second)); err != nil {
 				enc = nil
-				s.end(err)
-				return
+			}
+			bitrate := s.p.Quality.bitrate(job.w, job.h)
+			if onGPU {
+				if enc = newEncoderOn(addRefCOM(job.dev), job.w, job.h, fps, bitrate, idrEvery); enc == nil {
+					// The capture goes back to the processor; this picture,
+					// on the graphics card only, is not sent.
+					gpuOK.Store(false)
+					last = streamFrame{}
+					done(job)
+					continue
+				}
+			} else {
+				var err error
+				if enc, err = newEncoder(job.w, job.h, fps, bitrate, idrEvery); err != nil {
+					enc = nil
+					s.end(err)
+					return
+				}
 			}
 			if resized {
 				s.conn.send(context.Background(), s.video(job.w, job.h))
@@ -603,29 +722,41 @@ func (s *Stream) encodeLoop(jobs <-chan streamFrame, free chan<- []byte, st *enc
 			st.name.Store(&name)
 			s.log.Info("stream encoder", "encoder", enc.name, "hardware", enc.hardware(), "size", fmt.Sprintf("%dx%d", job.w, job.h), "fps", fps)
 		}
-		pic := job.buf
-		if job.nv12 != enc.nv12() {
-			// Converted before the capture knew the encoder's layout.
-			scratch = slices.Grow(scratch[:0], len(pic))[:len(pic)]
-			if enc.nv12() {
-				i420ToNV12(scratch, pic, job.w, job.h)
-			} else {
-				nv12ToI420(scratch, pic, job.w, job.h)
-			}
-			pic = scratch
-		}
 		if job.idr {
 			enc.forceIDR()
 		}
+		var (
+			frame []byte
+			tsMs  int64
+			idr   bool
+			err   error
+		)
 		t0 := time.Now()
-		frame, tsMs, idr, err := enc.encode(pic, job.elapsed.Milliseconds())
+		if onGPU {
+			frame, tsMs, idr, err = enc.encodeTexture(job.tex, job.elapsed.Milliseconds())
+		} else {
+			pic := job.buf
+			if job.nv12 != enc.nv12() {
+				// Converted before the capture knew the encoder's layout.
+				scratch = slices.Grow(scratch[:0], len(pic))[:len(pic)]
+				if enc.nv12() {
+					i420ToNV12(scratch, pic, job.w, job.h)
+				} else {
+					nv12ToI420(scratch, pic, job.w, job.h)
+				}
+				pic = scratch
+			}
+			frame, tsMs, idr, err = enc.encode(pic, job.elapsed.Milliseconds())
+		}
 		st.encodeNs.Add(int64(time.Since(t0)))
 		if err != nil {
 			st.failed.Add(1)
 			if enc.hardware() {
-				// The next picture goes to OpenH264, which always works.
+				// The next picture goes to OpenH264, which always works, and
+				// is converted by the processor for it.
 				s.log.Warn("the graphics card's encoder failed; OpenH264 takes over", "encoder", enc.name, "err", err)
 				hardwareFailed.Store(true)
+				gpuOK.Store(false)
 				enc.close()
 				enc = nil
 				wantNV12.Store(false)

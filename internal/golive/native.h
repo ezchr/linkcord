@@ -54,6 +54,15 @@ typedef struct lc_hwenc lc_hwenc;
 // NULL where there is none. Every call on it must come from one thread.
 lc_hwenc *lc_hwenc_open(int w, int h, int fps, int bitrate, int idr, uint16_t *name, int name_len);
 
+// lc_hwenc_open_on is lc_hwenc_open with the encoder of the graphics card
+// of device, an ID3D11Device, using its textures; NULL if that card has no
+// encoder that takes them.
+lc_hwenc *lc_hwenc_open_on(void *device, int w, int h, int fps, int bitrate, int idr, uint16_t *name, int name_len);
+
+// lc_hwenc_encode_texture is lc_hwenc_encode for an NV12 ID3D11Texture2D of
+// the encoder's device, rather than a picture in memory.
+int lc_hwenc_encode_texture(lc_hwenc *e, void *texture, int64_t ts_ms, int force_idr, uint8_t **out, int *out_len, int64_t *out_ts_ms, int *idr);
+
 // lc_hwenc_encode gives the encoder the NV12 picture nv12 and returns the
 // oldest picture it encoded, if any, in *out (Annex B, valid until the next
 // call), with its time and whether it is an IDR picture. A hardware encoder
@@ -107,6 +116,48 @@ int lc_dupl_grab(lc_dupl *d, const uint8_t **pix, int *w, int *h);
 int lc_dupl_seq(lc_dupl *d);
 
 void lc_dupl_close(lc_dupl *d);
+
+// lc_gpucap captures a screen, or a window that shows uncovered on one, and
+// converts it to NV12 on the graphics card, as Windows 8 and later can: the
+// picture never reaches the processor. lc_gpucap_open returns NULL where
+// Direct3D 11 is missing.
+typedef struct lc_gpucap lc_gpucap;
+lc_gpucap *lc_gpucap_open(uintptr_t hwnd, int x, int y, int cursor);
+
+// lc_gpucap_grab takes the latest picture, w by h. It returns 1 with one
+// (*changed 0 when it is the same as the last), 0 with none for now, -2
+// when this picture must be captured by the processor instead (a window
+// covered or across screens), and -1 when the graphics card cannot capture
+// at all, as on Windows 7. *gone reports a window closed.
+int lc_gpucap_grab(lc_gpucap *g, int *w, int *h, int *changed, int *gone);
+
+// lc_gpucap_convert scales the last picture grabbed to an ow by oh NV12
+// texture and sets *slot to it: the textures are used in turn, eight of
+// them. It returns 0, or -1 when the graphics card cannot convert.
+int lc_gpucap_convert(lc_gpucap *g, int ow, int oh, int *slot);
+
+// lc_gpucap_device is the ID3D11Device of the textures, which changes when
+// lc_gpucap_gen does; lc_gpucap_texture the ID3D11Texture2D of a slot. Both
+// come with a reference of their own, which lc_com_release lets go of.
+void *lc_gpucap_device(lc_gpucap *g);
+int lc_gpucap_gen(lc_gpucap *g);
+void *lc_gpucap_texture(lc_gpucap *g, int slot);
+
+// lc_gpucap_preview scales the last picture to w by h RGBA into rgba.
+int lc_gpucap_preview(lc_gpucap *g, uint8_t *rgba, int w, int h);
+void lc_gpucap_close(lc_gpucap *g);
+// lc_texture_read_nv12 reads a w by h NV12 texture back into dst, for tests.
+int lc_texture_read_nv12(void *texture, uint8_t *dst, int w, int h);
+
+void lc_com_addref(void *p);
+void lc_com_release(void *p);
+
+// lc_window_uncovered reports whether the window shows uncovered on the
+// screen over its client area at sx, sy, w by h.
+int lc_window_uncovered(uintptr_t hwnd, int sx, int sy, int w, int h);
+
+// lc_mt_protect has a Direct3D 11 device take calls from several threads.
+void lc_mt_protect(void *device);
 
 // lc_source is a screen or a window that can be shared.
 typedef struct {
