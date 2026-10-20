@@ -478,7 +478,10 @@ func (s *Stream) loop(capt *capturer) {
 					s.conn.send(context.Background(), s.video(ow, oh))
 				}
 				var err error
-				if enc, err = newEncoder(ow, oh, fps, s.p.Quality.bitrate(ow, oh), fps*4); err != nil {
+				// A keyframe every two seconds: the stream asks for a fixed
+				// interval, and a viewer who joins waits for the next one
+				// once its keys come.
+				if enc, err = newEncoder(ow, oh, fps, s.p.Quality.bitrate(ow, oh), fps*2); err != nil {
 					s.end(err)
 					return
 				}
