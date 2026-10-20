@@ -172,7 +172,10 @@ type ui struct {
 
 	// The connecting screen.
 	connectErr string
-	retry      widget.Clickable
+	// connectTries is how many times in a row connecting failed, for the
+	// wait before trying again.
+	connectTries int
+	retry        widget.Clickable
 	cancel     widget.Clickable
 	token      string
 }
@@ -234,21 +237,7 @@ func newUI(w *app.Window) *ui {
 	}
 	token := os.Getenv(tokenEnvVar)
 	if token == "" {
-		var err error
-		// Right after Windows starts, its credentials may not be readable
-		// yet: tried again for a while rather than shown signed out.
-		for try := 0; ; try++ {
-			if token, err = auth.LoadToken(); err == nil || try == 20 {
-				break
-			}
-			slog.Warn("could not read the saved token yet", "err", err, "try", try)
-			time.Sleep(500 * time.Millisecond)
-		}
-		if err != nil {
-			slog.Error("failed to load token", "err", err)
-		} else if token == "" {
-			slog.Info("no saved token: signing in")
-		}
+		token = loadSavedToken()
 	}
 	u.beginStartup(token)
 	return u
@@ -437,7 +426,20 @@ func (u *ui) connect(token string) {
 				u.logout("Your session expired or the token is invalid. Sign in again.")
 				return
 			}
-			u.connectErr = "Could not connect to Discord: " + err.Error()
+			// Other failures, as no network yet right after Windows starts,
+			// are tried again by themselves, sooner first.
+			u.connectTries++
+			delay := min(3*time.Second<<min(u.connectTries-1, 4), 30*time.Second)
+			u.connectErr = fmt.Sprintf("Could not connect to Discord: %v\nTrying again in %d seconds…", err, int(delay.Seconds()))
+			slog.Info("connecting again later", "in", delay, "tries", u.connectTries)
+			time.AfterFunc(delay, func() {
+				u.post(func() {
+					if u.screen == screenConnecting && u.connectErr != "" && u.chat != nil && u.chat.st == st {
+						u.chat.close()
+						u.connect(u.token)
+					}
+				})
+			})
 		})
 	}()
 }
@@ -447,6 +449,7 @@ func (u *ui) onReady(st *ningen.State, ready *gateway.ReadyEvent) {
 	if u.chat == nil || u.chat.st != st {
 		return
 	}
+	u.connectTries = 0
 	u.chat.load(ready)
 	u.screen = screenChat
 }

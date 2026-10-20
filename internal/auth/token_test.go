@@ -1,6 +1,10 @@
 package auth
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/zalando/go-keyring"
+)
 
 func TestTokenRoundTrip(t *testing.T) {
 	keyringService = "linkcord-test"
@@ -48,5 +52,34 @@ func TestCleanToken(t *testing.T) {
 		if got := CleanToken(in); got != want {
 			t.Errorf("CleanToken(%q) = %q; want %q", in, got, want)
 		}
+	}
+}
+
+// The encrypted copy stands in when the Credential Manager has nothing, and
+// is put back there; signing out removes both.
+func TestTokenBackup(t *testing.T) {
+	keyringService = "linkcord-test"
+	legacyKeyringService = "linkcord-test-legacy"
+	SetBackupDir(t.TempDir())
+	t.Cleanup(func() { DeleteToken() })
+
+	const want = "not-a-real-token: kept in the copy"
+	if err := SaveToken(want); err != nil {
+		t.Fatal(err)
+	}
+	// Lost from the Credential Manager only.
+	keyring.Delete(keyringService, keyringUser)
+	got, from, err := LoadTokenFrom()
+	if err != nil || got != want || from != "backup" {
+		t.Fatalf("LoadTokenFrom = %q, %q, %v; want the copy", got, from, err)
+	}
+	if got, from, _ := LoadTokenFrom(); got != want || from != "credentials" {
+		t.Fatalf("not put back in the credentials: %q from %q", got, from)
+	}
+	if err := DeleteToken(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := LoadTokenFrom(); got != "" {
+		t.Fatalf("token %q left after signing out", got)
 	}
 }
