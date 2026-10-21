@@ -38,7 +38,7 @@ func mediaExecutable(name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%s is required for video playback", filename)
 	}
-	return path, nil
+	return realExecutable(path), nil
 }
 
 // Download through Go's HTTP client. The decoder receives only a local file,
