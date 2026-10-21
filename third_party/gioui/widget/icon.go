@@ -18,11 +18,20 @@ import (
 
 type Icon struct {
 	src []byte
-	// Cached values.
-	op       paint.ImageOp
-	imgSize  int
-	imgColor color.NRGBA
+	// Cached pictures, the latest last. One icon is often drawn at more
+	// than one size or color in a frame, as a button and its hover: a
+	// single cached picture would be rasterized again each time.
+	cache []iconImage
 }
+
+type iconImage struct {
+	op    paint.ImageOp
+	size  int
+	color color.NRGBA
+}
+
+// maxIconImages bounds the pictures an Icon keeps.
+const maxIconImages = 6
 
 const defaultIconSize = unit.Dp(24)
 
@@ -53,8 +62,10 @@ func (ic *Icon) Layout(gtx layout.Context, color color.NRGBA) layout.Dimensions 
 }
 
 func (ic *Icon) image(sz int, color color.NRGBA) paint.ImageOp {
-	if sz == ic.imgSize && color == ic.imgColor {
-		return ic.op
+	for i := len(ic.cache) - 1; i >= 0; i-- {
+		if c := ic.cache[i]; c.size == sz && c.color == color {
+			return c.op
+		}
 	}
 	m, _ := iconvg.DecodeMetadata(ic.src)
 	dx, dy := m.ViewBox.AspectRatio()
@@ -65,8 +76,10 @@ func (ic *Icon) image(sz int, color color.NRGBA) paint.ImageOp {
 	iconvg.Decode(&ico, ic.src, &iconvg.DecodeOptions{
 		Palette: &m.Palette,
 	})
-	ic.op = paint.NewImageOp(img)
-	ic.imgSize = sz
-	ic.imgColor = color
-	return ic.op
+	op := paint.NewImageOp(img)
+	if len(ic.cache) == maxIconImages {
+		ic.cache = append(ic.cache[:0], ic.cache[1:]...)
+	}
+	ic.cache = append(ic.cache, iconImage{op: op, size: sz, color: color})
+	return op
 }

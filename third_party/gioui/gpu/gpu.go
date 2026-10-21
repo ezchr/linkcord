@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"image"
 	"image/color"
 	"math"
@@ -164,7 +165,15 @@ type opKey struct {
 	strokeWidth    float32
 	sx, hx, sy, hy float32
 	ops.Key
+	// content is a hash of a path's data, which keys it in place of where
+	// it was recorded: the same shape drawn again the next frame, from ops
+	// recorded anew, is then built only once, not stroked and uploaded to
+	// the graphics card each frame.
+	content uint64
 }
+
+// pathSeed hashes the data of paths, for opKey.content.
+var pathSeed = maphash.MakeSeed()
 
 type material struct {
 	material materialType
@@ -1024,7 +1033,7 @@ loop:
 				break loop
 			}
 			quads.aux = encOp.Data[ops.TypeAuxLen:]
-			quads.key.Key = encOp.Key
+			quads.key.content = maphash.Bytes(pathSeed, quads.aux)
 
 		case ops.TypeClip:
 			var op ops.ClipOp

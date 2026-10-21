@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"image"
 	"slices"
+	"time"
 
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -40,8 +41,24 @@ func (c *chatView) dmUnreadCount(chID discord.ChannelID) int {
 }
 
 // unreadDMs are the conversations with unread messages, newest first, as
-// Discord shows them above the servers.
+// Discord shows them above the servers. They are worked out again when
+// something happens outside the servers (see apply), or after 2 seconds:
+// each frame went through every conversation, copying each twice, which
+// while watching a stream was a gigabyte every few minutes.
 func (c *chatView) unreadDMs() []discord.Channel {
+	if c.dmUnread.at.IsZero() || time.Since(c.dmUnread.at) >= 2*time.Second {
+		c.dmUnread = cachedDMs{at: time.Now(), list: c.unreadDMsNow()}
+	}
+	return c.dmUnread.list
+}
+
+// cachedDMs are the conversations with unread messages, worked out at.
+type cachedDMs struct {
+	at   time.Time
+	list []discord.Channel
+}
+
+func (c *chatView) unreadDMsNow() []discord.Channel {
 	var out []discord.Channel
 	for _, ch := range c.privateChannels() {
 		if c.friends.requestIDs[ch.ID] {

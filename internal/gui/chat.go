@@ -135,7 +135,7 @@ type chatView struct {
 	localEdits map[discord.MessageID]string
 	// edits are what messages said before they were edited, and showEdits
 	// those whose earlier words show.
-	edits     map[discord.MessageID][]editVersion
+	edits map[discord.MessageID][]editVersion
 	// translations are the messages shown in the user's language.
 	translations map[discord.MessageID]*translation
 	// following is who the user follows from voice channel to voice
@@ -150,7 +150,7 @@ type chatView struct {
 	followTried   discord.ChannelID
 	followAt      time.Time
 	followWatched bool
-	stats     *voiceStats
+	stats         *voiceStats
 	// sched is the window to schedule messages, and those waiting.
 	sched scheduleView
 	// lostVoice is the bar of a voice channel left as Linkcord closed
@@ -165,9 +165,9 @@ type chatView struct {
 	// time through reactorJobs.
 	reactors    map[reactorsKey]*reactorsEntry
 	reactorJobs chan reactorsJob
-	showEdits map[discord.MessageID]bool
+	showEdits   map[discord.MessageID]bool
 	// games are the games of Discord's list running, the newest first.
-	games        []playing
+	games []playing
 	// customGames are the programs the user added as games, for the
 	// detection's goroutine.
 	customGames atomic.Pointer[gameList]
@@ -175,7 +175,7 @@ type chatView struct {
 	// detection's goroutine.
 	gamesOff atomic.Bool
 	// admins are each server's admin roles, for the crowns beside names.
-	admins map[discord.GuildID]adminRoles
+	admins       map[discord.GuildID]adminRoles
 	gamesWatched bool
 	// myStatus is the status the user chose here, kept over what the
 	// sessions say.
@@ -217,7 +217,7 @@ type chatView struct {
 
 	guildOrder []discord.GuildID
 	// tagCard is the card of a server tag clicked, tagClicks the tags.
-	tagCard   *tagCard
+	tagCard *tagCard
 	// voiceLog is who joined and left the voice channel the user is in.
 	voiceLog voiceLog
 	// mediaDrags follow the pictures of the chat being dragged out.
@@ -232,7 +232,7 @@ type chatView struct {
 	// joinCallBtn and joinVideoBtn join the one open.
 	dmCalls                   map[discord.ChannelID][]discord.UserID
 	joinCallBtn, joinVideoBtn widget.Clickable
-	tagClicks map[discord.GuildID]*widget.Clickable
+	tagClicks                 map[discord.GuildID]*widget.Clickable
 	// folders are the server column's folders, openFolders those open, and
 	// drag a server or folder being moved.
 	folders      []serverFolder
@@ -311,9 +311,9 @@ type chatView struct {
 	// set while the messages after those shown load, past a jump.
 	firstBtn     widget.Clickable
 	loadingNewer bool
-	memberRows    []memberRow
-	memberList    widget.List
-	memberChunk   int
+	memberRows   []memberRow
+	memberList   widget.List
+	memberChunk  int
 	// demo reports whether the chat shows made-up data, and must not
 	// contact Discord.
 	demo bool
@@ -330,9 +330,12 @@ type chatView struct {
 	// guildBadges are the unread marks of servers, worked out lately; rels
 	// the relationships, read at relsAt.
 	guildBadges map[discord.GuildID]guildBadge
-	perms       map[discord.ChannelID]cachedPerm
-	rels        []discord.Relationship
-	relsAt      time.Time
+	// dmUnread are the conversations with unread messages, worked out
+	// lately.
+	dmUnread cachedDMs
+	perms    map[discord.ChannelID]cachedPerm
+	rels     []discord.Relationship
+	relsAt   time.Time
 
 	// act is what can be done to messages: see actions.go.
 	act actionState
@@ -592,6 +595,17 @@ func eventGuild(ev gateway.Event) (discord.GuildID, bool) {
 		g = ev.ID
 	}
 	return g, g.IsValid()
+}
+
+// unreadEvent reports whether ev can change what is unread: what eventGuild
+// gives the server of.
+func unreadEvent(ev gateway.Event) bool {
+	switch ev.(type) {
+	case *gateway.MessageCreateEvent, *gateway.MessageUpdateEvent, *gateway.MessageDeleteEvent, *read.UpdateEvent,
+		*gateway.ChannelCreateEvent, *gateway.ChannelUpdateEvent, *gateway.ChannelDeleteEvent:
+		return true
+	}
+	return false
 }
 
 // eventChannel is the channel a message, typing or reaction event is of.
@@ -1169,8 +1183,11 @@ func (c *chatView) apply(ev gateway.Event) {
 	sel := c.selChannel
 	defer c.recordRefreshEvent(ev)
 	// The unread mark of the server it happened in is worked out again.
+	// So are the conversations with unread messages, for one outside them.
 	if g, ok := eventGuild(ev); ok {
 		delete(c.guildBadges, g)
+	} else if unreadEvent(ev) {
+		c.dmUnread = cachedDMs{}
 	}
 	switch ev := ev.(type) {
 	case *gateway.MessageCreateEvent:
@@ -1651,14 +1668,8 @@ func (c *chatView) dmsUnread() ningen.UnreadIndication {
 	if c.incomingRequests() > 0 {
 		return ningen.ChannelMentioned
 	}
-	channels := c.privateChannels()
-	for _, ch := range channels {
-		if c.friends.requestIDs[ch.ID] {
-			continue
-		}
-		if c.channelUnread(ch.ID) != ningen.ChannelRead {
-			return ningen.ChannelMentioned
-		}
+	if len(c.unreadDMs()) > 0 {
+		return ningen.ChannelMentioned
 	}
 	return ningen.ChannelRead
 }
