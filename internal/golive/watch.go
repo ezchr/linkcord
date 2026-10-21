@@ -987,9 +987,20 @@ func (w *Watch) startDecoder(sw, sh int) error {
 	if oldIn != nil {
 		oldIn.Close()
 	}
+	// It dies with the watch, whatever teardown does: one left over from a
+	// watch stopped while stalled kept running, holding its memory.
+	exited := make(chan struct{})
+	go func() {
+		select {
+		case <-w.done:
+			cmd.Process.Kill()
+		case <-exited:
+		}
+	}()
 	go func() {
 		defer func() {
 			err := cmd.Wait()
+			close(exited)
 			in.Close()
 			w.mu.Lock()
 			current := w.decoder == cmd

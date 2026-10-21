@@ -117,6 +117,12 @@ func startDeviceOn(kind malgo.DeviceType, id string, channels int, data func(out
 	}
 	config.SampleRate = sampleRate
 	config.PeriodSizeInMilliseconds = 10
+	// What is played has 20 milliseconds a period, the length of a packet:
+	// with 10, a busy processor, as while streaming and watching at once,
+	// missed periods and the sound broke up.
+	if kind == malgo.Playback {
+		config.PeriodSizeInMilliseconds = 20
+	}
 	config.Playback.Format, config.Playback.Channels = malgo.FormatS16, uint32(channels)
 	config.Capture.Format, config.Capture.Channels = malgo.FormatS16, uint32(channels)
 
@@ -193,7 +199,7 @@ type Session struct {
 	// healedDAVE is when the channel was last joined again for keys that
 	// stayed broken, in Unix nanoseconds.
 	healedDAVE atomic.Int64
-	failedAt     time.Time
+	failedAt   time.Time
 }
 
 // New returns a Session that sends what the microphone captures louder than sensitivity, in dB.
