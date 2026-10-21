@@ -92,6 +92,11 @@ const uint8_t *lc_capture_grab(lc_capture *c, int *w, int *h, int *stride, int *
 // desktop duplication rather than GDI.
 int lc_capture_duplicates(lc_capture *c);
 
+// lc_capture_release ends the capture's duplication of the screen, which
+// the next grab begins again. A program can duplicate a screen only once:
+// the graphics card's capture cannot while this one holds it.
+void lc_capture_release(lc_capture *c);
+
 void lc_capture_close(lc_capture *c);
 
 // lc_dpi_aware has the calling thread see screens in their own pixels and

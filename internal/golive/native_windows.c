@@ -815,6 +815,12 @@ int lc_capture_duplicates(lc_capture *c) {
 	return c->dupl != NULL;
 }
 
+void lc_capture_release(lc_capture *c) {
+	lc_dupl_close(c->dupl);
+	c->dupl = NULL;
+	c->dmset = 0;
+}
+
 void lc_capture_close(lc_capture *c) {
 	if (!c) {
 		return;

@@ -172,10 +172,16 @@ func (g *gpuCapture) convert(ow, oh int) (tex, dev unsafe.Pointer, err error) {
 // preview scales the last picture to w by h.
 func (g *gpuCapture) preview(w, h int) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	if C.lc_gpucap_preview(g.g, (*C.uint8_t)(unsafe.Pointer(&img.Pix[0])), C.int(w), C.int(h)) != 0 {
+	if !g.previewInto(img) {
 		return nil
 	}
 	return img
+}
+
+// previewInto makes the preview in img, at its size, false where it could
+// not.
+func (g *gpuCapture) previewInto(img *image.RGBA) bool {
+	return C.lc_gpucap_preview(g.g, (*C.uint8_t)(unsafe.Pointer(&img.Pix[0])), C.int(img.Rect.Dx()), C.int(img.Rect.Dy())) == 0
 }
 
 func (g *gpuCapture) close() { C.lc_gpucap_close(g.g) }
@@ -355,8 +361,13 @@ func (p picture) toI420(dst []byte, w, h int) {
 // toRGBA scales the picture to w by h.
 func (p picture) toRGBA(w, h int) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	C.lc_bgra_to_rgba((*C.uint8_t)(p.pix), C.int(p.w), C.int(p.h), C.int(p.stride), (*C.uint8_t)(unsafe.Pointer(&img.Pix[0])), C.int(w), C.int(h))
+	p.intoRGBA(img)
 	return img
+}
+
+// intoRGBA scales the picture to img's size, into img.
+func (p picture) intoRGBA(img *image.RGBA) {
+	C.lc_bgra_to_rgba((*C.uint8_t)(p.pix), C.int(p.w), C.int(p.h), C.int(p.stride), (*C.uint8_t)(unsafe.Pointer(&img.Pix[0])), C.int(img.Rect.Dx()), C.int(img.Rect.Dy()))
 }
 
 // capturer captures a screen or a window.
@@ -386,6 +397,10 @@ func (c *capturer) grab() (p picture, ok, gone bool) {
 }
 
 func (c *capturer) close() { C.lc_capture_close(c.c) }
+
+// release lets go of the screen's duplication, for the graphics card's
+// capture, which cannot duplicate it while this holds it.
+func (c *capturer) release() { C.lc_capture_release(c.c) }
 
 // method is how the picture is captured, for the log.
 func (c *capturer) method() string {

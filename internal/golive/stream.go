@@ -416,10 +416,28 @@ func (s *Stream) loop(capt *capturer) {
 			gpu = nil
 		}
 		if gpuOK.Load() {
+			// The screen is duplicated once per program: the processor's
+			// capture lets go of it, and takes it again only if needed.
+			capt.release()
 			gpu = newGPUCapture(capt.src, true)
 		}
 	}
 	openGPU()
+	// The preview is made in turn in a few pictures rather than a new one
+	// each time: ten a second as wide as the window are 30 MB a second for
+	// the collector, whose pauses break the sound. The GUI shows the
+	// latest; the ones before it are free.
+	var previews [3]*image.RGBA
+	previewAt := 0
+	nextPreview := func(w, h int) *image.RGBA {
+		img := previews[previewAt]
+		if img == nil || img.Rect.Dx() != w || img.Rect.Dy() != h {
+			img = image.NewRGBA(image.Rect(0, 0, w, h))
+			previews[previewAt] = img
+		}
+		previewAt = (previewAt + 1) % len(previews)
+		return img
+	}
 	encDone := make(chan struct{})
 	go func() {
 		defer close(encDone)
@@ -581,7 +599,7 @@ func (s *Stream) loop(capt *capturer) {
 						if tw <= 0 {
 							tw = 320
 						}
-						if img := gpu.preview(tw, max(tw*h/w, 1)); img != nil {
+						if img := nextPreview(tw, max(tw*h/w, 1)); gpu.previewInto(img) {
 							s.preview.Store(img)
 						}
 					}
@@ -614,7 +632,9 @@ func (s *Stream) loop(capt *capturer) {
 					if tw <= 0 {
 						tw = 320
 					}
-					s.preview.Store(pic.toRGBA(tw, max(tw*pic.h/pic.w, 1)))
+					img := nextPreview(tw, max(tw*pic.h/pic.w, 1))
+					pic.intoRGBA(img)
+					s.preview.Store(img)
 				}
 			}
 		}
