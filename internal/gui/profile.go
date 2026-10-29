@@ -650,7 +650,7 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 		section(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return styledName(gtx, bold(label(th, 20, colorHeader, name)), user, false)
+					return styledName(gtx, bold(label(th, 20, colorHeader, name)), user, roleLook{})
 				}),
 				layout.Rigid(c.linkcordBadge(user.ID, 20)),
 			)
@@ -1302,7 +1302,7 @@ func (c *chatView) layoutRoles(gtx layout.Context, guildID discord.GuildID, ids 
 						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return dot(gtx, col, 10) }),
 							layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-							layout.Rigid(label(th, 12, colorText, role.Name).Layout),
+							layout.Rigid(roleChipName(th, role)),
 						)
 					})
 				})

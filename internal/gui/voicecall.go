@@ -715,7 +715,6 @@ func (c *chatView) callMoreItems() []menuItem {
 		}},
 		{text: "Open Text Chat", act: func() {
 			if ch, err := c.st.Cabinet.Channel(cv.channel); err == nil {
-				c.closeCall()
 				c.selectChannel(*ch)
 			}
 		}},

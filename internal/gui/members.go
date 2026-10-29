@@ -18,7 +18,6 @@ import (
 	"gioui.org/widget/material"
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/gateway"
-	"github.com/ayn2op/arikawa/v3/state"
 	"github.com/ayn2op/ningen/v3/states/member"
 )
 
@@ -177,6 +176,9 @@ func (c *chatView) groupName(guildID discord.GuildID, g gateway.GuildMemberListG
 		if id, err := discord.ParseSnowflake(g.ID); err == nil {
 			if role, err := c.st.Cabinet.Role(guildID, discord.RoleID(id)); err == nil {
 				name = strings.ToUpper(role.Name)
+				if role.UnicodeEmoji != "" {
+					name = role.UnicodeEmoji + " " + name
+				}
 			}
 		}
 	}
@@ -215,14 +217,9 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 		}
 		name := cmp.Or(m.Nick, m.User.DisplayOrUsername())
 		nameColor := colorText
-		roleColored := false
-		if guildID.IsValid() && !c.u.app.NoRoleColors {
-			if col, ok := state.MemberColor(m, func(id discord.RoleID) *discord.Role {
-				role, _ := c.st.Cabinet.Role(guildID, id)
-				return role
-			}); ok && col != 0 && col != discord.NullColor {
-				nameColor, roleColored = rgb(uint32(col)), true
-			}
+		look := c.memberRoleLook(guildID, m.User.ID)
+		if look.colored() {
+			nameColor = rgb(uint32(look.color))
 		}
 		offline := status == discord.OfflineStatus || status == discord.InvisibleStatus
 		return layout.Inset{Left: unit.Dp(8), Right: unit.Dp(8), Top: unit.Dp(1)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -263,7 +260,7 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 							// The crown, platforms and timeout go right after the name,
 							// which leaves them the room they take.
 							return nameWithMarks(gtx, func(gtx layout.Context) layout.Dimensions {
-								return c.layoutMemberName(gtx, m, guildID, label(th, 15, col, name), roleColored)
+								return c.layoutMemberName(gtx, m, guildID, label(th, 15, col, look.named(name)), look)
 							}, func(gtx layout.Context) layout.Dimensions {
 								return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutStaffTag(gtx, guildID, m.User.ID) }),
@@ -347,7 +344,7 @@ func (c *chatView) memberItem(gtx layout.Context, m *discord.Member, w func(gtx 
 
 // layoutMemberName is the name of a member, cut short to leave room for the
 // tag of the server they wear and the gem of those who boost the server.
-func (c *chatView) layoutMemberName(gtx layout.Context, m *discord.Member, guildID discord.GuildID, name material.LabelStyle, roleColored bool) layout.Dimensions {
+func (c *chatView) layoutMemberName(gtx layout.Context, m *discord.Member, guildID discord.GuildID, name material.LabelStyle, look roleLook) layout.Dimensions {
 	var after []layout.Widget
 	// Bots are marked as in the chat, and who uses Linkcord with its logo.
 	if m.User.Bot {
@@ -384,7 +381,7 @@ func (c *chatView) layoutMemberName(gtx layout.Context, m *discord.Member, guild
 	ngtx.Constraints.Min = image.Point{}
 	ngtx.Constraints.Max.X = max(gtx.Constraints.Max.X-used, 0)
 	macro := op.Record(gtx.Ops)
-	ndims := styledName(ngtx, oneLine(name), m.User, roleColored)
+	ndims := styledName(ngtx, oneLine(name), m.User, look)
 	nameCall := macro.Stop()
 	height := ndims.Size.Y
 	for _, s := range sizes {

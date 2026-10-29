@@ -316,6 +316,9 @@ type Role struct {
 	Position int `json:"position"`
 	// Color is the integer representation of hexadecimal color code.
 	Color Color `json:"color"`
+	// Colors are the colors of the role's name: Color, and the ones a gradient
+	// fades it through.
+	Colors RoleColors `json:"colors,omitzero"`
 
 	// Hoist specifies if this role is pinned in the user listing.
 	Hoist bool `json:"hoist"`
@@ -330,6 +333,14 @@ type Role struct {
 	UnicodeEmoji string `json:"unicode_emoji,omitempty"`
 	// Tags are the RoleTags of this role.
 	Tags RoleTags `json:"tags,omitzero"`
+}
+
+// RoleColors are the colors of a role's name. Secondary and Tertiary are 0
+// when the name has no gradient.
+type RoleColors struct {
+	Primary   Color `json:"primary_color"`
+	Secondary Color `json:"secondary_color"`
+	Tertiary  Color `json:"tertiary_color"`
 }
 
 type RoleTags struct {

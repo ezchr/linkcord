@@ -119,20 +119,23 @@ func nameFontLoaded(id int) bool { return fontsLoaded.Load()&needName(id) != 0 }
 
 // styledName draws l, a name, as user chose with Nitro: in their font, once
 // it is loaded, and in their colors, a gradient between the first two for
-// the gradient effect, unless roleColored: the color of their role in the
-// server wins, as on Discord. Names without a style are drawn as they are.
-func styledName(gtx layout.Context, l material.LabelStyle, user discord.User, roleColored bool) layout.Dimensions {
+// the gradient effect, unless look gives the name its role's colors: the
+// color of their role in the server wins, as on Discord, and a role gradient
+// fades through its colors. Names without a style are drawn as they are.
+func styledName(gtx layout.Context, l material.LabelStyle, user discord.User, look roleLook) layout.Dimensions {
 	st := user.DisplayNameStyles
-	if st == nil {
-		return l.Layout(gtx)
-	}
-	if _, ok := nameFonts[st.FontID]; ok {
-		wantNameFont(st.FontID)
-		if nameFontLoaded(st.FontID) {
-			l.Font = font.Font{Typeface: nameTypeface(st.FontID)}
+	if st != nil {
+		if _, ok := nameFonts[st.FontID]; ok {
+			wantNameFont(st.FontID)
+			if nameFontLoaded(st.FontID) {
+				l.Font = font.Font{Typeface: nameTypeface(st.FontID)}
+			}
 		}
 	}
-	if len(st.Colors) == 0 || roleColored {
+	if look.gradient() {
+		return gradientName(gtx, l, nameRGB(uint32(look.color), l.Color.A), nameRGB(uint32(look.second), l.Color.A))
+	}
+	if st == nil || len(st.Colors) == 0 || look.colored() {
 		return l.Layout(gtx)
 	}
 	first := nameRGB(st.Colors[0], l.Color.A)
@@ -140,6 +143,12 @@ func styledName(gtx layout.Context, l material.LabelStyle, user discord.User, ro
 		l.Color = first
 		return l.Layout(gtx)
 	}
+	return gradientName(gtx, l, first, nameRGB(st.Colors[1], l.Color.A))
+}
+
+// gradientName draws l with its color fading from first to second across the
+// width of the name.
+func gradientName(gtx layout.Context, l material.LabelStyle, first, second color.NRGBA) layout.Dimensions {
 	// The width the gradient spans is the name's, measured first.
 	m := op.Record(gtx.Ops)
 	dims := l.Layout(gtx)
@@ -147,7 +156,7 @@ func styledName(gtx layout.Context, l material.LabelStyle, user discord.User, ro
 	mat := op.Record(gtx.Ops)
 	paint.LinearGradientOp{
 		Stop1: f32.Pt(0, 0), Color1: first,
-		Stop2: f32.Pt(float32(max(dims.Size.X, 1)), 0), Color2: nameRGB(st.Colors[1], l.Color.A),
+		Stop2: f32.Pt(float32(max(dims.Size.X, 1)), 0), Color2: second,
 	}.Add(gtx.Ops)
 	return widget.Label{Alignment: l.Alignment, MaxLines: l.MaxLines, Truncator: l.Truncator}.
 		Layout(gtx, l.Shaper, l.Font, l.TextSize, l.Text, mat.Stop())

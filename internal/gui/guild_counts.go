@@ -9,6 +9,7 @@ import (
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
+	"gioui.org/widget/material"
 	"github.com/ayn2op/arikawa/v3/api"
 	"github.com/ayn2op/arikawa/v3/discord"
 )
@@ -52,7 +53,12 @@ func (c *chatView) layoutGuildCounts(gtx layout.Context, id discord.GuildID) lay
 	if n.total == 0 {
 		return layout.Dimensions{}
 	}
-	th := c.u.th
+	return layoutMemberCounts(gtx, c.u.th, n.online, n.total)
+}
+
+// layoutMemberCounts is a green dot with the members online and a gray one
+// with all of them.
+func layoutMemberCounts(gtx layout.Context, th *material.Theme, online, total uint64) layout.Dimensions {
 	dot := func(col colorT) layout.Widget {
 		return func(gtx layout.Context) layout.Dimensions {
 			s := gtx.Dp(7)
@@ -63,11 +69,11 @@ func (c *chatView) layoutGuildCounts(gtx layout.Context, id discord.GuildID) lay
 	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(dot(colorGreen)),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-		layout.Rigid(oneLine(label(th, 11, colorMuted, fmt.Sprintf("%s Online", groupThousands(n.online)))).Layout),
+		layout.Rigid(oneLine(label(th, 11, colorMuted, fmt.Sprintf("%s Online", groupThousands(online)))).Layout),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
 		layout.Rigid(dot(colorMuted)),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-		layout.Rigid(oneLine(label(th, 11, colorMuted, fmt.Sprintf("%s Members", groupThousands(n.total)))).Layout),
+		layout.Rigid(oneLine(label(th, 11, colorMuted, fmt.Sprintf("%s Members", groupThousands(total)))).Layout),
 	)
 }
 

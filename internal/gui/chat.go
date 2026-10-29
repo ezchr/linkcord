@@ -100,6 +100,8 @@ type chatView struct {
 	stickers guildStickers
 	// guildCounts are the members online and in all of each server.
 	guildCounts map[discord.GuildID]*guildCount
+	// invites are the invite cards shown under messages, by code.
+	invites map[string]*inviteCard
 	// friends is the friends page and the message requests of the direct
 	// messages.
 	friends friendsState
@@ -794,7 +796,10 @@ func (c *chatView) closeChannel() {
 	}
 	// Loads on their way for the channel are dropped when they arrive.
 	c.historyEpoch++
-	c.closeCall()
+	// A call in its own window goes on while another chat is shown here.
+	if !c.u.popped() {
+		c.closeCall()
+	}
 	c.friends.page = homeNone
 	c.selChannel, c.messages = nil, nil
 	c.comp.files, c.comp.mentions, c.comp.mentionOn, c.comp.emoji = nil, nil, false, nil
@@ -1014,7 +1019,10 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 		c.refreshCancel = nil
 	}
 	c.historyEpoch++
-	c.closeCall()
+	// A call in its own window goes on while another chat is shown here.
+	if !c.u.popped() {
+		c.closeCall()
+	}
 	c.friends.page = homeNone
 	c.refreshing, c.refreshPending, c.refreshFailures = false, false, 0
 	c.lastRefresh, c.refreshLive = time.Time{}, nil
@@ -1922,7 +1930,7 @@ func (c *chatView) layoutVoiceMember(gtx layout.Context, r channelRow, hovered b
 						return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
 					}
 					m := discord.Member{User: c.voiceUser(r)}
-					dims := c.layoutMemberName(gtx, &m, r.ch.GuildID, label(th, 14, col, r.label), false)
+					dims := c.layoutMemberName(gtx, &m, r.ch.GuildID, label(th, 14, col, r.label), roleLook{})
 					// The whole width, for what follows to stay at the right.
 					dims.Size.X = gtx.Constraints.Max.X
 					return dims
@@ -2026,20 +2034,21 @@ func (c *chatView) layoutUserPanel(gtx layout.Context) layout.Dimensions {
 											}
 											name := c.me.DisplayOrUsername()
 											col := colorHeader
-											roleColored := false
+											look := roleLook{}
 											m := &discord.Member{User: c.me}
 											if guildID := c.selGuild; guildID.IsValid() {
 												if mm, err := c.st.Cabinet.Member(guildID, c.me.ID); err == nil {
 													m = mm
 												}
 												name = c.memberName(guildID, c.me.ID, m)
-												if cl, ok := c.memberColor(guildID, c.me.ID); ok && cl != 0 && cl != discord.NullColor {
-													col, roleColored = rgb(uint32(cl)), true
+												look = c.memberRoleLook(guildID, c.me.ID)
+												if look.colored() {
+													col = rgb(uint32(look.color))
 												}
 											}
 											return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													return c.layoutMemberName(gtx, m, c.selGuild, oneLine(bold(label(th, 14, col, name))), roleColored)
+													return c.layoutMemberName(gtx, m, c.selGuild, oneLine(bold(label(th, 14, col, look.named(name)))), look)
 												}),
 												layout.Rigid(oneLine(label(th, 12, colorMuted, sub)).Layout),
 											)

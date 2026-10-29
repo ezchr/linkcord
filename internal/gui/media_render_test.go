@@ -123,23 +123,23 @@ func TestRenderMedia(t *testing.T) {
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return c.layoutMessageBody(gtx, pngSticker, false, "Media test", colorHeader, false)
+							return c.layoutMessageBody(gtx, pngSticker, false, "Media test", colorHeader, roleLook{})
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return c.layoutMessageBody(gtx, animatedSticker, false, "Media test", colorHeader, false)
+							return c.layoutMessageBody(gtx, animatedSticker, false, "Media test", colorHeader, roleLook{})
 						}),
 					)
 				}),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return c.layoutMessageBody(gtx, tenor, false, "Media test", colorHeader, false)
+							return c.layoutMessageBody(gtx, tenor, false, "Media test", colorHeader, roleLook{})
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return c.layoutMessageBody(gtx, video, false, "Media test", colorHeader, false)
+							return c.layoutMessageBody(gtx, video, false, "Media test", colorHeader, roleLook{})
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return c.layoutMessageBody(gtx, noThumb, false, "Media test", colorHeader, false)
+							return c.layoutMessageBody(gtx, noThumb, false, "Media test", colorHeader, roleLook{})
 						}),
 					)
 				}),

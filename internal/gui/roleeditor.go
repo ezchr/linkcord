@@ -43,6 +43,11 @@ type roleEditor struct {
 	name                 widget.Editor
 	origName             string
 	color, origColor     discord.Color
+	second, origSecond   discord.Color
+	secondPresets        [20]widget.Clickable
+	gradBtn              widget.Clickable
+	emoji                widget.Editor
+	origEmoji            string
 	picker               colorPicker
 	pickerOpen           bool
 	defaultBtn, custom   widget.Clickable
@@ -66,6 +71,16 @@ type roleEditor struct {
 var rolePresets = [20]uint32{
 	0x1abc9c, 0x2ecc71, 0x3498db, 0x9b59b6, 0xe91e63, 0xf1c40f, 0xe67e22, 0xe74c3c, 0x95a5a6, 0x607d8b,
 	0x11806a, 0x1f8b4c, 0x206694, 0x71368a, 0xad1457, 0xc27c0e, 0xa84300, 0x992d22, 0x979c9f, 0x546e7a,
+}
+
+// roleColorsBody is a role's colors for Discord: the color, and the color its
+// name fades to, if it has one.
+func roleColorsBody(primary, secondary discord.Color) map[string]any {
+	body := map[string]any{"primary_color": uint32(primary), "secondary_color": nil}
+	if secondary > 0 {
+		body["secondary_color"] = uint32(secondary)
+	}
+	return body
 }
 
 // myTopRole is the position of the user's highest role in the server.
@@ -104,9 +119,11 @@ func (c *chatView) openRoleEditor(id discord.RoleID, tab int) {
 		return
 	}
 	re := &gs.lists.role
-	*re = roleEditor{id: id, role: *r, tab: tab, origName: r.Name, color: r.Color, origColor: r.Color}
+	*re = roleEditor{id: id, role: *r, tab: tab, origName: r.Name, color: r.Color, origColor: r.Color, second: r.Colors.Secondary, origSecond: r.Colors.Secondary, origEmoji: r.UnicodeEmoji}
 	re.name.SingleLine = true
 	re.name.SetText(r.Name)
+	re.emoji.SingleLine = true
+	re.emoji.SetText(r.UnicodeEmoji)
 	re.permSearch.SingleLine, re.memberSearch.SingleLine = true, true
 	gs.list.Position = layout.Position{}
 	gs.err, gs.info = "", ""
@@ -185,23 +202,41 @@ func (c *chatView) updateRoleEditor(gtx layout.Context) {
 		if name != re.origName && name != "" && !re.role.Managed {
 			body["name"] = name
 		}
-		if re.color != re.origColor {
+		if re.color != re.origColor || re.second != re.origSecond {
 			body["color"] = uint32(re.color)
+			body["colors"] = roleColorsBody(re.color, re.second)
+		}
+		emoji := strings.TrimSpace(re.emoji.Text())
+		if emoji != re.origEmoji {
+			body["unicode_emoji"] = emoji
+			if emoji == "" {
+				body["unicode_emoji"] = nil
+			} else {
+				body["icon"] = nil
+			}
 		}
 		if len(body) > 0 {
-			col := re.color
+			col, second := re.color, re.second
 			c.patchRole(func(r *discord.Role) {
 				if n, ok := body["name"].(string); ok {
 					r.Name = n
 				}
 				r.Color = col
+				r.Colors = discord.RoleColors{Primary: col, Secondary: second}
+				r.UnicodeEmoji = emoji
+				if emoji != "" {
+					r.Icon = ""
+				}
 			}, body)
 			re.origName, re.origColor = cmpOr(name, re.origName), re.color
+			re.origSecond, re.origEmoji = re.second, emoji
 		}
 	}
 	if re.reset.Clicked(gtx) {
 		re.name.SetText(re.origName)
 		re.color = re.origColor
+		re.second = re.origSecond
+		re.emoji.SetText(re.origEmoji)
 		re.pickerOpen = false
 	}
 	if re.defaultBtn.Clicked(gtx) {
@@ -222,6 +257,18 @@ func (c *chatView) updateRoleEditor(gtx layout.Context) {
 	for i := range re.presets {
 		if re.presets[i].Clicked(gtx) {
 			re.color, re.pickerOpen = discord.Color(rolePresets[i]), false
+		}
+	}
+	if re.gradBtn.Clicked(gtx) {
+		if re.second == 0 {
+			re.second = discord.Color(rolePresets[3])
+		} else {
+			re.second = 0
+		}
+	}
+	for i := range re.secondPresets {
+		if re.secondPresets[i].Clicked(gtx) {
+			re.second = discord.Color(rolePresets[i])
 		}
 	}
 	if re.hoistBtn.Clicked(gtx) {
@@ -486,6 +533,13 @@ func (c *chatView) roleDisplayRows(editable bool) []layout.Widget {
 	if re.color != 0 {
 		col = rgb(uint32(re.color))
 	}
+	nameLabel := func(gtx layout.Context) layout.Dimensions {
+		l := bold(label(th, 15, col, "Wumpus"))
+		if re.second != 0 {
+			return gradientName(gtx, l, col, rgb(uint32(re.second)))
+		}
+		return l.Layout(gtx)
+	}
 	swatch := func(gtx layout.Context, click *widget.Clickable, fill colorT, size image.Point, chosen bool) layout.Dimensions {
 		return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			if editable {
@@ -555,6 +609,27 @@ func (c *chatView) roleDisplayRows(editable bool) []layout.Widget {
 			return re.picker.layout(gtx)
 		})
 	}
+	rows = append(rows,
+		gap(16),
+		section(th, "Role Gradient", "Fades the name from the role's color to this one."),
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &re.gradBtn, "Gradient name", "", re.second != 0)
+		},
+		func(gtx layout.Context) layout.Dimensions {
+			if re.second == 0 {
+				return layout.Dimensions{}
+			}
+			small := image.Pt(gtx.Dp(22), gtx.Dp(22))
+			gapPx := gtx.Dp(6)
+			for i, p := range rolePresets {
+				x, y := (i%10)*(small.X+gapPx), (i/10)*(small.Y+gapPx)
+				t := offset(gtx, x, y)
+				swatch(gtx, &re.secondPresets[i], rgb(p), small, uint32(re.second) == p)
+				t.Pop()
+			}
+			return layout.Dimensions{Size: image.Pt(10*small.X+9*gapPx, 2*small.Y+gapPx)}
+		},
+	)
 	iconText := "Upload an image under 256 KB. We recommend at least 64x64 pixels. Members see the icon of their highest role. Needs Server Boost level 2."
 	rows = append(rows,
 		gap(16),
@@ -596,13 +671,21 @@ func (c *chatView) roleDisplayRows(editable bool) []layout.Widget {
 							return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions { return avatar(gtx, th, 36, colorAccent, "Wumpus", -1) }),
 								layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
-								layout.Flexed(1, stacked(bold(label(th, 15, col, "Wumpus")).Layout, label(th, 14, text, "rocks are really old").Layout)),
+								layout.Flexed(1, stacked(nameLabel, label(th, 14, text, "rocks are really old").Layout)),
 							)
 						})
 					})
 				}))
 			}
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, lines...)
+		},
+		gap(16),
+		section(th, "Role Emoji", "A unicode emoji shown beside the members of the role. Setting one replaces the role icon. Needs Server Boost level 2."),
+		func(gtx layout.Context) layout.Dimensions {
+			if !editable || r.Managed {
+				return label(th, 15, colorText, r.UnicodeEmoji).Layout(gtx)
+			}
+			return textField(gtx, th, &re.emoji, "Emoji")
 		},
 		gap(16),
 		func(gtx layout.Context) layout.Dimensions {
@@ -614,7 +697,7 @@ func (c *chatView) roleDisplayRows(editable bool) []layout.Widget {
 				"Members with \"Mention @everyone, @here and All Roles\" can always mention this role.", r.Mentionable)
 		},
 	)
-	changed := strings.TrimSpace(re.name.Text()) != re.origName && !r.Managed || re.color != re.origColor
+	changed := strings.TrimSpace(re.name.Text()) != re.origName && !r.Managed || re.color != re.origColor || re.second != re.origSecond || strings.TrimSpace(re.emoji.Text()) != re.origEmoji
 	if changed && editable {
 		rows = append(rows, saveBar(th, true, false, "", "", &re.reset, &re.save))
 	}
