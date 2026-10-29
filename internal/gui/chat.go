@@ -688,19 +688,25 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 
 	seen := make(map[discord.GuildID]bool)
 	var order []discord.GuildID
+	// The settings can still name servers left on another device: only those
+	// in the ready event are kept.
+	here := make(map[discord.GuildID]bool, len(ready.Guilds))
+	for _, g := range ready.Guilds {
+		here[g.ID] = true
+	}
 	// The settings can be missing, in which case the servers keep the order
 	// of the ready event.
 	if settings := ready.UserSettings; settings != nil {
 		for _, folder := range settings.GuildFolders {
 			for _, id := range folder.GuildIDs {
-				if !seen[id] {
+				if !seen[id] && here[id] {
 					seen[id] = true
 					order = append(order, id)
 				}
 			}
 		}
 		for _, id := range settings.GuildPositions {
-			if !seen[id] {
+			if !seen[id] && here[id] {
 				seen[id] = true
 				order = append(order, id)
 			}

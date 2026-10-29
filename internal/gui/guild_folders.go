@@ -94,6 +94,24 @@ func (c *chatView) syncFolders() {
 	}
 }
 
+// guildKnown reports whether the server is in the cache. A server left on
+// another device is not, and has no place on the list.
+func (c *chatView) guildKnown(id discord.GuildID) bool {
+	_, err := c.st.Cabinet.Guild(id)
+	return err == nil
+}
+
+// folderGuilds are the servers of the folder that are in the cache.
+func (c *chatView) folderGuilds(f *serverFolder) []discord.GuildID {
+	var guilds []discord.GuildID
+	for _, g := range f.Guilds {
+		if c.guildKnown(g) {
+			guilds = append(guilds, g)
+		}
+	}
+	return guilds
+}
+
 // guildEntries are the rows of the server column after the direct
 // messages.
 func (c *chatView) guildEntries() []guildEntry {
@@ -101,12 +119,18 @@ func (c *chatView) guildEntries() []guildEntry {
 	for i := range c.folders {
 		f := &c.folders[i]
 		if f.ID == 0 {
-			out = append(out, guildEntry{guild: f.Guilds[0]})
+			if g := f.Guilds[0]; c.guildKnown(g) {
+				out = append(out, guildEntry{guild: g})
+			}
+			continue
+		}
+		guilds := c.folderGuilds(f)
+		if len(guilds) == 0 {
 			continue
 		}
 		out = append(out, guildEntry{folder: f})
 		if c.openFolders[f.ID] {
-			for _, g := range f.Guilds {
+			for _, g := range guilds {
 				out = append(out, guildEntry{folder: f, guild: g})
 			}
 		}
@@ -128,7 +152,8 @@ func (c *chatView) layoutFolder(gtx layout.Context, f *serverFolder) layout.Dime
 	open := c.openFolders[f.ID]
 	unread := ningen.ChannelRead
 	mentions := 0
-	for _, g := range f.Guilds {
+	guilds := c.folderGuilds(f)
+	for _, g := range guilds {
 		if u := c.guildUnread(g); u > unread {
 			unread = u
 		}
@@ -151,7 +176,7 @@ func (c *chatView) layoutFolder(gtx layout.Context, f *serverFolder) layout.Dime
 		paint.FillShape(gtx.Ops, withAlpha(col, 0x40), clip.UniformRRect(r, gtx.Dp(16)).Op(gtx.Ops))
 		mini := gtx.Dp(16)
 		pad := (size - 2*mini - gtx.Dp(4)) / 2
-		for i, g := range f.Guilds[:min(4, len(f.Guilds))] {
+		for i, g := range guilds[:min(4, len(guilds))] {
 			x, y := pad+(i%2)*(mini+gtx.Dp(4)), pad+(i/2)*(mini+gtx.Dp(4))
 			t := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
 			if guild, err := c.st.Cabinet.Guild(g); err == nil {
