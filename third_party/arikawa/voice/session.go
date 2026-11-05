@@ -71,6 +71,11 @@ type MainSession interface {
 // Session is a single voice session that wraps around the voice gateway and UDP
 // connection.
 type Session struct {
+	// OwnSession, when set, is the main gateway's session ID: voice state
+	// updates of the user's other sessions (other devices) are then not taken
+	// for this connection's.
+	OwnSession func() string
+
 	// veil makes what is sent heard by Linkcord only, when on.
 	veil veiled
 	*handler.Handler
@@ -179,10 +184,16 @@ func (s *Session) acquireUpdate(f func()) {
 	f()
 }
 
+// sameGuild reports whether two guild IDs are the same guild. A DM call has no
+// guild, which Discord sends as null and a DM channel holds as 0.
+func sameGuild(a, b discord.GuildID) bool {
+	return a == b || !a.IsValid() && !b.IsValid()
+}
+
 // updateServer is specifically used to monitor for reconnects.
 func (s *Session) updateServer(ev *gateway.VoiceServerUpdateEvent) {
 	s.acquireUpdate(func() {
-		if s.state.GuildID != ev.GuildID || ev.Endpoint == "" {
+		if !sameGuild(s.state.GuildID, ev.GuildID) || ev.Endpoint == "" {
 			return
 		}
 
@@ -200,7 +211,11 @@ func (s *Session) updateServer(ev *gateway.VoiceServerUpdateEvent) {
 // forced across channels or out of them.
 func (s *Session) updateState(ev *gateway.VoiceStateUpdateEvent) {
 	s.acquireUpdate(func() {
-		if s.state.GuildID != ev.GuildID || s.state.UserID != ev.UserID {
+		if !sameGuild(s.state.GuildID, ev.GuildID) || s.state.UserID != ev.UserID {
+			return
+		}
+		// Another device of the user leaving is not about this connection.
+		if s.OwnSession != nil && ev.SessionID != s.OwnSession() && !ev.ChannelID.IsValid() {
 			return
 		}
 		// Disconnected by someone else, or by connecting from another client.
@@ -382,7 +397,7 @@ func (s *Session) waitForIncoming(ctx context.Context, chs waitEventChs) error {
 			slog.Info("voice join: server update", "guild", ev.GuildID, "want_guild", s.state.GuildID, "endpoint", ev.Endpoint != "")
 			// An empty endpoint means the voice server is being reallocated,
 			// and another event follows once it is.
-			if s.state.GuildID != ev.GuildID || ev.Endpoint == "" {
+			if !sameGuild(s.state.GuildID, ev.GuildID) || ev.Endpoint == "" {
 				continue
 			}
 			s.state.Endpoint = ev.Endpoint
@@ -393,7 +408,12 @@ func (s *Session) waitForIncoming(ctx context.Context, chs waitEventChs) error {
 			if s.state.UserID == ev.UserID {
 				slog.Info("voice join: state update", "guild", ev.GuildID, "want_guild", s.state.GuildID, "channel", ev.ChannelID)
 			}
-			if s.state.GuildID != ev.GuildID || s.state.UserID != ev.UserID {
+			if !sameGuild(s.state.GuildID, ev.GuildID) || s.state.UserID != ev.UserID {
+				continue
+			}
+			// The state of the user's own other device (leaving, as this join
+			// moves the call here) is not this connection's.
+			if s.OwnSession != nil && ev.SessionID != s.OwnSession() {
 				continue
 			}
 			s.state.SessionID = ev.SessionID

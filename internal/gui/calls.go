@@ -245,9 +245,18 @@ func (c *chatView) callChannel(ch discord.Channel, video bool) {
 	if c.u.voiceChannel() != ch.ID {
 		c.joinVoice(ch)
 		go func() {
-			// Null recipients ring everyone in it.
-			c.st.Client.FastRequest("POST", api.EndpointChannels+ch.ID.String()+"/call/ring",
-				httputil.WithJSONBody(map[string]any{"recipients": nil}))
+			// Ring once the call is joined: Discord rings only while the caller
+			// is in it. Null recipients ring everyone in it.
+			for range 40 {
+				if st := c.u.voiceStatus(); st.ChannelID == ch.ID && st.Joined {
+					break
+				}
+				time.Sleep(250 * time.Millisecond)
+			}
+			if err := c.st.Client.FastRequest("POST", api.EndpointChannels+ch.ID.String()+"/call/ring",
+				httputil.WithJSONBody(map[string]any{"recipients": nil})); err != nil {
+				slog.Warn("could not ring the call", "channel", ch.ID, "err", err)
+			}
 		}()
 	}
 	if video {

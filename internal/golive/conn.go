@@ -221,6 +221,10 @@ func (c *connHandler) OnOp(ctx context.Context, op ws.Op) bool {
 	c.mu.Unlock()
 
 	switch data := op.Data.(type) {
+	case *ws.CloseEvent:
+		// The connection dropped: resume at once, as the main gateway does,
+		// instead of waiting for a heartbeat to fail.
+		c.gw.QueueReconnect()
 	case *voicegateway.HelloEvent:
 		c.gw.ResetHeartbeat(data.HeartbeatInterval.Duration())
 		var err error
@@ -232,7 +236,10 @@ func (c *connHandler) OnOp(ctx context.Context, op ws.Op) bool {
 			}
 		} else {
 			err = c.gw.Send(ctx, &voicegateway.ResumeCommand{
-				GuildID:   discord.GuildID(mustSnowflake(c.identify.ServerID)),
+				GuildID: discord.GuildID(mustSnowflake(c.identify.ServerID)),
+				// Voice gateway v9 needs the channel to resume, or the session
+				// is refused (4006) and the stream ends.
+				ChannelID: discord.ChannelID(mustSnowflake(c.identify.ChannelID)),
 				SessionID: c.identify.SessionID,
 				Token:     c.identify.Token,
 				SeqAck:    seq,

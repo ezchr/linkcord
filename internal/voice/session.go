@@ -281,6 +281,9 @@ func (s *Session) follow(event *gateway.VoiceStateUpdateEvent) {
 	case !status.Joined || own && event.ChannelID == status.ChannelID:
 	case own && event.ChannelID.IsValid():
 		s.setStatus(Status{ChannelID: event.ChannelID, Joined: true})
+	case !own && !event.ChannelID.IsValid():
+		// The user's other device leaving, as joining here moves the call
+		// from it: this connection carries on.
 	default:
 		s.left()
 	}
@@ -444,7 +447,10 @@ func (s *Session) Join(channelID discord.ChannelID) (err error) {
 
 	session := s.session.Load()
 	if session == nil {
-		if session, err = voice.NewSession(s.state, s.state.Handler); err != nil {
+		if session, err = voice.NewSession(s.state, s.state.Handler); err == nil {
+			session.OwnSession = func() string { return s.state.Ready().SessionID }
+		}
+		if err != nil {
 			return err
 		}
 
