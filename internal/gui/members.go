@@ -260,7 +260,7 @@ func (c *chatView) layoutMembers(gtx layout.Context) layout.Dimensions {
 							// The crown, platforms and timeout go right after the name,
 							// which leaves them the room they take.
 							return nameWithMarks(gtx, func(gtx layout.Context) layout.Dimensions {
-								return c.layoutMemberName(gtx, m, guildID, label(th, 15, col, look.named(name)), look)
+								return c.layoutMemberName(gtx, m, guildID, label(th, 15, col, name), look)
 							}, func(gtx layout.Context) layout.Dimensions {
 								return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutStaffTag(gtx, guildID, m.User.ID) }),
@@ -346,6 +346,9 @@ func (c *chatView) memberItem(gtx layout.Context, m *discord.Member, w func(gtx 
 // tag of the server they wear and the gem of those who boost the server.
 func (c *chatView) layoutMemberName(gtx layout.Context, m *discord.Member, guildID discord.GuildID, name material.LabelStyle, look roleLook) layout.Dimensions {
 	var after []layout.Widget
+	if look.hasIcon() {
+		after = append(after, func(gtx layout.Context) layout.Dimensions { return c.roleIcon(gtx, look, 16) })
+	}
 	// Bots are marked as in the chat, and who uses Linkcord with its logo.
 	if m.User.Bot {
 		after = append(after, botTag(c.u.th))

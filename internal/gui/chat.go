@@ -2054,7 +2054,7 @@ func (c *chatView) layoutUserPanel(gtx layout.Context) layout.Dimensions {
 											}
 											return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													return c.layoutMemberName(gtx, m, c.selGuild, oneLine(bold(label(th, 14, col, look.named(name)))), look)
+													return c.layoutMemberName(gtx, m, c.selGuild, oneLine(bold(label(th, 14, col, name))), look.withoutIcon())
 												}),
 												layout.Rigid(oneLine(label(th, 12, colorMuted, sub)).Layout),
 											)

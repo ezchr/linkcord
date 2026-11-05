@@ -368,12 +368,20 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 								cl := c.msgClick(m.ID, 1)
 								return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 									pointer.CursorPointer.Add(gtx.Ops)
-									dims := styledName(gtx, oneLine(bold(label(th, 15, nameColor, look.named(name)))), m.Author, look)
+									dims := styledName(gtx, oneLine(bold(label(th, 15, nameColor, name))), m.Author, look)
 									if cl.Hovered() {
 										// Underline the name like a link.
 										paint.FillShape(gtx.Ops, nameColor, clip.Rect{Min: image.Pt(0, dims.Size.Y-gtx.Dp(2)), Max: image.Pt(dims.Size.X, dims.Size.Y-gtx.Dp(1))}.Op())
 									}
 									return dims
+								})
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								if !look.hasIcon() {
+									return layout.Dimensions{}
+								}
+								return layout.Inset{Left: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return c.roleIcon(gtx, look, 18)
 								})
 							}),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {

@@ -1302,7 +1302,7 @@ func (c *chatView) layoutRoles(gtx layout.Context, guildID discord.GuildID, ids 
 						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return dot(gtx, col, 10) }),
 							layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-							layout.Rigid(roleChipName(th, role)),
+							layout.Rigid(c.roleChipName(th, role)),
 						)
 					})
 				})
