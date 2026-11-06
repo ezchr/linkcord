@@ -99,6 +99,13 @@ void lc_capture_release(lc_capture *c);
 
 void lc_capture_close(lc_capture *c);
 
+// lc_wgc captures a screen with Windows.Graphics.Capture: wgc_windows.c.
+typedef struct lc_wgc lc_wgc;
+lc_wgc *lc_wgc_open(void *dev, void *monitor);
+int lc_wgc_next(lc_wgc *c, void **tex);
+void lc_wgc_done(lc_wgc *c);
+void lc_wgc_close(lc_wgc *c);
+
 // lc_dpi_aware has the calling thread see screens in their own pixels and
 // returns what lc_dpi_restore takes to undo it.
 void *lc_dpi_aware(void);
@@ -146,6 +153,7 @@ int lc_gpucap_convert(lc_gpucap *g, int ow, int oh, int *slot);
 // come with a reference of their own, which lc_com_release lets go of.
 void *lc_gpucap_device(lc_gpucap *g);
 int lc_gpucap_gen(lc_gpucap *g);
+int lc_gpucap_wgc(lc_gpucap *g);
 void *lc_gpucap_texture(lc_gpucap *g, int slot);
 
 // lc_gpucap_preview scales the last picture to w by h RGBA into rgba.

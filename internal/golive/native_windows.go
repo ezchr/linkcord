@@ -186,6 +186,14 @@ func (g *gpuCapture) previewInto(img *image.RGBA) bool {
 
 func (g *gpuCapture) close() { C.lc_gpucap_close(g.g) }
 
+// method names how pictures are taken.
+func (g *gpuCapture) method() string {
+	if C.lc_gpucap_wgc(g.g) != 0 {
+		return "windows graphics capture, converted by the graphics card"
+	}
+	return "desktop duplication, converted by the graphics card"
+}
+
 // readNV12 reads a w by h NV12 texture back, for tests.
 func readNV12(tex unsafe.Pointer, w, h int) []byte {
 	b := make([]byte, w*h*3/2)

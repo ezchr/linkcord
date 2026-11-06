@@ -77,6 +77,8 @@ struct lc_dupl {
 	ID3D11Device *dev;
 	ID3D11DeviceContext *ctx;
 	IDXGIOutputDuplication *dup;
+	// wgc captures instead of dup, for the graphics card, where Windows can.
+	lc_wgc *wgc;
 	ID3D11Texture2D *staging;
 	int sw, sh;
 	// frame is the last picture, BGRA, fw by fh with rows fw*4 bytes apart.
@@ -110,6 +112,10 @@ static void release(lc_dupl *d) {
 	if (d->dup) {
 		IDXGIOutputDuplication_Release(d->dup);
 		d->dup = NULL;
+	}
+	if (d->wgc) {
+		lc_wgc_close(d->wgc);
+		d->wgc = NULL;
 	}
 	if (d->ctx) {
 		ID3D11DeviceContext_Release(d->ctx);
@@ -153,6 +159,10 @@ static HRESULT duplicate(lc_dupl *d) {
 				d->gen++;
 				// The encoder's threads use the device too.
 				lc_mt_protect((IUnknown *)d->dev);
+			}
+			if (SUCCEEDED(hr) && d->gpu && (d->wgc = lc_wgc_open(d->dev, od.Monitor))) {
+				IDXGIOutput_Release(o);
+				break;
 			}
 			IDXGIOutput1 *o1 = NULL;
 			if (SUCCEEDED(hr)) {
@@ -296,11 +306,33 @@ static int next(lc_dupl *d, UINT timeout) {
 	return 0;
 }
 
+// next_wgc takes the newest picture of d->wgc, if there is one. It starts
+// over when capturing stopped, as next does.
+static int next_wgc(lc_dupl *d) {
+	void *tex = NULL;
+	int r = lc_wgc_next(d->wgc, &tex);
+	if (r < 0) {
+		release(d);
+		return 0;
+	}
+	if (r == 0) {
+		return 0;
+	}
+	int kept = keep(d, tex);
+	ID3D11Texture2D_Release((ID3D11Texture2D *)tex);
+	lc_wgc_done(d->wgc);
+	if (kept < 0) {
+		release(d);
+		return -1;
+	}
+	return 0;
+}
+
 // poll takes the latest picture of the screen, duplicating it again when
 // it stopped. It returns 1 when there is a picture, 0 when there is none yet,
 // and -1 when the screen cannot be duplicated.
 static int poll(lc_dupl *d) {
-	if (!d->dup) {
+	if (!d->dup && !d->wgc) {
 		if (d->worked && GetTickCount() - d->retry < 500) {
 			goto last;
 		}
@@ -315,6 +347,15 @@ static int poll(lc_dupl *d) {
 		d->worked = 1;
 	}
 	// The first picture is waited for; then what has not changed is kept.
+	for (int i = 0; i < 25 && d->wgc; i++) {
+		if (next_wgc(d) < 0) {
+			return -1;
+		}
+		if (d->have) {
+			break;
+		}
+		Sleep(20);
+	}
 	for (int i = 0; i < 5 && d->dup; i++) {
 		if (next(d, d->have ? 0 : 100) < 0) {
 			return -1;
@@ -828,6 +869,11 @@ void lc_com_release(void *p) {
 		IUnknown *u = p;
 		u->lpVtbl->Release(u);
 	}
+}
+
+// lc_gpucap_wgc reports whether Windows.Graphics.Capture takes the pictures.
+int lc_gpucap_wgc(lc_gpucap *g) {
+	return g->d && g->d->wgc;
 }
 
 int lc_gpucap_gen(lc_gpucap *g) {

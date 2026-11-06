@@ -499,7 +499,7 @@ func (s *Stream) loop(capt *capturer) {
 	}
 	method := func() string {
 		if gpu != nil {
-			return "desktop duplication, converted by the graphics card"
+			return gpu.method()
 		}
 		return capt.method()
 	}
