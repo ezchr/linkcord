@@ -503,7 +503,11 @@ static int pointer(lc_capture *c, int ox, int oy, HCURSOR *cur, int *x, int *y, 
 	CURSORINFO ci;
 	memset(&ci, 0, sizeof ci);
 	ci.cbSize = sizeof ci;
-	if (!GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor) {
+	// In the screen's own pixels, as the picture is, on a scaled screen too.
+	HANDLE dpi = lc_dpi_aware();
+	BOOL got = GetCursorInfo(&ci);
+	lc_dpi_restore(dpi);
+	if (!got || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor) {
 		return 0;
 	}
 	ICONINFO ii;
