@@ -181,13 +181,25 @@ func (c *chatView) updateStreamPicker(gtx layout.Context) {
 			chosen = mainScreen(sp.sources)
 		}
 		sp.open = false
-		if sp.changing && c.u.streaming() {
-			c.changeStream(sp.sources[chosen])
-			return
-		}
 		settings := c.u.voiceSettings()
+		same := settings.StreamHeight == sp.height && settings.StreamFPS == sp.fps
 		settings.StreamHeight, settings.StreamFPS = sp.height, sp.fps
 		c.u.saveVoiceSettings()
+		if sp.changing && c.u.streaming() {
+			if same || c.u.voice.stream == nil {
+				c.changeStream(sp.sources[chosen])
+				return
+			}
+			// A stream keeps its quality for good: a new one takes its place.
+			u, old := c.u, c.u.voice.stream
+			src, q := sp.sources[chosen], golive.Quality{Height: sp.height, FPS: sp.fps}
+			u.voice.stream = nil
+			go func() {
+				old.Stop()
+				u.post(func() { c.startStream(src, q) })
+			}()
+			return
+		}
 		c.startStream(sp.sources[chosen], golive.Quality{Height: sp.height, FPS: sp.fps})
 	}
 }
