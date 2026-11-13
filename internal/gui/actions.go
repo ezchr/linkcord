@@ -44,6 +44,8 @@ const (
 	actCopy
 	actDelete
 	actTranslate
+	// actThread starts a thread from the message.
+	actThread
 )
 
 type actionKey struct {
@@ -301,6 +303,9 @@ func (c *chatView) layoutToolbar(gtx layout.Context, m discord.Message, row layo
 	if c.canSendHere() && !gone {
 		kinds = append(kinds, actReply)
 	}
+	if ch := c.selChannel; ch != nil && !gone && m.Thread == nil && isRegular(m) && !isEphemeral(m) && c.canCreateThread(*ch) {
+		kinds = append(kinds, actThread)
+	}
 	if m.Author.ID == c.me.ID || c.u.app.EditOthers || gone {
 		kinds = append(kinds, actEdit)
 	}
@@ -370,6 +375,8 @@ func actionIcon(k actionKind) (*widget.Icon, colorT) {
 		return iconCopy, colorHeader
 	case actTranslate:
 		return iconTranslate, colorHeader
+	case actThread:
+		return iconMenuThreads, colorHeader
 	default:
 		return iconDelete, colorRed
 	}
@@ -394,6 +401,12 @@ func (c *chatView) runAction(gtx layout.Context, m discord.Message, k actionKind
 		c.u.post(func() { c.askDelete(m, shift) })
 	case actTranslate:
 		c.u.post(func() { c.translate(m) })
+	case actThread:
+		c.u.post(func() {
+			if ch := c.selChannel; ch != nil {
+				c.openCreateThread(*ch, &m)
+			}
+		})
 	}
 }
 

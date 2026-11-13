@@ -86,6 +86,14 @@ func (c *chatView) permsNow(chID discord.ChannelID) (discord.Permissions, bool) 
 	if err != nil {
 		return 0, false
 	}
+	// A thread has the permissions of its channel.
+	if isThread(ch.Type) {
+		parent, err := c.st.Cabinet.Channel(ch.ParentID)
+		if err != nil {
+			return 0, false
+		}
+		return threadPerms(discord.CalcOverrides(*g, *parent, *m, roles), threadLocked(*ch)), true
+	}
 	return discord.CalcOverrides(*g, *ch, *m, roles), true
 }
 

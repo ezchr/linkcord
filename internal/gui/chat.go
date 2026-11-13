@@ -73,6 +73,8 @@ const (
 	// rowGuildInfo is the boost goal, the events or the boosts, at the top
 	// of a server's channels.
 	rowGuildInfo
+	// rowThread is a thread, under its channel.
+	rowThread
 )
 
 // channelRow is a line of the channel column.
@@ -111,6 +113,10 @@ type chatView struct {
 	// makes a channel from it.
 	gmenu      guildMenu
 	newChannel createChannel
+	// threads are the threads joined and the list of a channel's; newThread
+	// is the form that starts one.
+	threads   threadState
+	newThread createThread
 	// search finds messages of the server or conversation open.
 	search searchView
 	// gset is the settings of a server, open over everything, and cset a
@@ -307,6 +313,9 @@ type chatView struct {
 	// The member list at the right of the messages.
 	showMembers   bool
 	membersToggle widget.Clickable
+	// The buttons of the header for threads: a channel's list of them,
+	// joining the thread open, and its menu.
+	threadsBtn, joinThreadBtn, threadMoreBtn widget.Clickable
 	// callBtn and videoCallBtn call the direct message or group open.
 	callBtn, videoCallBtn widget.Clickable
 	// firstBtn goes to the first message of the channel; loadingNewer is
@@ -560,7 +569,9 @@ func (c *chatView) pump() {
 				*gateway.ChannelCreateEvent, *gateway.ChannelUpdateEvent, *gateway.ChannelDeleteEvent,
 				*gateway.VoiceStateUpdateEvent, *gateway.GuildMembersChunkEvent,
 				*gateway.MessageReactionAddEvent, *gateway.MessageReactionRemoveEvent,
-				*gateway.MessageReactionRemoveAllEvent, *gateway.MessageReactionRemoveEmojiEvent:
+				*gateway.MessageReactionRemoveAllEvent, *gateway.MessageReactionRemoveEmojiEvent,
+				*gateway.ThreadCreateEvent, *gateway.ThreadUpdateEvent, *gateway.ThreadDeleteEvent, *gateway.ThreadListSyncEvent,
+				*gateway.ThreadMemberUpdateEvent, *gateway.ThreadMembersUpdateEvent:
 				// What happens in a channel not open changes no more than
 				// its unread mark: it waits for a frame a little later.
 				if ch, ok := eventChannel(ev); ok && uint64(ch) != c.openChannel.Load() {
@@ -595,6 +606,16 @@ func eventGuild(ev gateway.Event) (discord.GuildID, bool) {
 		g = ev.ID
 	case *gateway.GuildUpdateEvent:
 		g = ev.ID
+	case *gateway.ThreadCreateEvent:
+		g = ev.GuildID
+	case *gateway.ThreadUpdateEvent:
+		g = ev.GuildID
+	case *gateway.ThreadDeleteEvent:
+		g = ev.GuildID
+	case *gateway.ThreadListSyncEvent:
+		g = ev.GuildID
+	case *gateway.ThreadMembersUpdateEvent:
+		g = ev.GuildID
 	}
 	return g, g.IsValid()
 }
@@ -691,8 +712,11 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 	// The settings can still name servers left on another device: only those
 	// in the ready event are kept.
 	here := make(map[discord.GuildID]bool, len(ready.Guilds))
+	// The threads the user joined come with their servers.
+	c.threads.joined = nil
 	for _, g := range ready.Guilds {
 		here[g.ID] = true
+		c.threads.noteGuild(g)
 	}
 	// The settings can be missing, in which case the servers keep the order
 	// of the ready event.
@@ -866,7 +890,8 @@ func (c *chatView) rebuildRows() {
 			categories = append(categories, ch)
 		case !isTextual(ch.Type) && !isVoice(ch.Type):
 			// Forums and other kinds are not supported yet.
-		case ch.Type == discord.GuildPublicThread || ch.Type == discord.GuildPrivateThread || ch.Type == discord.GuildAnnouncementThread:
+		case isThread(ch.Type):
+			// Listed under their channel.
 		case !c.can(ch.ID, discord.PermissionViewChannel) && !c.u.app.ShowHiddenChannels:
 		case hideMuted && c.st.ChannelIsMuted(ch.ID, ningen.UnreadOpts{}):
 		case slices.Contains(c.u.app.PinnedChannels, ch.ID):
@@ -924,6 +949,7 @@ func (c *chatView) rebuildRows() {
 			return
 		}
 		c.rows = append(c.rows, channelRow{kind: rowText, ch: ch, label: ch.Name})
+		c.rows = append(c.rows, c.threadRows(channels, ch)...)
 	}
 
 	// Pinned channels first, out of their categories.
@@ -1032,6 +1058,10 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	c.friends.page = homeNone
 	c.refreshing, c.refreshPending, c.refreshFailures = false, false, 0
 	c.lastRefresh, c.refreshLive = time.Time{}, nil
+	// A thread not joined is listed only while open.
+	if c.openThreadID().IsValid() || isThread(ch.Type) {
+		defer c.rebuildRows()
+	}
 	c.selChannel = &ch
 	c.lastChannel[c.selGuild] = ch.ID
 	c.saveLastPlace()
@@ -1285,6 +1315,7 @@ func (c *chatView) apply(ev gateway.Event) {
 	case *gateway.ChannelCreateEvent, *gateway.ChannelUpdateEvent, *gateway.ChannelDeleteEvent:
 		c.rebuildRows()
 	}
+	c.applyThreadEvent(ev)
 	// Read states, member names and the rest are read while laying out, so
 	// the next frame shows them.
 }
@@ -1319,7 +1350,7 @@ func (c *chatView) update(gtx layout.Context) {
 		case rowCategory:
 			c.collapsed[r.ch.ID] = !c.collapsed[r.ch.ID]
 			c.rebuildRows()
-		case rowText, rowDM:
+		case rowText, rowDM, rowThread:
 			c.selectChannel(r.ch)
 		case rowGuildInfo:
 			c.openGuildInfo(r.ch.ID)
@@ -1389,6 +1420,7 @@ func (c *chatView) update(gtx layout.Context) {
 	if c.membersToggle.Clicked(gtx) {
 		c.showMembers = !c.showMembers
 	}
+	c.updateThreadButtons(gtx)
 	if ch := c.selChannel; ch != nil {
 		for _, r := range c.memberRows {
 			if r.member != nil && c.userClick(r.member.User.ID).Clicked(gtx) {
@@ -1552,6 +1584,9 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 	}
 	if c.newChannel.open {
 		c.layoutCreateChannel(gtx)
+	}
+	if c.newThread.open {
+		c.layoutCreateThread(gtx)
 	}
 	c.layoutSearchMenu(gtx)
 	c.layoutClips(gtx)
@@ -1736,6 +1771,8 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 		return c.layoutHomeRow(gtx, r)
 	case rowGuildInfo:
 		return c.layoutGuildInfoRow(gtx, r)
+	case rowThread:
+		return c.layoutThreadRow(gtx, r)
 	case rowCategory:
 		top := unit.Dp(14)
 		if first {

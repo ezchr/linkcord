@@ -107,6 +107,9 @@ func (c *chatView) channelMenuItems() []menuItem {
 		}
 	}
 	back := menuItem{key: "back", text: "Back", back: true, act: page(chanMenuMain)}
+	if isThread(ch.Type) && m.page == chanMenuMain {
+		return c.threadMenuItems(ch)
+	}
 	switch m.page {
 	case chanMenuMute:
 		items := []menuItem{back, {title: true, text: "Mute Channel"}}

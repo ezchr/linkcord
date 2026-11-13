@@ -76,6 +76,9 @@ func (c *chatView) chatHeader(gtx layout.Context, title string) layout.Dimension
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Min.Y = gtx.Constraints.Max.Y
 				return vcenter(gtx, func(gtx layout.Context) layout.Dimensions {
+					if isThread(ch.Type) {
+						return c.layoutThreadTitle(gtx, *ch)
+					}
 					if ch.Type != discord.DirectMessage {
 						return oneLine(bold(label(th, 16, colorHeader, title))).Layout(gtx)
 					}
@@ -87,7 +90,11 @@ func (c *chatView) chatHeader(gtx layout.Context, title string) layout.Dimension
 				})
 			}),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				if ch.Topic == "" {
+				topic := ch.Topic
+				if isThread(ch.Type) {
+					topic = threadStatus(*ch)
+				}
+				if topic == "" {
 					return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
 				}
 				return layout.Inset{Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -97,7 +104,7 @@ func (c *chatView) chatHeader(gtx layout.Context, title string) layout.Dimension
 					y := (gtx.Constraints.Max.Y - h) / 2
 					paint.FillShape(gtx.Ops, colorSelected, clip.Rect{Min: image.Pt(0, y), Max: image.Pt(gtx.Dp(1), y+h)}.Op())
 					return layout.Inset{Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return vcenter(gtx, oneLine(label(th, 14, colorMuted, strings.ReplaceAll(ch.Topic, "\n", " "))).Layout)
+						return vcenter(gtx, oneLine(label(th, 14, colorMuted, strings.ReplaceAll(topic, "\n", " "))).Layout)
 					})
 				})
 			}),
@@ -116,6 +123,9 @@ func (c *chatView) chatHeader(gtx layout.Context, title string) layout.Dimension
 						}),
 						layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout))
 				})
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return vcenter(gtx, c.layoutThreadButtons)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return vcenter(gtx, c.layoutSearchBox)
@@ -192,6 +202,9 @@ func (c *chatView) layoutHistoryTop(gtx layout.Context) layout.Dimensions {
 			})
 		}
 		txt := "This is the beginning of #" + c.selChannel.Name + "."
+		if isThread(c.selChannel.Type) {
+			txt = "This is the beginning of the thread " + c.selChannel.Name + "."
+		}
 		if !c.selChannel.GuildID.IsValid() {
 			txt = "This is the beginning of your conversation with " + c.dmName(*c.selChannel) + "."
 		}
@@ -260,6 +273,12 @@ func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
 	m := c.messages[i]
 	if text, ok := c.localEdits[m.ID]; ok {
 		m.Content = text
+	}
+	switch m.Type {
+	case discord.ThreadCreatedMessage:
+		return c.layoutThreadCreated(gtx, m)
+	case discord.ThreadStarterMessage:
+		return c.layoutThreadStarter(gtx, m)
 	}
 	if !isRegular(m) {
 		return layout.Inset{Left: unit.Dp(72), Right: unit.Dp(16), Top: unit.Dp(8), Bottom: unit.Dp(4)}.Layout(gtx,
@@ -442,6 +461,11 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 				if len(m.Reactions) > 0 {
 					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return c.layoutReactions(gtx, m)
+					}))
+				}
+				if m.Thread != nil && !isThread(c.selChannel.Type) {
+					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return c.layoutThreadCard(gtx, m)
 					}))
 				}
 				if isEphemeral(m) {

@@ -283,6 +283,54 @@ func (u *ui) startDemo() {
 		}
 	})
 
+	// Threads in general-chat: one started from a message and joined, one
+	// on its own that is locked, one not joined, and an archived one.
+	general := channels[4]
+	thread := func(n int, name string, kind discord.ChannelType, owner discord.User, count int, md discord.ThreadMetadata) discord.Channel {
+		md.AutoArchiveDuration = discord.ThreeDaysArchive
+		return discord.Channel{ID: discord.ChannelID(id(n)), GuildID: guild.ID, ParentID: general.ID, Type: kind, Name: name,
+			OwnerID: owner.ID, MessageCount: count, MemberCount: 3, ThreadMetadata: &md}
+	}
+	add(general.ID, guild.ID, users[2], 3*time.Hour, "what should we watch on movie night? 🍿", nil)
+	var starter discord.Message
+	var movie discord.Channel
+	add(general.ID, guild.ID, users[0], 2*time.Hour, "who wants to plan the movie night? ideas here please", func(m *discord.Message) {
+		// The thread started from a message has the message's ID.
+		movie = thread(0, "Movie night ideas", discord.GuildPublicThread, users[0], 5, discord.ThreadMetadata{})
+		movie.ID = discord.ChannelID(m.ID)
+		m.Thread = &movie
+		m.Flags |= discord.MessageHasThread
+		starter = *m
+	})
+	rules := thread(130, "rules-feedback", discord.GuildPublicThread, me, 2, discord.ThreadMetadata{Locked: true})
+	bugs := thread(131, "bug reports", discord.GuildPublicThread, users[1], 3, discord.ThreadMetadata{})
+	old := thread(132, "old patch notes", discord.GuildPublicThread, users[3], 12, discord.ThreadMetadata{Archived: true, ArchiveTimestamp: discord.NewTimestamp(time.Now().Add(-72 * time.Hour))})
+	for _, th := range []*discord.Channel{&movie, &rules, &bugs} {
+		cab.ChannelSet(th, false)
+	}
+	add(general.ID, guild.ID, users[1], 80*time.Minute, "bug reports", func(m *discord.Message) {
+		m.Type = discord.ThreadCreatedMessage
+		m.Reference = &discord.MessageReference{ChannelID: bugs.ID, GuildID: guild.ID}
+	})
+	add(general.ID, guild.ID, users[3], 70*time.Minute, "sounds good, see you all there", nil)
+	add(movie.ID, guild.ID, users[0], 2*time.Hour-time.Second, "", func(m *discord.Message) {
+		m.Type = discord.ThreadStarterMessage
+		ref := starter
+		m.ReferencedMessage = &ref
+		m.Reference = &discord.MessageReference{MessageID: starter.ID, ChannelID: general.ID, GuildID: guild.ID}
+	})
+	add(movie.ID, guild.ID, users[1], 110*time.Minute, "something scary 👻", nil)
+	add(movie.ID, guild.ID, users[3], 100*time.Minute, "no, a comedy!", func(m *discord.Message) {
+		m.Reactions = []discord.Reaction{{Count: 2, Emoji: discord.Emoji{Name: "😂"}}}
+	})
+	add(movie.ID, guild.ID, me, 90*time.Minute, "let's vote in #general-chat later", nil)
+	add(movie.ID, guild.ID, users[0], 50*time.Minute, "<@"+me.ID.String()+"> can you bring the projector?", nil)
+	add(rules.ID, guild.ID, me, 6*time.Hour, "tell us what you think of the new rules", nil)
+	add(rules.ID, guild.ID, users[2], 5*time.Hour, "looks fair to me", nil)
+	add(bugs.ID, guild.ID, users[1], 80*time.Minute, "post the bugs you find here, with steps", nil)
+	add(bugs.ID, guild.ID, users[5], 75*time.Minute, "the lobby froze once when I joined", nil)
+	add(old.ID, guild.ID, users[3], 80*time.Hour, "patch 1.2 is out", nil)
+
 	for i := 60; i > 0; i-- {
 		author := users[0]
 		if i%3 == 0 {
@@ -295,7 +343,8 @@ func (u *ui) startDemo() {
 	}
 
 	ready := &gateway.ReadyEvent{User: me}
-	ready.Guilds = []gateway.GuildCreateEvent{{Guild: guild}}
+	// The threads joined come with their server, as for a user.
+	ready.Guilds = []gateway.GuildCreateEvent{{Guild: guild, Threads: []discord.Channel{movie, rules}}}
 	for i := range 6 {
 		g := discord.Guild{ID: discord.GuildID(id(300 + i)), Name: []string{"Games", "Music", "Programming", "Anime", "Linkcord Club", "Homework"}[i], OwnerID: me.ID}
 		cab.GuildSet(&g, false)
@@ -307,6 +356,7 @@ func (u *ui) startDemo() {
 	// A message someone deleted, shown with its sign; the demo keeps nothing.
 	u.chat.deleted = newDeletedLog("")
 	u.chat.deleted.record(deleted)
+	u.chat.threads.demoArchived = []discord.Channel{old}
 
 	// Friends in each state, and a message request from a stranger.
 	rel := func(user discord.User, t discord.RelationshipType) discord.Relationship {

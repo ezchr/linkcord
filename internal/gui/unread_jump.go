@@ -42,7 +42,7 @@ func (c *chatView) updateUnreadKeys(gtx layout.Context) {
 func (c *chatView) jumpUnreadChannel(step int) {
 	cur := -1
 	for i, r := range c.rows {
-		if c.selChannel != nil && (r.kind == rowText || r.kind == rowDM) && r.ch.ID == c.selChannel.ID {
+		if c.selChannel != nil && (r.kind == rowText || r.kind == rowDM || r.kind == rowThread) && r.ch.ID == c.selChannel.ID {
 			cur = i
 		}
 	}
@@ -50,7 +50,7 @@ func (c *chatView) jumpUnreadChannel(step int) {
 	for k := 1; k <= n; k++ {
 		i := ((cur+step*k)%n + n) % n
 		r := c.rows[i]
-		if (r.kind == rowText || r.kind == rowDM) && c.channelUnread(r.ch.ID) != ningen.ChannelRead {
+		if (r.kind == rowText || r.kind == rowDM || r.kind == rowThread) && c.channelUnread(r.ch.ID) != ningen.ChannelRead {
 			c.selectChannel(r.ch)
 			return
 		}

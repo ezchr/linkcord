@@ -16,7 +16,7 @@ Linkcord does most of what Discord's app does. What it still lacks:
 | Camera | Video in voice channels and calls; the video call button joins without it. |
 | Activities | Games and apps played together in voice channels. |
 | Notification previews | Unread markers and mention counts are there; desktop pop-ups with the message are not. |
-| Threads and forums | |
+| Forums | Forum channels and their posts are not listed; threads of text and announcement channels work. |
 | Lottie stickers | PNG, APNG and GIF stickers work. |
 | Creating polls | Voting in polls works. |
 | Multi-value select menus | Bot menus with one choice work. |

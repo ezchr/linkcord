@@ -576,7 +576,7 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 					return rounded(gtx, colorInput, 8, func(gtx layout.Context) layout.Dimensions {
 						gtx.Constraints.Min.X = gtx.Constraints.Max.X
 						return layout.UniformInset(unit.Dp(14)).Layout(gtx,
-							label(th, 15, colorMuted, "You do not have permission to send messages in this channel.").Layout)
+							label(th, 15, colorMuted, c.cannotSendText()).Layout)
 					})
 				}
 				return rounded(gtx, colorInput, 8, func(gtx layout.Context) layout.Dimensions {
