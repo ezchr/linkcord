@@ -29,3 +29,9 @@ func NewSessionClient(token string) *api.Client {
 	client.UserAgent = BrowserUserAgent()
 	return client
 }
+
+// NewPersistentClient is NewSessionClient: this build keeps no cookies on
+// disk.
+func NewPersistentClient(token string) *api.Client {
+	return NewSessionClient(token)
+}
