@@ -207,6 +207,12 @@ func DiffMessage(src, dst *discord.Message) {
 	if src.Components != nil {
 		dst.Components = src.Components
 	}
+	// The thread started from the message comes in an update of it. (Added
+	// by Linkcord.)
+	if src.Thread != nil {
+		dst.Thread = src.Thread
+		dst.Flags |= discord.MessageHasThread
+	}
 }
 
 func (s *Message) MessageRemove(channelID discord.ChannelID, messageID discord.MessageID) error {

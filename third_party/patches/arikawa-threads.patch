@@ -1,0 +1,30 @@
+diff --git a/discord/channel.go b/discord/channel.go
+index 86d1179..5a50c91 100644
+--- a/discord/channel.go
++++ b/discord/channel.go
+@@ -106,7 +106,7 @@ type Channel struct {
+ 	ThreadMetadata *ThreadMetadata `json:"thread_metadata,omitempty"`
+ 	// ThreadMember is the thread member object for the current user, if they
+ 	// have joined the thread, only included on certain API endpoints.
+-	ThreadMember *ThreadMember `json:"thread_member,omitempty"`
++	ThreadMember *ThreadMember `json:"member,omitempty"`
+ 	// DefaultAutoArchiveDuration is the default duration for newly created
+ 	// threads, in minutes, to automatically archive the thread after recent
+ 	// activity.
+diff --git a/state/store/defaultstore/message.go b/state/store/defaultstore/message.go
+index e2d40b0..67c54bf 100644
+--- a/state/store/defaultstore/message.go
++++ b/state/store/defaultstore/message.go
+@@ -207,6 +207,12 @@ func DiffMessage(src, dst *discord.Message) {
+ 	if src.Components != nil {
+ 		dst.Components = src.Components
+ 	}
++	// The thread started from the message comes in an update of it. (Added
++	// by Linkcord.)
++	if src.Thread != nil {
++		dst.Thread = src.Thread
++		dst.Flags |= discord.MessageHasThread
++	}
+ }
+ 
+ func (s *Message) MessageRemove(channelID discord.ChannelID, messageID discord.MessageID) error {
