@@ -64,6 +64,12 @@ type request fhttp.Request
 
 var _ httpdriver.Request = (*request)(nil)
 
+// GetMethod is the request's method, which tells what headers a browser
+// would send with it.
+func (r *request) GetMethod() string {
+	return r.Method
+}
+
 func (r *request) GetPath() string {
 	return r.URL.Path
 }

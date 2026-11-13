@@ -785,6 +785,7 @@ func (c *chatView) click(id discord.Snowflake) *widget.Clickable {
 
 func (c *chatView) selectGuild(id discord.GuildID) {
 	c.selGuild = id
+	c.notePage()
 	c.saveLastPlace()
 	c.channelList.Position = layout.Position{}
 	if id.IsValid() && !c.demo {
@@ -835,6 +836,7 @@ func (c *chatView) closeChannel() {
 	}
 	c.friends.page = homeNone
 	c.selChannel, c.messages = nil, nil
+	c.notePage()
 	c.comp.files, c.comp.mentions, c.comp.mentionOn, c.comp.emoji = nil, nil, false, nil
 	c.act.reset()
 	c.memberRows, c.memberChunk = nil, 0
@@ -1066,6 +1068,7 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 		defer c.rebuildRows()
 	}
 	c.selChannel = &ch
+	c.notePage()
 	c.lastChannel[c.selGuild] = ch.ID
 	c.saveLastPlace()
 	c.askCall(ch)

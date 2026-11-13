@@ -345,7 +345,8 @@ func (c *chatView) joinThread(ch discord.Channel) {
 		return
 	}
 	go func() {
-		err := c.st.JoinThread(ch.ID)
+		// The web app joins with a POST, not the PUT of the documentation.
+		err := c.st.Client.FastRequest("POST", api.EndpointChannels+ch.ID.String()+"/thread-members/@me")
 		c.u.post(func() {
 			if err != nil {
 				c.showNotice("Discord did not let you join the thread")
@@ -631,15 +632,14 @@ func (c *chatView) submitCreateThread() {
 		return
 	}
 	ct.busy, ct.err = true, ""
-	data := api.StartThreadData{Name: name, AutoArchiveDuration: archive, Type: kind}
+	// As the web app sends it, with the kind of thread from a message too.
+	body := map[string]any{"name": name, "type": kind, "auto_archive_duration": archive}
+	url := api.EndpointChannels + parent.ID.String() + "/threads"
+	if from != nil {
+		url = api.EndpointChannels + parent.ID.String() + "/messages/" + from.ID.String() + "/threads"
+	}
 	go func() {
-		var th *discord.Channel
-		var err error
-		if from != nil {
-			th, err = c.st.StartThreadWithMessage(parent.ID, from.ID, data)
-		} else {
-			th, err = c.st.StartThreadWithoutMessage(parent.ID, data)
-		}
+		th, err := c.st.Client.RequestJSON[*discord.Channel]("POST", url, httputil.WithJSONBody(body))
 		c.u.post(func() {
 			ct.busy = false
 			if err != nil {

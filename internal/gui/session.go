@@ -9,7 +9,6 @@ import (
 	"github.com/ayn2op/arikawa/v3/state"
 	"github.com/ayn2op/arikawa/v3/state/store/defaultstore"
 	"github.com/ayn2op/arikawa/v3/utils/handler"
-	"github.com/ayn2op/arikawa/v3/utils/httputil"
 	"github.com/ayn2op/arikawa/v3/utils/ws"
 	"github.com/ayn2op/ningen/v3"
 	clientgateway "github.com/ezchr/linkcord/internal/gateway"
@@ -90,6 +89,6 @@ func newState(token string) *ningen.State {
 	st.StateLog = func(err error) {
 		slog.Error("state log", "err", err)
 	}
-	st.OnRequest = append(st.OnRequest, httputil.WithHeaders(http.Headers()))
+	st.OnRequest = append(st.OnRequest, http.PageHeaders(currentPage))
 	return st
 }

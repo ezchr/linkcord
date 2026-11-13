@@ -7,6 +7,8 @@ import (
 	stdHttp "net/http"
 
 	"github.com/ayn2op/arikawa/v3/api"
+	"github.com/ayn2op/arikawa/v3/utils/httputil"
+	"github.com/ayn2op/arikawa/v3/utils/httputil/httpdriver"
 )
 
 func Headers() stdHttp.Header {
@@ -38,4 +40,25 @@ func Headers() stdHttp.Header {
 	}
 
 	return headers
+}
+
+// PageHeaders are Headers as a browser tab sends them with each request:
+// Referer is the page shown (page gives it, "" for the default), and GET and
+// HEAD requests carry no Origin, which browsers send only with requests
+// that change something.
+func PageHeaders(page func() string) httputil.RequestOption {
+	base := Headers()
+	return func(r httpdriver.Request) error {
+		h := base.Clone()
+		if p := page(); p != "" {
+			h.Set("Referer", p)
+		}
+		if m, ok := r.(interface{ GetMethod() string }); ok {
+			if method := m.GetMethod(); method == stdHttp.MethodGet || method == stdHttp.MethodHead {
+				h.Del("Origin")
+			}
+		}
+		r.AddHeader(h)
+		return nil
+	}
 }

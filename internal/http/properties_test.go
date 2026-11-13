@@ -1,6 +1,11 @@
 package http
 
 import (
+	"context"
+	"io"
+	"maps"
+	nethttp "net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"uuid"
@@ -84,5 +89,37 @@ func TestOneLaunchIDPerRun(t *testing.T) {
 	}
 	if _, ok := xSuperProperties()["device_model_name"]; !ok {
 		t.Fatal("device_model_name missing")
+	}
+}
+
+// fakeRequest is a request with a method, as the TLS client's are.
+type fakeRequest struct {
+	method string
+	h      nethttp.Header
+}
+
+func (r *fakeRequest) GetMethod() string           { return r.method }
+func (r *fakeRequest) GetPath() string             { return "/api/v9/x" }
+func (r *fakeRequest) GetContext() context.Context { return context.Background() }
+func (r *fakeRequest) AddHeader(h nethttp.Header)  { maps.Copy(r.h, h) }
+func (r *fakeRequest) AddQuery(url.Values)         {}
+func (r *fakeRequest) WithBody(io.ReadCloser)      {}
+
+func TestPageHeaders(t *testing.T) {
+	opt := PageHeaders(func() string { return "https://discord.com/channels/1/2" })
+	for _, tc := range []struct {
+		method string
+		origin bool
+	}{{"GET", false}, {"HEAD", false}, {"POST", true}, {"PATCH", true}, {"DELETE", true}} {
+		r := &fakeRequest{method: tc.method, h: nethttp.Header{}}
+		if err := opt(r); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.h.Get("Referer"); got != "https://discord.com/channels/1/2" {
+			t.Errorf("%s Referer %q", tc.method, got)
+		}
+		if has := r.h.Get("Origin") != ""; has != tc.origin {
+			t.Errorf("%s Origin sent: %v", tc.method, has)
+		}
 	}
 }
