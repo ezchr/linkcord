@@ -50,6 +50,20 @@ func NewCustomWebsocket(conn Connection, addr string) *Websocket {
 	}
 }
 
+// Addr is the address the websocket dials.
+func (ws *Websocket) Addr() string {
+	ws.mutex.Lock()
+	defer ws.mutex.Unlock()
+	return ws.addr
+}
+
+// SetAddr changes the address the next dial goes to. (Added by Linkcord.)
+func (ws *Websocket) SetAddr(addr string) {
+	ws.mutex.Lock()
+	defer ws.mutex.Unlock()
+	ws.addr = addr
+}
+
 // Dial waits until the rate limiter allows then dials the websocket.
 func (ws *Websocket) Dial(ctx context.Context) (<-chan Op, error) {
 	if err := ws.dialLimiter.Wait(ctx); err != nil {

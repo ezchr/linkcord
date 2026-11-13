@@ -725,6 +725,8 @@ type ReadyEvent struct {
 
 	User      discord.User `json:"user"`
 	SessionID string       `json:"session_id"`
+	// ResumeGatewayURL is where to resume the session. (Added by Linkcord.)
+	ResumeGatewayURL string `json:"resume_gateway_url,omitempty"`
 
 	PrivateChannels []discord.Channel  `json:"private_channels"`
 	Guilds          []GuildCreateEvent `json:"guilds"`

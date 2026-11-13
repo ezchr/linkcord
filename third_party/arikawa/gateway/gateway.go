@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -90,6 +91,10 @@ type Gateway struct {
 	// acknowledged since, it is how long the connection has gone silent.
 	helloBeat time.Time
 	retryTimer lazytime.Timer
+
+	// baseAddr is the address a new session connects to, and resumeAddr
+	// where Discord said to resume the current one. (Added by Linkcord.)
+	baseAddr, resumeAddr string
 }
 
 // NewWithIntents creates a new Gateway with the given intents and the default
@@ -328,11 +333,38 @@ type gatewayImpl struct {
 	*Gateway
 	heartrate    time.Duration
 	lastSentBeat time.Time
+	// firstBeat is whether the first heartbeat of a connection, sent after
+	// a random part of the interval as Discord asks, is still to come.
+	firstBeat bool
 }
 
 func (g *gatewayImpl) invalidate() {
 	g.state.SessionID = ""
 	g.state.Sequence = 0
+	// A new session starts at the gateway's own address.
+	g.resumeAddr = ""
+	if g.baseAddr != "" {
+		g.gateway.SetAddr(g.baseAddr)
+	}
+}
+
+// ResumeAddr is where a session is resumed: the address Discord gave, with
+// the query (version, encoding) of the gateway's own. (Added by Linkcord.)
+func ResumeAddr(base, resume string) string {
+	if resume == "" {
+		return base
+	}
+	query := ""
+	if i := strings.IndexByte(base, '?'); i >= 0 {
+		query = base[i:]
+	}
+	return strings.TrimSuffix(resume, "/") + "/" + query
+}
+
+// firstBeatDelay is when the first heartbeat of a connection goes: after a
+// random part of the interval, as Discord's documentation asks.
+func firstBeatDelay(interval time.Duration) time.Duration {
+	return max(time.Duration(rand.Float64()*float64(interval)), 100*time.Millisecond)
 }
 
 // sendIdentify sends off the Identify command with the Gateway's IdentifyData
@@ -369,7 +401,8 @@ func (g *gatewayImpl) OnOp(ctx context.Context, op ws.Op) bool {
 
 	case *HelloEvent:
 		g.heartrate = data.HeartbeatInterval.Duration()
-		g.gateway.ResetHeartbeat(g.heartrate)
+		g.firstBeat = true
+		g.gateway.ResetHeartbeat(firstBeatDelay(g.heartrate))
 
 		now := time.Now()
 
@@ -437,6 +470,15 @@ func (g *gatewayImpl) OnOp(ctx context.Context, op ws.Op) bool {
 
 	case *ReadyEvent:
 		g.state.SessionID = data.SessionID
+		// The session is resumed where Discord says, a new one started
+		// where the gateway is.
+		if g.baseAddr == "" {
+			g.baseAddr = g.gateway.Addr()
+		}
+		if data.ResumeGatewayURL != "" {
+			g.resumeAddr = ResumeAddr(g.baseAddr, data.ResumeGatewayURL)
+			g.gateway.SetAddr(g.resumeAddr)
+		}
 		if data.AuthToken != "" {
 			g.state.Identifier.Token = data.AuthToken
 		}
@@ -487,6 +529,12 @@ func (g *Gateway) Reconnect() { g.gateway.RequestReconnect() }
 // SendHeartbeat sends a heartbeat with the gateway's current sequence.
 func (g *gatewayImpl) SendHeartbeat(ctx context.Context) {
 	g.lastSentBeat = time.Now()
+	if g.firstBeat {
+		// The first beat went after part of the interval; the next come at
+		// the interval.
+		g.firstBeat = false
+		g.gateway.ResetHeartbeat(g.heartrate)
+	}
 
 	// TODO: move this to ws.Gateway
 	if g.isDead() {

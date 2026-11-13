@@ -309,6 +309,13 @@ func (g *Gateway) RequestReconnect() {
 	}
 }
 
+// Addr is the address the gateway dials. (Added by Linkcord.)
+func (g *Gateway) Addr() string { return g.ws.Addr() }
+
+// SetAddr changes the address the next dial goes to, as for resuming at the
+// address Discord gave. (Added by Linkcord.)
+func (g *Gateway) SetAddr(addr string) { g.ws.SetAddr(addr) }
+
 // ResetHeartbeat resets the heartbeat to be the given duration.
 func (g *Gateway) ResetHeartbeat(d time.Duration) {
 	g.heart.Reset(d)

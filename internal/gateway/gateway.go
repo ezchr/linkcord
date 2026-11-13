@@ -7,7 +7,9 @@ import (
 	"github.com/ezchr/linkcord/internal/http"
 )
 
-const gatewayURL = "wss://gateway.discord.gg"
+// gatewayURL is the gateway as the web app dials it, with a slash before
+// its query.
+const gatewayURL = "wss://gateway.discord.gg/"
 
 func New(id discordgateway.Identifier) *discordgateway.Gateway {
 	codec := ws.NewCodec(discordgateway.NewOpUnmarshalers(id.Capabilities))
