@@ -345,6 +345,8 @@ type chatView struct {
 	// lately.
 	dmUnread cachedDMs
 	perms    map[discord.ChannelID]cachedPerm
+	// ackTimers are the channels seen waiting to be marked read.
+	ackTimers map[discord.ChannelID]*time.Timer
 	rels     []discord.Relationship
 	relsAt   time.Time
 
@@ -672,6 +674,7 @@ func (c *chatView) close() {
 	c.u.leaveVoice()
 	c.u.voice.demoChannel = 0
 	c.stopEvents()
+	c.stopAcks()
 	close(c.done)
 	stopNarrator()
 	if c.stats != nil {
@@ -1204,7 +1207,7 @@ func (c *chatView) markRead(chID discord.ChannelID) {
 // marking.
 func (c *chatView) seen(chID discord.ChannelID) {
 	if !c.u.app.GhostRead {
-		c.markRead(chID)
+		c.ackSoon(chID)
 	}
 }
 

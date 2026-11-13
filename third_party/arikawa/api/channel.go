@@ -1,6 +1,8 @@
 package api
 
 import (
+	"time"
+
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/utils/httputil"
 	"github.com/ayn2op/arikawa/v3/utils/json/option"
@@ -359,12 +361,27 @@ func (c *Client) RemoveRecipient(channelID discord.ChannelID, userID discord.Use
 // Ack is the read state of a channel. This is undocumented.
 type Ack struct {
 	Token *string `json:"token"`
+	// LastViewed is the day the channel was last seen, counted from
+	// Discord's epoch, as the web app sends it; 0 is today. (Added by
+	// Linkcord.)
+	LastViewed int `json:"last_viewed,omitempty"`
+}
+
+// ackDay is today counted in days from Discord's epoch, rounded up, as the
+// web app counts it.
+func ackDay(now time.Time) int {
+	const day = 24 * time.Hour
+	since := now.Sub(time.UnixMilli(0).Add(discord.Epoch))
+	return int((since + day - 1) / day)
 }
 
 // Ack marks the read state of a channel. This is undocumented. The method will
 // write to the ack variable passed in. If this method is called asynchronously,
 // then ack should be mutex guarded.
 func (c *Client) Ack(channelID discord.ChannelID, messageID discord.MessageID, ack *Ack) error {
+	if ack.LastViewed == 0 {
+		ack.LastViewed = ackDay(time.Now())
+	}
 	return c.RequestJSONInto(
 		ack, "POST",
 		EndpointChannels+channelID.String()+"/messages/"+messageID.String()+"/ack",

@@ -175,9 +175,11 @@ func (c *chatView) channelMenuItems() []menuItem {
 			return
 		}
 		if category {
+			var ids []discord.ChannelID
 			for _, child := range c.categoryChildren(ch) {
-				c.markRead(child.ID)
+				ids = append(ids, child.ID)
 			}
+			c.markManyRead(ids)
 			return
 		}
 		c.markRead(ch.ID)
