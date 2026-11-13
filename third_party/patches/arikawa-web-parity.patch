@@ -1,0 +1,232 @@
+diff --git a/api/channel.go b/api/channel.go
+index 29e1866..05707b1 100644
+--- a/api/channel.go
++++ b/api/channel.go
+@@ -1,6 +1,8 @@
+ package api
+ 
+ import (
++	"time"
++
+ 	"github.com/ayn2op/arikawa/v3/discord"
+ 	"github.com/ayn2op/arikawa/v3/utils/httputil"
+ 	"github.com/ayn2op/arikawa/v3/utils/json/option"
+@@ -359,12 +361,27 @@ func (c *Client) RemoveRecipient(channelID discord.ChannelID, userID discord.Use
+ // Ack is the read state of a channel. This is undocumented.
+ type Ack struct {
+ 	Token *string `json:"token"`
++	// LastViewed is the day the channel was last seen, counted from
++	// Discord's epoch, as the web app sends it; 0 is today. (Added by
++	// Linkcord.)
++	LastViewed int `json:"last_viewed,omitempty"`
++}
++
++// ackDay is today counted in days from Discord's epoch, rounded up, as the
++// web app counts it.
++func ackDay(now time.Time) int {
++	const day = 24 * time.Hour
++	since := now.Sub(time.UnixMilli(0).Add(discord.Epoch))
++	return int((since + day - 1) / day)
+ }
+ 
+ // Ack marks the read state of a channel. This is undocumented. The method will
+ // write to the ack variable passed in. If this method is called asynchronously,
+ // then ack should be mutex guarded.
+ func (c *Client) Ack(channelID discord.ChannelID, messageID discord.MessageID, ack *Ack) error {
++	if ack.LastViewed == 0 {
++		ack.LastViewed = ackDay(time.Now())
++	}
+ 	return c.RequestJSONInto(
+ 		ack, "POST",
+ 		EndpointChannels+channelID.String()+"/messages/"+messageID.String()+"/ack",
+diff --git a/api/send.go b/api/send.go
+index 133e7b2..e448802 100644
+--- a/api/send.go
++++ b/api/send.go
+@@ -122,7 +122,7 @@ type SendMessageData struct {
+ 	Nonce string `json:"nonce,omitempty"`
+ 
+ 	// TTS is true if this is a TTS message.
+-	TTS bool `json:"tts,omitempty"`
++	TTS bool `json:"tts"`
+ 	// Embed is embedded rich content.
+ 	Embeds []discord.Embed `json:"embeds,omitempty"`
+ 
+diff --git a/gateway/events.go b/gateway/events.go
+index a65fe68..4965c5d 100644
+--- a/gateway/events.go
++++ b/gateway/events.go
+@@ -725,6 +725,8 @@ type ReadyEvent struct {
+ 
+ 	User      discord.User `json:"user"`
+ 	SessionID string       `json:"session_id"`
++	// ResumeGatewayURL is where to resume the session. (Added by Linkcord.)
++	ResumeGatewayURL string `json:"resume_gateway_url,omitempty"`
+ 
+ 	PrivateChannels []discord.Channel  `json:"private_channels"`
+ 	Guilds          []GuildCreateEvent `json:"guilds"`
+diff --git a/gateway/gateway.go b/gateway/gateway.go
+index 9086394..92c933a 100644
+--- a/gateway/gateway.go
++++ b/gateway/gateway.go
+@@ -12,6 +12,7 @@ import (
+ 	"fmt"
+ 	"math/rand"
+ 	"net/url"
++	"strings"
+ 	"sync"
+ 	"time"
+ 
+@@ -90,6 +91,10 @@ type Gateway struct {
+ 	// acknowledged since, it is how long the connection has gone silent.
+ 	helloBeat time.Time
+ 	retryTimer lazytime.Timer
++
++	// baseAddr is the address a new session connects to, and resumeAddr
++	// where Discord said to resume the current one. (Added by Linkcord.)
++	baseAddr, resumeAddr string
+ }
+ 
+ // NewWithIntents creates a new Gateway with the given intents and the default
+@@ -328,11 +333,38 @@ type gatewayImpl struct {
+ 	*Gateway
+ 	heartrate    time.Duration
+ 	lastSentBeat time.Time
++	// firstBeat is whether the first heartbeat of a connection, sent after
++	// a random part of the interval as Discord asks, is still to come.
++	firstBeat bool
+ }
+ 
+ func (g *gatewayImpl) invalidate() {
+ 	g.state.SessionID = ""
+ 	g.state.Sequence = 0
++	// A new session starts at the gateway's own address.
++	g.resumeAddr = ""
++	if g.baseAddr != "" {
++		g.gateway.SetAddr(g.baseAddr)
++	}
++}
++
++// ResumeAddr is where a session is resumed: the address Discord gave, with
++// the query (version, encoding) of the gateway's own. (Added by Linkcord.)
++func ResumeAddr(base, resume string) string {
++	if resume == "" {
++		return base
++	}
++	query := ""
++	if i := strings.IndexByte(base, '?'); i >= 0 {
++		query = base[i:]
++	}
++	return strings.TrimSuffix(resume, "/") + "/" + query
++}
++
++// firstBeatDelay is when the first heartbeat of a connection goes: after a
++// random part of the interval, as Discord's documentation asks.
++func firstBeatDelay(interval time.Duration) time.Duration {
++	return max(time.Duration(rand.Float64()*float64(interval)), 100*time.Millisecond)
+ }
+ 
+ // sendIdentify sends off the Identify command with the Gateway's IdentifyData
+@@ -369,7 +401,8 @@ func (g *gatewayImpl) OnOp(ctx context.Context, op ws.Op) bool {
+ 
+ 	case *HelloEvent:
+ 		g.heartrate = data.HeartbeatInterval.Duration()
+-		g.gateway.ResetHeartbeat(g.heartrate)
++		g.firstBeat = true
++		g.gateway.ResetHeartbeat(firstBeatDelay(g.heartrate))
+ 
+ 		now := time.Now()
+ 
+@@ -437,6 +470,15 @@ func (g *gatewayImpl) OnOp(ctx context.Context, op ws.Op) bool {
+ 
+ 	case *ReadyEvent:
+ 		g.state.SessionID = data.SessionID
++		// The session is resumed where Discord says, a new one started
++		// where the gateway is.
++		if g.baseAddr == "" {
++			g.baseAddr = g.gateway.Addr()
++		}
++		if data.ResumeGatewayURL != "" {
++			g.resumeAddr = ResumeAddr(g.baseAddr, data.ResumeGatewayURL)
++			g.gateway.SetAddr(g.resumeAddr)
++		}
+ 		if data.AuthToken != "" {
+ 			g.state.Identifier.Token = data.AuthToken
+ 		}
+@@ -487,6 +529,12 @@ func (g *Gateway) Reconnect() { g.gateway.RequestReconnect() }
+ // SendHeartbeat sends a heartbeat with the gateway's current sequence.
+ func (g *gatewayImpl) SendHeartbeat(ctx context.Context) {
+ 	g.lastSentBeat = time.Now()
++	if g.firstBeat {
++		// The first beat went after part of the interval; the next come at
++		// the interval.
++		g.firstBeat = false
++		g.gateway.ResetHeartbeat(g.heartrate)
++	}
+ 
+ 	// TODO: move this to ws.Gateway
+ 	if g.isDead() {
+diff --git a/gateway/identify.go b/gateway/identify.go
+index 59dc2cf..9366085 100644
+--- a/gateway/identify.go
++++ b/gateway/identify.go
+@@ -233,11 +233,10 @@ func (s Shard) NumShards() int {
+ 
+ // ClientState describes the undocumented client_state field in the Identify
+ // command. Little is known about this type.
++//
++// It is what Discord's web app sends when it has nothing cached, as Linkcord
++// never has: {"guild_versions":{}}. (Changed by Linkcord: the fields of an
++// older version of the web app went.)
+ type ClientState struct {
+-	GuildHashes          map[discord.GuildID]any `json:"guild_hashes"`            // {}
+-	HighestLastMessageID discord.MessageID       `json:"highest_last_message_id"` // "0"
+-
+-	ReadStateVersion         int `json:"read_state_version"`          // 0
+-	UserGuildSettingsVersion int `json:"user_guild_settings_version"` // -1
+-	UserSettingsVersion      int `json:"user_settings_version"`       // -1
++	GuildVersions map[discord.GuildID]any `json:"guild_versions"`
+ }
+diff --git a/utils/ws/gateway.go b/utils/ws/gateway.go
+index e596c5b..3bef85d 100644
+--- a/utils/ws/gateway.go
++++ b/utils/ws/gateway.go
+@@ -309,6 +309,13 @@ func (g *Gateway) RequestReconnect() {
+ 	}
+ }
+ 
++// Addr is the address the gateway dials. (Added by Linkcord.)
++func (g *Gateway) Addr() string { return g.ws.Addr() }
++
++// SetAddr changes the address the next dial goes to, as for resuming at the
++// address Discord gave. (Added by Linkcord.)
++func (g *Gateway) SetAddr(addr string) { g.ws.SetAddr(addr) }
++
+ // ResetHeartbeat resets the heartbeat to be the given duration.
+ func (g *Gateway) ResetHeartbeat(d time.Duration) {
+ 	g.heart.Reset(d)
+diff --git a/utils/ws/ws.go b/utils/ws/ws.go
+index b3e0412..2ee968f 100644
+--- a/utils/ws/ws.go
++++ b/utils/ws/ws.go
+@@ -50,6 +50,20 @@ func NewCustomWebsocket(conn Connection, addr string) *Websocket {
+ 	}
+ }
+ 
++// Addr is the address the websocket dials.
++func (ws *Websocket) Addr() string {
++	ws.mutex.Lock()
++	defer ws.mutex.Unlock()
++	return ws.addr
++}
++
++// SetAddr changes the address the next dial goes to. (Added by Linkcord.)
++func (ws *Websocket) SetAddr(addr string) {
++	ws.mutex.Lock()
++	defer ws.mutex.Unlock()
++	ws.addr = addr
++}
++
+ // Dial waits until the rate limiter allows then dials the websocket.
+ func (ws *Websocket) Dial(ctx context.Context) (<-chan Op, error) {
+ 	if err := ws.dialLimiter.Wait(ctx); err != nil {
