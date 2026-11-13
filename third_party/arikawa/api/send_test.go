@@ -17,7 +17,7 @@ func TestMarshalAllowedMentions(t *testing.T) {
 			},
 		}
 
-		if j := mustMarshal(t, data); j != `{"allowed_mentions":{"parse":[]},"flags":0}` {
+		if j := mustMarshal(t, data); j != `{"tts":false,"allowed_mentions":{"parse":[]},"flags":0}` {
 			t.Fatal("Unexpected JSON:", j)
 		}
 	})
@@ -27,7 +27,7 @@ func TestMarshalAllowedMentions(t *testing.T) {
 			Content: "a",
 		}
 
-		if j := mustMarshal(t, data); j != `{"content":"a","flags":0}` {
+		if j := mustMarshal(t, data); j != `{"content":"a","tts":false,"flags":0}` {
 			t.Fatal("Unexpected JSON:", j)
 		}
 	})
@@ -39,7 +39,7 @@ func TestMarshalAllowedMentions(t *testing.T) {
 			},
 		}
 
-		if j := mustMarshal(t, data); j != `{"allowed_mentions":{"parse":null,"users":["1","2"]},"flags":0}` {
+		if j := mustMarshal(t, data); j != `{"tts":false,"allowed_mentions":{"parse":null,"users":["1","2"]},"flags":0}` {
 			t.Fatal("Unexpected JSON:", j)
 		}
 	})
