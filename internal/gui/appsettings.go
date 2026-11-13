@@ -94,8 +94,8 @@ type appSettings struct {
 	// ShowHiddenChannels lists the channels the user may not see too,
 	// dimmed, with what is known of them.
 	ShowHiddenChannels bool `json:"show_hidden_channels,omitempty"`
-	// Platform is what the others see the user connected from, see
-	// platformChoices; empty is the web, as Linkcord is.
+	// Platform was the platform the others saw; it is ignored now, as
+	// Linkcord always connects as the web.
 	Platform string `json:"platform,omitempty"`
 	// NoGameDetection stops showing the games of Discord's list that run
 	// as being played.

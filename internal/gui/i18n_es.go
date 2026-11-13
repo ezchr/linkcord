@@ -1359,4 +1359,5 @@ var spanish = map[string]string{
 	" Messages": " mensajes",
 	" Messages ›": " mensajes ›",
 	"in #": "en #",
+	"Others see you connected from the web, as Linkcord talks to Discord as its web app does. Showing a phone, console or the desktop app is no longer offered: only part of the connection could say so, which Discord can tell apart.": "Los demás te ven conectado desde la web, porque Linkcord habla con Discord como su aplicación web. Ya no se ofrece mostrar un teléfono, una consola o la aplicación de escritorio: solo una parte de la conexión podía decirlo, y Discord puede notarlo.",
 }
