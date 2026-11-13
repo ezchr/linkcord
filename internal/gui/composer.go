@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -868,7 +867,7 @@ func (c *chatView) send() {
 		for i, part := range parts {
 			data := api.SendMessageData{
 				Content: part,
-				Nonce:   strconv.FormatInt(time.Now().UnixNano(), 10),
+				Nonce:   newNonce(),
 			}
 			if silent {
 				data.Flags = discord.SuppressNotifications

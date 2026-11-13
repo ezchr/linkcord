@@ -122,7 +122,7 @@ type SendMessageData struct {
 	Nonce string `json:"nonce,omitempty"`
 
 	// TTS is true if this is a TTS message.
-	TTS bool `json:"tts,omitempty"`
+	TTS bool `json:"tts"`
 	// Embed is embedded rich content.
 	Embeds []discord.Embed `json:"embeds,omitempty"`
 

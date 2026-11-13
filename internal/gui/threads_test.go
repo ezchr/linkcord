@@ -3,6 +3,7 @@ package gui
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/gateway"
@@ -165,5 +166,20 @@ func TestMessageUpdateKeepsThread(t *testing.T) {
 	defaultstore.DiffMessage(&discord.Message{ID: 1, Thread: &th}, &old)
 	if old.Thread == nil || old.Thread.Name != "talk" || old.Flags&discord.MessageHasThread == 0 || old.Content != "hi" {
 		t.Errorf("updated message %+v", old)
+	}
+}
+
+func TestNonceIsSnowflakeOfNow(t *testing.T) {
+	before := time.Now().Add(-time.Second)
+	a, b := newNonce(), newNonce()
+	if a == b {
+		t.Fatal("two nonces in a row are the same")
+	}
+	n, err := discord.ParseSnowflake(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if at := n.Time(); at.Before(before) || at.After(time.Now().Add(time.Second)) {
+		t.Errorf("nonce is a snowflake of %v, not now", at)
 	}
 }

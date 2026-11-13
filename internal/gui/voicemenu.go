@@ -677,7 +677,7 @@ func (c *chatView) sendInvite(chID discord.ChannelID, user discord.User) {
 		if err == nil {
 			var dm *discord.Channel
 			if dm, err = c.st.CreatePrivateChannel(user.ID); err == nil {
-				_, err = c.st.SendMessage(dm.ID, "https://discord.gg/"+inv.Code)
+				_, err = c.st.SendMessageComplex(dm.ID, api.SendMessageData{Content: "https://discord.gg/" + inv.Code, Nonce: newNonce()})
 			}
 		}
 		c.u.post(func() {

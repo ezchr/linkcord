@@ -344,7 +344,7 @@ func (c *chatView) gifBody(gtx layout.Context, p *emojiPicker) (layout.Widget, b
 		if g.clicks[i].Clicked(gtx) && i < len(g.results) && c.selChannel != nil {
 			id, link := c.selChannel.ID, g.results[i].URL
 			go func() {
-				if _, err := c.st.SendMessage(id, link); err != nil {
+				if _, err := c.st.SendMessageComplex(id, api.SendMessageData{Content: link, Nonce: newNonce()}); err != nil {
 					c.u.post(func() { c.sendErr = "Could not send the GIF: " + err.Error() })
 				}
 			}()

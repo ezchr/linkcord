@@ -132,7 +132,7 @@ func (c *chatView) sendDue() {
 		}
 		go func() {
 			_, err := c.st.SendMessageComplex(m.ChannelID, api.SendMessageData{
-				Content: m.Content, Nonce: strconv.FormatInt(time.Now().UnixNano(), 10),
+				Content: m.Content, Nonce: newNonce(),
 			})
 			if err != nil {
 				slog.Warn("could not send a scheduled message", "channel", m.ChannelID, "err", err)

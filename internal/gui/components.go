@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"sync/atomic"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -78,9 +79,16 @@ func (ip *interactions) busy(key string) bool {
 	return false
 }
 
+//
+// It is a snowflake of now, as Discord's web app makes them, with a count in
+// its lowest bits so that messages sent in the same millisecond differ.
 func newNonce() string {
-	return strconv.FormatUint(uint64(discord.NewSnowflake(time.Now())), 10)
+	n := uint64(discord.NewSnowflake(time.Now())) | nonceCount.Add(1)&0xfff
+	return strconv.FormatUint(n, 10)
 }
+
+// nonceCount tells apart the nonces made in one millisecond.
+var nonceCount atomic.Uint64
 
 // appOf returns the application a bot message comes from, which interactions
 // go to. Most bots are their own application.
