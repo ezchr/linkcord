@@ -76,3 +76,13 @@ func TestXSuperProperties(t *testing.T) {
 		})
 	}
 }
+
+func TestOneLaunchIDPerRun(t *testing.T) {
+	a, b := IdentifyProperties()["client_launch_id"], xSuperProperties()["client_launch_id"]
+	if a != b || a == "" {
+		t.Fatalf("identify %v and super properties %v launch ids differ", a, b)
+	}
+	if _, ok := xSuperProperties()["device_model_name"]; !ok {
+		t.Fatal("device_model_name missing")
+	}
+}

@@ -25,9 +25,13 @@ func browserBrands() string {
 	return `"Chromium";v="` + version + `", "Not-A.Brand";v="24", "Google ` + tls.BrowserName() + `";v="` + version + `"`
 }
 
+// launchID is this run's client_launch_id.
+var launchID = uuid.NewV4().String()
+
 func commonProperties() gateway.IdentifyProperties {
 	return gateway.IdentifyProperties{
 		gateway.IdentifyDevice: "",
+		"device_model_name":    "",
 
 		gateway.IdentifyOS: osName,
 		"os_version":       osVersion,
@@ -38,7 +42,9 @@ func commonProperties() gateway.IdentifyProperties {
 
 		"client_build_number": CurrentClientBuildNumber(),
 		"client_event_source": nil,
-		"client_launch_id":    uuid.NewV4().String(),
+		// One per run, in the gateway and every request alike, as the web
+		// app has one per page load.
+		"client_launch_id": launchID,
 
 		"system_locale":   locale,
 		"release_channel": "stable",

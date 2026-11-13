@@ -3,6 +3,7 @@ package gui
 import (
 	"log/slog"
 
+	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/gateway"
 	"github.com/ayn2op/arikawa/v3/session"
 	"github.com/ayn2op/arikawa/v3/state"
@@ -66,6 +67,10 @@ func newState(token string) *ningen.State {
 	id := gateway.NewIdentifier(gateway.IdentifyCommand{
 		Token:      token,
 		Properties: withPlatform(http.IdentifyProperties()),
+		// As the web app's first identify of a page (its fast connect,
+		// which is_fast_connect says this is): no presence, no compress,
+		// and the client state of a client with nothing cached.
+		ClientState: &gateway.ClientState{GuildVersions: map[discord.GuildID]any{}},
 		Capabilities: gateway.LazyUserNotes |
 			gateway.VersionedReadStates |
 			gateway.VersionedUserGuildSetttings |

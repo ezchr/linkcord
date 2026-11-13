@@ -233,11 +233,10 @@ func (s Shard) NumShards() int {
 
 // ClientState describes the undocumented client_state field in the Identify
 // command. Little is known about this type.
+//
+// It is what Discord's web app sends when it has nothing cached, as Linkcord
+// never has: {"guild_versions":{}}. (Changed by Linkcord: the fields of an
+// older version of the web app went.)
 type ClientState struct {
-	GuildHashes          map[discord.GuildID]any `json:"guild_hashes"`            // {}
-	HighestLastMessageID discord.MessageID       `json:"highest_last_message_id"` // "0"
-
-	ReadStateVersion         int `json:"read_state_version"`          // 0
-	UserGuildSettingsVersion int `json:"user_guild_settings_version"` // -1
-	UserSettingsVersion      int `json:"user_settings_version"`       // -1
+	GuildVersions map[discord.GuildID]any `json:"guild_versions"`
 }
