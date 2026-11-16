@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	procSendMessageW     = user32.NewProc("SendMessageW")
+	procPostMessageW     = user32.NewProc("PostMessageW")
 	procLoadImageW       = user32.NewProc("LoadImageW")
 	procGetSystemMetrics = user32.NewProc("GetSystemMetrics")
 	procGetModuleHandleW = syscall.NewLazyDLL("kernel32.dll").NewProc("GetModuleHandleW")
@@ -41,7 +41,10 @@ func setWindowIcon(hwnd uintptr, path string) {
 			h, _, _ = procLoadImageW.Call(instance, 1, imageIcon, size, size, 0)
 		}
 		if h != 0 {
-			procSendMessageW.Call(hwnd, wmSetIcon, k.which, h)
+			// Posted, not sent: the window's thread waits for the frame
+			// being drawn, and sending from it would wait for that thread
+			// in turn, which froze the window.
+			procPostMessageW.Call(hwnd, wmSetIcon, k.which, h)
 		}
 	}
 }

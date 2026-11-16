@@ -177,6 +177,10 @@ func (u *ui) applyIcon() {
 			path = ""
 		}
 	}
-	tray.SetIconFile(path)
-	setWindowIcon(u.hwnd, path)
+	hwnd := u.hwnd
+	// Off the window's thread, which neither call may hold up.
+	go func() {
+		tray.SetIconFile(path)
+		setWindowIcon(hwnd, path)
+	}()
 }
