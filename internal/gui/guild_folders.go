@@ -392,6 +392,22 @@ func (c *chatView) dropGuild(entries []guildEntry, from, to, where int) {
 		}
 		return slices.Contains(f.Guilds, dst.guild)
 	})
+	if idx < 0 && dst.guild == 0 && len(dst.folder.Guilds) > 0 {
+		// The folder dropped on is gone: the server moved was one of its
+		// two. It lands beside the one that stays, not out of sight at the
+		// end of the list.
+		stays := dst.folder.Guilds[0]
+		idx = slices.IndexFunc(c.folders, func(f serverFolder) bool { return slices.Contains(f.Guilds, stays) })
+		if idx >= 0 {
+			at := idx
+			if where >= 0 {
+				at++
+			}
+			c.folders = slices.Insert(c.folders, at, moving)
+			c.saveFolders()
+			return
+		}
+	}
 	if idx < 0 {
 		c.folders = append(c.folders, moving)
 		c.saveFolders()
