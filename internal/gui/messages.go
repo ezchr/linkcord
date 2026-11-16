@@ -281,8 +281,12 @@ func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
 		return c.layoutThreadStarter(gtx, m)
 	}
 	if !isRegular(m) {
+		col := colorMuted
+		if isBoost(m) {
+			col = colorBoost
+		}
 		return layout.Inset{Left: unit.Dp(72), Right: unit.Dp(16), Top: unit.Dp(8), Bottom: unit.Dp(4)}.Layout(gtx,
-			label(th, 14, colorMuted, c.systemText(m)).Layout)
+			label(th, 14, col, c.systemText(m)).Layout)
 	}
 	grouped := c.grouped(i)
 	top := c.u.app.groupGap()
@@ -1068,11 +1072,52 @@ func (c *chatView) systemText(m discord.Message) string {
 		return "← " + name + " left the group."
 	case discord.ChannelNameChangeMessage:
 		return name + " changed the channel name: " + m.Content
+	case discord.NitroBoostMessage, discord.NitroTier1Message, discord.NitroTier2Message, discord.NitroTier3Message:
+		return c.boostText(name, m)
+	case discord.ChannelFollowAddMessage:
+		return "→ " + name + " added " + m.Content + " to this channel. Its most important updates will show up here."
 	}
 	if m.Content != "" {
 		return name + ": " + c.renderContent(m)
 	}
 	return name + " performed an action Linkcord cannot display yet."
+}
+
+// isBoost reports whether m is Discord's message of a member boosting the
+// server.
+func isBoost(m discord.Message) bool {
+	switch m.Type {
+	case discord.NitroBoostMessage, discord.NitroTier1Message, discord.NitroTier2Message, discord.NitroTier3Message:
+		return true
+	}
+	return false
+}
+
+// boostText is Discord's line for a boost: who boosted, how many times (the
+// content holds the count when more than one), and the level reached.
+func (c *chatView) boostText(name string, m discord.Message) string {
+	s := "◆ " + name + " just boosted the server"
+	if n, err := strconv.Atoi(strings.TrimSpace(m.Content)); err == nil && n > 1 {
+		s += fmt.Sprintf(" %d times", n)
+	}
+	s += "!"
+	level := 0
+	switch m.Type {
+	case discord.NitroTier1Message:
+		level = 1
+	case discord.NitroTier2Message:
+		level = 2
+	case discord.NitroTier3Message:
+		level = 3
+	}
+	if level > 0 {
+		server := "The server"
+		if g, err := c.st.Cabinet.Guild(c.selChannel.GuildID); err == nil && g.Name != "" {
+			server = g.Name
+		}
+		s += fmt.Sprintf(" %s has achieved Level %d!", server, level)
+	}
+	return s
 }
 
 // formatTime shows when a message was sent, as Discord does in Spanish.
