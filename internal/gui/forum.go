@@ -1,8 +1,10 @@
 package gui
 
 import (
+	"cmp"
 	"fmt"
 	"image"
+	"slices"
 	"strings"
 
 	"gioui.org/io/pointer"
@@ -56,10 +58,25 @@ const (
 	defaultForumColumns = 3
 )
 
+// forumColumns is how many squares across the forums' posts show in, or 0
+// if they are listed.
+func (c *chatView) forumColumns() int {
+	switch n := c.u.appearance.ForumColumns; {
+	case n < 0:
+		return 0
+	case n == 0:
+		return defaultForumColumns
+	default:
+		return min(max(n, minForumColumns), maxForumColumns)
+	}
+}
+
 // setForumColumns shows the forums' posts in n squares across, or lists
 // them if n is 0, and keeps the choice.
 func (c *chatView) setForumColumns(n int) {
-	if n != 0 {
+	if n == 0 {
+		n = -1
+	} else {
 		n = min(max(n, minForumColumns), maxForumColumns)
 	}
 	c.u.appearance.ForumColumns = n
@@ -224,7 +241,7 @@ func (c *chatView) updateForum(gtx layout.Context, forum discord.Channel) {
 	if c.forum.newPost.Clicked(gtx) && c.canPost(forum) {
 		c.openCreateThread(forum, nil)
 	}
-	cols := c.u.appearance.ForumColumns
+	cols := c.forumColumns()
 	if c.forum.asList.Clicked(gtx) {
 		c.setForumColumns(0)
 	}
@@ -290,7 +307,7 @@ func (c *chatView) layoutForum(gtx layout.Context) layout.Dimensions {
 	for i := range older {
 		lines = append(lines, forumLine{post: &older[i]})
 	}
-	cols := c.u.appearance.ForumColumns
+	cols := c.forumColumns()
 	if cols > 0 {
 		lines = gridLines(lines, cols)
 	}
@@ -388,7 +405,7 @@ func (c *chatView) layoutForumView(gtx layout.Context, cols int) layout.Dimensio
 	}
 	children := []layout.FlexChild{
 		layout.Rigid(chip(&f.asList, "List", cols == 0)),
-		layout.Rigid(chip(&f.asGrid, "Squares", cols > 0)),
+		layout.Rigid(chip(&f.asGrid, "Grid", cols > 0)),
 	}
 	if cols > 0 {
 		children = append(children,
@@ -435,7 +452,11 @@ func (c *chatView) layoutForumSquare(gtx layout.Context, post discord.Channel) l
 		defer clip.UniformRRect(r, gtx.Dp(8)).Push(gtx.Ops).Pop()
 		paint.FillShape(gtx.Ops, bg, clip.Rect(r).Op())
 		// The text takes what it needs at the bottom, the picture the rest.
-		textH := min(gtx.Dp(64), size.Y/2)
+		textH := gtx.Dp(64)
+		if hasFirst && len(first.Reactions) > 0 {
+			textH = gtx.Dp(86)
+		}
+		textH = min(textH, size.Y*2/3)
 		picH := size.Y - textH
 		pic := image.Rectangle{Max: image.Pt(size.X, picH)}
 		proxy, url, ok := postPicture(first)
@@ -472,11 +493,36 @@ func (c *chatView) layoutForumSquare(gtx layout.Context, post discord.Channel) l
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(name.Layout),
 				layout.Rigid(oneLine(label(th, 11, colorMuted, postSummary(post))).Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutPostReactions(gtx, first, 4) }),
 			)
 		})
 		t.Pop()
 		return layout.Dimensions{Size: size}
 	})
+}
+
+// layoutPostReactions are the reactions to a post's first message, the most
+// given first, at most n of them: each its emoji and how many.
+func (c *chatView) layoutPostReactions(gtx layout.Context, first discord.Message, n int) layout.Dimensions {
+	if len(first.Reactions) == 0 {
+		return layout.Dimensions{}
+	}
+	th := c.u.th
+	rs := slices.Clone(first.Reactions)
+	slices.SortStableFunc(rs, func(a, b discord.Reaction) int { return cmp.Compare(b.Count, a.Count) })
+	var children []layout.FlexChild
+	for _, r := range rs[:min(len(rs), n)] {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Right: unit.Dp(8), Top: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutEmoji(gtx, r.Emoji, 15) }),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(3)}.Layout),
+					layout.Rigid(label(th, 12, colorMuted, fmt.Sprint(r.Count)).Layout),
+				)
+			})
+		}))
+	}
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
 }
 
 // layoutForumPost is one post of the forum's list: its name, and under it
@@ -528,7 +574,13 @@ func (c *chatView) layoutForumPost(gtx layout.Context, post discord.Channel) lay
 							}
 							rows = append(rows,
 								layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-								layout.Rigid(oneLine(label(th, 12, colorMuted, postSummary(post))).Layout),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+										layout.Rigid(oneLine(label(th, 12, colorMuted, postSummary(post))).Layout),
+										layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutPostReactions(gtx, first, 6) }),
+									)
+								}),
 							)
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
 						}),

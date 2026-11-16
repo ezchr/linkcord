@@ -63,7 +63,7 @@ func (c *chatView) presetList() []themePreset {
 func (c *chatView) pickPicture() {
 	owner := zenity.Attach(c.u.hwnd)
 	go func() {
-		path, err := zenity.SelectFile(zenity.Title("Background picture"), owner, zenity.FileFilter{Name: "Images", Patterns: []string{"*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"}})
+		path, err := zenity.SelectFile(zenity.Title(tr("Background picture")), owner, zenity.FileFilter{Name: "Images", Patterns: []string{"*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"}})
 		if err != nil {
 			return
 		}

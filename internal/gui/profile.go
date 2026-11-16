@@ -2,6 +2,7 @@ package gui
 
 import (
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"image"
 	"io"
@@ -60,13 +61,13 @@ type profileData struct {
 			ID string `json:"id"`
 		} `json:"profile_effect"`
 	} `json:"user_profile"`
-	Badges []profileBadge `json:"badges"`
+	Badges      []profileBadge `json:"badges"`
 	GuildMember *struct {
 		JoinedAt discord.Timestamp `json:"joined_at"`
 	} `json:"guild_member"`
 	GuildMemberProfile *struct {
-		Bio         string `json:"bio"`
-		Pronouns    string `json:"pronouns"`
+		Bio           string `json:"bio"`
+		Pronouns      string `json:"pronouns"`
 		Banner        string `json:"banner"`
 		ThemeColors   []int  `json:"theme_colors"`
 		ProfileEffect *struct {
@@ -79,6 +80,10 @@ type profileData struct {
 	} `json:"mutual_guilds"`
 	MutualFriends      []discord.User `json:"mutual_friends"`
 	MutualFriendsCount int            `json:"mutual_friends_count"`
+	// The accounts of other services linked to the profile, and its
+	// widgets, of which those of games are shown.
+	ConnectedAccounts []connectedAccount `json:"connected_accounts"`
+	Widgets           []json.RawMessage  `json:"widgets"`
 }
 
 // themeColors are the two colors of the profile, top and bottom, darkened as
@@ -131,6 +136,8 @@ type profileView struct {
 	badgeLink   widget.Clickable
 	// opened is when the card opened.
 	opened time.Time
+	// linkClicks are the accounts linked, which open their pages.
+	linkClicks map[string]*widget.Clickable
 	// bannerBtn shows the banner, bannerURL, big, as the avatar.
 	bannerBtn        widget.Clickable
 	bannerURL        string
@@ -199,6 +206,7 @@ func (c *chatView) openProfile(user discord.User, guildID discord.GuildID) {
 			}
 			c.profiles[key] = data
 			p.data = data
+			noteProfileExtras(data)
 		})
 	}()
 }
@@ -723,6 +731,22 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 		)
 	}
 
+	// The accounts linked, and the games of the profile's widgets.
+	if d := p.data; d != nil {
+		if len(d.ConnectedAccounts) > 0 {
+			children = append(children,
+				layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+				section(func(gtx layout.Context) layout.Dimensions { return c.layoutConnections(gtx, p, d.ConnectedAccounts) }),
+			)
+		}
+		for _, w := range gameWidgets(d.Widgets) {
+			children = append(children,
+				layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+				section(func(gtx layout.Context) layout.Dimensions { return c.layoutProfileGames(gtx, w) }),
+			)
+		}
+	}
+
 	// Activities other than the custom status.
 	if presence != nil {
 		for _, a := range latestActivities(presence.Activities) {
@@ -796,9 +820,7 @@ func (c *chatView) layoutCardContent(gtx layout.Context, p *profileView) layout.
 
 	// Actions.
 	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout))
-	if p.self {
-		children = append(children, section(func(gtx layout.Context) layout.Dimensions { return c.layoutSelfMenu(gtx, p) }))
-	} else {
+	if !p.self {
 		rel := c.relationship(user.ID)
 		children = append(children, section(func(gtx layout.Context) layout.Dimensions {
 			main := func(gtx layout.Context) layout.Dimensions {

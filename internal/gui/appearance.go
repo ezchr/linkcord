@@ -144,7 +144,7 @@ type appearanceSettings struct {
 	Picture *pictureSettings  `json:"picture,omitempty"`
 	Layout  paneLayout        `json:"layout,omitzero"`
 	// ForumColumns is how many squares across a forum's posts are shown
-	// in; 0 lists them.
+	// in: 0 is the grid of defaultForumColumns, and -1 lists them.
 	ForumColumns int `json:"forum_columns,omitempty"`
 	// Icon is the .ico made of the picture chosen as the app's icon.
 	Icon string `json:"icon,omitempty"`

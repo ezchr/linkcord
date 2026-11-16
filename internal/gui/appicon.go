@@ -124,7 +124,7 @@ func readIcon(path string) ([]byte, error) {
 func (c *chatView) pickIcon() {
 	owner := zenity.Attach(c.u.hwnd)
 	go func() {
-		path, err := zenity.SelectFile(zenity.Title("App icon"), owner, zenity.FileFilter{Name: "Images", Patterns: []string{"*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.ico"}})
+		path, err := zenity.SelectFile(zenity.Title(tr("App icon")), owner, zenity.FileFilter{Name: "Images", Patterns: []string{"*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.ico"}})
 		if err != nil {
 			return
 		}

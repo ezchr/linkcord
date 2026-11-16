@@ -2086,6 +2086,12 @@ func (c *chatView) layoutUserPanel(gtx layout.Context) layout.Dimensions {
 					// The avatar and name open the user's own profile.
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 						gtx.Constraints.Min.X = gtx.Constraints.Max.X
+						// A right click opens the user's menu: status, quitting,
+						// logging out.
+						if rightClicked(gtx, c.rightTag("self"), image.Pt(gtx.Constraints.Max.X, gtx.Dp(48))) {
+							c.profile = nil
+							c.openMenu(c.pointerAt, 240, c.selfMenuItems)
+						}
 						return c.selfClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 							pointer.CursorPointer.Add(gtx.Ops)
 							hovered := c.selfClick.Hovered()

@@ -1085,7 +1085,7 @@ func (c *chatView) systemText(m discord.Message) string {
 	case discord.NitroBoostMessage, discord.NitroTier1Message, discord.NitroTier2Message, discord.NitroTier3Message:
 		return c.boostText(name, m)
 	case discord.ChannelFollowAddMessage:
-		return "→ " + name + " added " + m.Content + " to this channel. Its most important updates will show up here."
+		return "→ " + name + tr(" added ") + m.Content + tr(" to this channel. Its most important updates will show up here.")
 	}
 	if m.Content != "" {
 		return name + ": " + c.renderContent(m)
@@ -1106,9 +1106,10 @@ func isBoost(m discord.Message) bool {
 // boostText is Discord's line for a boost: who boosted, how many times (the
 // content holds the count when more than one), and the level reached.
 func (c *chatView) boostText(name string, m discord.Message) string {
-	s := "◆ " + name + " just boosted the server"
+	// Put together of translated parts: the whole is no text known.
+	s := "◆ " + name + tr(" just boosted the server")
 	if n, err := strconv.Atoi(strings.TrimSpace(m.Content)); err == nil && n > 1 {
-		s += fmt.Sprintf(" %d times", n)
+		s += fmt.Sprintf(tr(" %d times"), n)
 	}
 	s += "!"
 	level := 0
@@ -1121,11 +1122,11 @@ func (c *chatView) boostText(name string, m discord.Message) string {
 		level = 3
 	}
 	if level > 0 {
-		server := "The server"
+		server := tr("The server")
 		if g, err := c.st.Cabinet.Guild(c.selChannel.GuildID); err == nil && g.Name != "" {
 			server = g.Name
 		}
-		s += fmt.Sprintf(" %s has achieved Level %d!", server, level)
+		s += fmt.Sprintf(tr(" %s has achieved Level %d!"), server, level)
 	}
 	return s
 }
