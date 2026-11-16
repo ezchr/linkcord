@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"image"
+	"maps"
 	"slices"
 	"strings"
 
@@ -49,6 +50,8 @@ type forumState struct {
 	// The buttons that show the posts as a list or as squares, and that
 	// take or add a column of them.
 	asList, asGrid, fewer, more widget.Clickable
+	// demoFirst are the first messages of the demo's posts.
+	demoFirst map[discord.ChannelID]discord.Message
 }
 
 // The fewest and most columns of squares, and those first chosen.
@@ -169,6 +172,7 @@ func (c *chatView) noteFirstMessages(forum discord.ChannelID, msgs []discord.Mes
 func (c *chatView) loadFirstMessages(forum discord.Channel) {
 	c.forum.first, c.forum.firstOf = nil, forum.ID
 	if c.demo {
+		c.forum.first = maps.Clone(c.forum.demoFirst)
 		return
 	}
 	for _, archived := range []bool{false, true} {
@@ -452,9 +456,10 @@ func (c *chatView) layoutForumSquare(gtx layout.Context, post discord.Channel) l
 		defer clip.UniformRRect(r, gtx.Dp(8)).Push(gtx.Ops).Pop()
 		paint.FillShape(gtx.Ops, bg, clip.Rect(r).Op())
 		// The text takes what it needs at the bottom, the picture the rest.
-		// The same in every square, with room for the reactions, so that the
-		// names line up across a row whether a post has any or not.
-		textH := min(gtx.Dp(104), size.Y*2/3)
+		// The same in every square, with room for two lines of the name, the
+		// summary and the reactions, so that the names line up across a row
+		// whether a post has any or not.
+		textH := min(gtx.Dp(88), size.Y*2/3)
 		picH := size.Y - textH
 		pic := image.Rectangle{Max: image.Pt(size.X, picH)}
 		proxy, url, ok := postPicture(first)
@@ -491,7 +496,7 @@ func (c *chatView) layoutForumSquare(gtx layout.Context, post discord.Channel) l
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(name.Layout),
 				layout.Rigid(oneLine(label(th, 11, colorMuted, postSummary(post))).Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutPostReactions(gtx, first, 4) }),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutPostReactions(gtx, first, 4, true) }),
 			)
 		})
 		t.Pop()
@@ -501,12 +506,17 @@ func (c *chatView) layoutForumSquare(gtx layout.Context, post discord.Channel) l
 
 // layoutPostReactions are the reactions to a post's first message, the most
 // given first, at most n of them, as the buttons a message has: each adds
-// or takes back the user's own.
-func (c *chatView) layoutPostReactions(gtx layout.Context, first discord.Message, n int) layout.Dimensions {
+// or takes back the user's own. They are as big as the text beside them:
+// small in a square, a little bigger in a row of the list.
+func (c *chatView) layoutPostReactions(gtx layout.Context, first discord.Message, n int, small bool) layout.Dimensions {
 	if len(first.Reactions) == 0 {
 		return layout.Dimensions{}
 	}
 	th := c.u.th
+	emoji, text, padX, padY, corner, gap := unit.Dp(16), unit.Sp(13), unit.Dp(8), unit.Dp(4), unit.Dp(8), unit.Dp(5)
+	if small {
+		emoji, text, padX, padY, corner, gap = 14, 12, 6, 3, 6, 4
+	}
 	rs := slices.Clone(first.Reactions)
 	slices.SortStableFunc(rs, func(a, b discord.Reaction) int { return cmp.Compare(b.Count, a.Count) })
 	var children []layout.FlexChild
@@ -517,7 +527,7 @@ func (c *chatView) layoutPostReactions(gtx layout.Context, first discord.Message
 			c.u.post(func() { c.togglePostReaction(post, e) })
 		}
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Right: unit.Dp(6), Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Right: gap, Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return btn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					pointer.CursorPointer.Add(gtx.Ops)
 					bg, border, count := colorChat, colorSelected, colorText
@@ -528,15 +538,15 @@ func (c *chatView) layoutPostReactions(gtx layout.Context, first discord.Message
 						bg, border, count = colorMentionB, colorAccent, colorMention
 					}
 					macro := op.Record(gtx.Ops)
-					dims := layout.Inset{Left: unit.Dp(10), Right: unit.Dp(10), Top: unit.Dp(5), Bottom: unit.Dp(5)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					dims := layout.Inset{Left: padX, Right: padX, Top: padY, Bottom: padY}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutEmoji(gtx, r.Emoji, 22) }),
-							layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
-							layout.Rigid(bold(label(th, 15, count, fmt.Sprint(r.Count))).Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutEmoji(gtx, r.Emoji, emoji) }),
+							layout.Rigid(layout.Spacer{Width: gap}.Layout),
+							layout.Rigid(bold(label(th, text, count, fmt.Sprint(r.Count))).Layout),
 						)
 					})
 					call := macro.Stop()
-					radius := gtx.Dp(8)
+					radius := gtx.Dp(corner)
 					rect := image.Rectangle{Max: dims.Size}
 					paint.FillShape(gtx.Ops, border, clip.UniformRRect(rect, radius).Op(gtx.Ops))
 					inner := image.Rectangle{Min: image.Pt(1, 1), Max: dims.Size.Sub(image.Pt(1, 1))}
@@ -633,7 +643,7 @@ func (c *chatView) layoutForumPost(gtx layout.Context, post discord.Channel) lay
 									)
 								}),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return c.layoutPostReactions(gtx, first, 6)
+									return c.layoutPostReactions(gtx, first, 6, false)
 								}),
 							)
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)

@@ -111,6 +111,10 @@ func (u *ui) startDemo() {
 	for i := range channels {
 		cab.ChannelSet(&channels[i], false)
 	}
+	// A forum, with posts that have pictures and reactions and some that do
+	// not, to see its list and its squares.
+	forum := discord.Channel{ID: discord.ChannelID(id(127)), GuildID: guild.ID, Type: discord.GuildForum, Name: "ideas", Position: 5, ParentID: cat.ID}
+	cab.ChannelSet(&forum, false)
 	for _, i := range []int{3, 0, 6, 1} {
 		cab.VoiceStateSet(guild.ID, &discord.VoiceState{GuildID: guild.ID, ChannelID: channels[5].ID, UserID: users[i].ID, SelfMute: i == 6, SelfStream: i == 0}, false)
 	}
@@ -331,6 +335,33 @@ func (u *ui) startDemo() {
 	add(bugs.ID, guild.ID, users[5], 75*time.Minute, "the lobby froze once when I joined", nil)
 	add(old.ID, guild.ID, users[3], 80*time.Hour, "patch 1.2 is out", nil)
 
+	// The forum's posts and their first messages.
+	posts := make(map[discord.ChannelID]discord.Message)
+	for i, p := range []struct {
+		name, text string
+		picture    bool
+		reactions  []discord.Reaction
+	}{
+		{"A map made by the community", "what if we all build one together?", true, []discord.Reaction{{Count: 12, Me: true, Emoji: discord.Emoji{Name: "🔥"}}, {Count: 4, Emoji: discord.Emoji{Name: "👍"}}, {Count: 1, Emoji: discord.Emoji{Name: "😂"}}}},
+		{"Music bot requests", "songs the bot should know", false, []discord.Reaction{{Count: 3, Emoji: discord.Emoji{Name: "🎵"}}}},
+		{"Screenshots of the week", "post your best ones", true, nil},
+		{"New emoji", "", false, nil},
+		{"A longer name for a post, to see how two lines of it look in a square", "with a picture", true, []discord.Reaction{{Count: 128, Emoji: discord.Emoji{Name: "❤️"}}, {Count: 27, Me: true, Emoji: discord.Emoji{Name: "👀"}}}},
+	} {
+		post := discord.Channel{ID: discord.ChannelID(id(140 + i)), GuildID: guild.ID, ParentID: forum.ID, Type: discord.GuildPublicThread, Name: p.name,
+			OwnerID: users[i%len(users)].ID, MessageCount: 3 + 7*i, MemberCount: 2 + i, ThreadMetadata: &discord.ThreadMetadata{AutoArchiveDuration: discord.ThreeDaysArchive}}
+		cab.ChannelSet(&post, false)
+		add(post.ID, guild.ID, users[i%len(users)], time.Duration(i+1)*time.Hour, p.text, func(m *discord.Message) {
+			// A post's first message has the post's ID.
+			m.ID = discord.MessageID(post.ID)
+			if p.picture {
+				m.Attachments = []discord.Attachment{{Filename: "picture.png", URL: discord.URL(avatar), ContentType: "image/png", Width: 128, Height: 128}}
+			}
+			m.Reactions = p.reactions
+			posts[post.ID] = *m
+		})
+	}
+
 	for i := 60; i > 0; i-- {
 		author := users[0]
 		if i%3 == 0 {
@@ -357,6 +388,7 @@ func (u *ui) startDemo() {
 	u.chat.deleted = newDeletedLog("")
 	u.chat.deleted.record(deleted)
 	u.chat.threads.demoArchived = []discord.Channel{old}
+	u.chat.forum.demoFirst = posts
 
 	// Friends in each state, and a message request from a stranger.
 	rel := func(user discord.User, t discord.RelationshipType) discord.Relationship {
