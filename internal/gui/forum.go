@@ -454,7 +454,7 @@ func (c *chatView) layoutForumSquare(gtx layout.Context, post discord.Channel) l
 		// The text takes what it needs at the bottom, the picture the rest.
 		textH := gtx.Dp(64)
 		if hasFirst && len(first.Reactions) > 0 {
-			textH = gtx.Dp(86)
+			textH = gtx.Dp(104)
 		}
 		textH = min(textH, size.Y*2/3)
 		picH := size.Y - textH
@@ -502,7 +502,8 @@ func (c *chatView) layoutForumSquare(gtx layout.Context, post discord.Channel) l
 }
 
 // layoutPostReactions are the reactions to a post's first message, the most
-// given first, at most n of them: each its emoji and how many.
+// given first, at most n of them, as the buttons a message has: each adds
+// or takes back the user's own.
 func (c *chatView) layoutPostReactions(gtx layout.Context, first discord.Message, n int) layout.Dimensions {
 	if len(first.Reactions) == 0 {
 		return layout.Dimensions{}
@@ -512,17 +513,71 @@ func (c *chatView) layoutPostReactions(gtx layout.Context, first discord.Message
 	slices.SortStableFunc(rs, func(a, b discord.Reaction) int { return cmp.Compare(b.Count, a.Count) })
 	var children []layout.FlexChild
 	for _, r := range rs[:min(len(rs), n)] {
+		btn := c.reactionButton(first.ID, r.Emoji)
+		if btn.Clicked(gtx) {
+			post, e := first.ChannelID, r.Emoji
+			c.u.post(func() { c.togglePostReaction(post, e) })
+		}
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Right: unit.Dp(8), Top: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutEmoji(gtx, r.Emoji, 15) }),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(3)}.Layout),
-					layout.Rigid(label(th, 12, colorMuted, fmt.Sprint(r.Count)).Layout),
-				)
+			return layout.Inset{Right: unit.Dp(6), Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return btn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					bg, border, count := colorChat, colorSelected, colorText
+					if btn.Hovered() {
+						border = colorMuted
+					}
+					if r.Me {
+						bg, border, count = colorMentionB, colorAccent, colorMention
+					}
+					macro := op.Record(gtx.Ops)
+					dims := layout.Inset{Left: unit.Dp(10), Right: unit.Dp(10), Top: unit.Dp(5), Bottom: unit.Dp(5)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutEmoji(gtx, r.Emoji, 22) }),
+							layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+							layout.Rigid(bold(label(th, 15, count, fmt.Sprint(r.Count))).Layout),
+						)
+					})
+					call := macro.Stop()
+					radius := gtx.Dp(8)
+					rect := image.Rectangle{Max: dims.Size}
+					paint.FillShape(gtx.Ops, border, clip.UniformRRect(rect, radius).Op(gtx.Ops))
+					inner := image.Rectangle{Min: image.Pt(1, 1), Max: dims.Size.Sub(image.Pt(1, 1))}
+					paint.FillShape(gtx.Ops, bg, clip.UniformRRect(inner, radius-1).Op(gtx.Ops))
+					call.Add(gtx.Ops)
+					return dims
+				})
 			})
 		}))
 	}
 	return layout.Flex{Alignment: layout.Middle}.Layout(gtx, children...)
+}
+
+// togglePostReaction adds the user's reaction e to the first message of the
+// post, or takes it back.
+func (c *chatView) togglePostReaction(post discord.ChannelID, e discord.Emoji) {
+	m, ok := c.forum.first[post]
+	if !ok {
+		return
+	}
+	j := slices.IndexFunc(m.Reactions, func(r discord.Reaction) bool { return emojiKey(r.Emoji) == emojiKey(e) })
+	add := j < 0 || !m.Reactions[j].Me
+	m.Reactions = slices.Clone(m.Reactions)
+	applyReaction(&m, e, add, true)
+	c.forum.first[post] = m
+	if c.demo {
+		return
+	}
+	go func() {
+		var err error
+		if add {
+			err = c.st.React(m.ChannelID, m.ID, e.APIString())
+		} else {
+			err = c.st.Unreact(m.ChannelID, m.ID, e.APIString())
+		}
+		if err != nil {
+			c.u.post(func() { c.showNotice("Could not update the reaction") })
+		}
+	}()
 }
 
 // layoutForumPost is one post of the forum's list: its name, and under it
@@ -577,9 +632,10 @@ func (c *chatView) layoutForumPost(gtx layout.Context, post discord.Channel) lay
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 									return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 										layout.Rigid(oneLine(label(th, 12, colorMuted, postSummary(post))).Layout),
-										layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutPostReactions(gtx, first, 6) }),
 									)
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return c.layoutPostReactions(gtx, first, 6)
 								}),
 							)
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
