@@ -1,7 +1,11 @@
 package gui
 
 import (
+	"bytes"
+	"embed"
 	"encoding/json"
+	"image"
+	"image/png"
 	"log/slog"
 	"net/url"
 	"strings"
@@ -10,10 +14,12 @@ import (
 
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"github.com/ayn2op/arikawa/v3/api"
 	"github.com/ayn2op/arikawa/v3/discord"
+	"golang.org/x/exp/shiny/materialdesign/icons"
 )
 
 // What a profile says beside the About Me: the accounts linked to it, and
@@ -202,8 +208,37 @@ func noteProfileExtras(d *profileData) {
 	slog.Info("profile widgets", "kinds", kinds, "games", len(gameWidgets(d.Widgets)))
 }
 
-// layoutConnections are the accounts linked to the profile: each its
-// service and name, opening its page when it has one.
+// iconOpenLink marks what opens a page in the browser.
+var iconOpenLink = mustIcon(icons.ActionOpenInNew)
+
+//go:embed connicons/*.png
+var connIconFiles embed.FS
+
+// connIcons are the marks of the services, read once each. They come from
+// Simple Icons (CC0), in each brand's color, or white where that is too
+// dark to see on a card.
+var connIcons sync.Map // kind → *paint.ImageOp, nil if there is none
+
+// connIcon is the mark of the service kind, or nil.
+func connIcon(kind string) *paint.ImageOp {
+	if v, ok := connIcons.Load(kind); ok {
+		op, _ := v.(*paint.ImageOp)
+		return op
+	}
+	var op *paint.ImageOp
+	if data, err := connIconFiles.ReadFile("connicons/" + kind + ".png"); err == nil {
+		if img, err := png.Decode(bytes.NewReader(data)); err == nil {
+			o := paint.NewImageOp(img)
+			op = &o
+		}
+	}
+	connIcons.Store(kind, op)
+	return op
+}
+
+// layoutConnections are the accounts linked to the profile, each a line as
+// Discord draws them: the service's mark, the account's name over the
+// service's, a check if it is verified, and an arrow if it opens a page.
 func (c *chatView) layoutConnections(gtx layout.Context, p *profileView, accounts []connectedAccount) layout.Dimensions {
 	th := c.u.th
 	if p.linkClicks == nil {
@@ -211,7 +246,7 @@ func (c *chatView) layoutConnections(gtx layout.Context, p *profileView, account
 	}
 	rows := []layout.FlexChild{
 		layout.Rigid(bold(label(th, 12, colorText, "Connections")).Layout),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 	}
 	for _, a := range accounts {
 		link := connectionURL(a)
@@ -221,32 +256,64 @@ func (c *chatView) layoutConnections(gtx layout.Context, p *profileView, account
 		}
 		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			row := func(gtx layout.Context) layout.Dimensions {
-				nameCol := colorText
-				if link != "" {
-					nameCol = colorLink
+				bg := withAlpha(colorMenu, 0xb0)
+				if link != "" && cl.Hovered() {
+					bg = colorHover
 				}
-				return layout.Inset{Top: unit.Dp(2), Bottom: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							gtx.Constraints.Min.X = gtx.Dp(96)
-							return oneLine(label(th, 13, colorMuted, connectionName(a.Type))).Layout(gtx)
-						}),
-						layout.Flexed(1, oneLine(label(th, 13, nameCol, a.Name)).Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if !a.Verified {
-								return layout.Dimensions{}
-							}
-							return layout.Inset{Left: unit.Dp(6)}.Layout(gtx, label(th, 12, colorGreen, "✓").Layout)
-						}),
-					)
+				return rounded(gtx, bg, 6, func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = gtx.Constraints.Max.X
+					return layout.Inset{Left: unit.Dp(10), Right: unit.Dp(10), Top: unit.Dp(7), Bottom: unit.Dp(7)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								s := gtx.Dp(22)
+								size := image.Pt(s, s)
+								if img := connIcon(a.Type); img != nil {
+									gtx.Constraints = layout.Exact(size)
+									return widget.Image{Src: *img, Fit: widget.Contain}.Layout(gtx)
+								}
+								// A service without a mark: its initial.
+								return avatar(gtx, th, 22, colorSecondaryButton, connectionName(a.Type), gtx.Dp(5))
+							}),
+							layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+								return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												gtx.Constraints.Max.X -= gtx.Dp(20)
+												return oneLine(bold(label(th, 14, colorHeader, a.Name))).Layout(gtx)
+											}),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												if !a.Verified {
+													return layout.Dimensions{}
+												}
+												return layout.Inset{Left: unit.Dp(5)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+													return icon(gtx, iconCheck, 14, colorGreen)
+												})
+											}),
+										)
+									}),
+									layout.Rigid(oneLine(label(th, 11, colorMuted, connectionName(a.Type))).Layout),
+								)
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								if link == "" {
+									return layout.Dimensions{}
+								}
+								return icon(gtx, iconOpenLink, 16, colorMuted)
+							}),
+						)
+					})
 				})
 			}
-			if link == "" {
-				return row(gtx)
-			}
-			return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				pointer.CursorPointer.Add(gtx.Ops)
-				return row(gtx)
+			return layout.Inset{Bottom: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				if link == "" {
+					return row(gtx)
+				}
+				return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					pointer.CursorPointer.Add(gtx.Ops)
+					return row(gtx)
+				})
 			})
 		}))
 	}

@@ -217,6 +217,12 @@ func (c *chatView) demoProfile(user discord.User) *profileData {
 	d := &profileData{}
 	d.User.User = user
 	d.UserProfile.Bio = "Just a demo profile."
+	d.ConnectedAccounts = []connectedAccount{
+		{Type: "github", ID: "1", Name: user.Username, Verified: true},
+		{Type: "youtube", ID: "UC1", Name: user.Username + " plays", Verified: true},
+		{Type: "steam", ID: "7656", Name: user.Username},
+		{Type: "xbox", ID: "2", Name: user.Username + "4664"},
+	}
 	d.UserProfile.ThemeColors = []int{0xc4163d, 0x3b3b3b}
 	d.Badges = []profileBadge{
 		{ID: "hypesquad_house_3", Description: "HypeSquad Balance", Icon: "3aa41de486fa12454c3761e8e223442e", Link: "https://discord.com/settings/hypesquad-online"},
