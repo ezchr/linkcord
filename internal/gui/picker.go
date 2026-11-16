@@ -81,7 +81,7 @@ func (c *chatView) layoutEmojiPicker(gtx layout.Context) layout.Dimensions {
 		}
 	}
 	// Reactions are emoji only, as on Discord.
-	if p.react.IsValid() {
+	if p.reacting() {
 		p.tab = tabEmoji
 	}
 	for i := range p.tabs {
@@ -111,7 +111,7 @@ func (c *chatView) layoutEmojiPicker(gtx layout.Context) layout.Dimensions {
 
 	return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		children := []layout.FlexChild{}
-		if !p.react.IsValid() {
+		if !p.reacting() {
 			children = append(children,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					var tabs []layout.FlexChild
@@ -183,7 +183,10 @@ func (c *chatView) emojiBody(gtx layout.Context, p *emojiPicker) (layout.Widget,
 	for _, r := range rows {
 		for _, cl := range r.cells {
 			if cl.click.Clicked(gtx) && !cl.locked {
-				if id := p.react; id.IsValid() {
+				if p.reactAll {
+					e := emojiOfCell(cl)
+					c.u.post(func() { c.bulkReact(e) })
+				} else if id := p.react; id.IsValid() {
 					e := emojiOfCell(cl)
 					c.u.post(func() { c.toggleReaction(id, e) })
 				} else {

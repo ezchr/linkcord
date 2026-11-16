@@ -437,8 +437,13 @@ func (c *chatView) forwardFinished(j *bulkJob, note bool) {
 	case j.stopped == "cancelled":
 		f.err = tr("Stopped. What was sent stays sent.")
 	case !f.pending(note):
+		selection := f.selection
 		n := len(f.msgs)
 		c.closeForward()
+		if selection {
+			// Done with those selected.
+			c.leaveSelection()
+		}
 		if n == 1 {
 			c.showNotice("Message forwarded")
 		} else {

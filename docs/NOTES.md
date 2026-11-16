@@ -159,3 +159,48 @@ that no test reads or writes the real `inbox.json`.
 - **How to test.** `go test ./internal/gui -run 'Forward|Dests|SendErrorText'`.
   In the demo the form sends nothing and adds the forward to the place
   chosen. `TestRenderDemo` has `rclick:x,y` for the message's menu.
+
+## Selecting several messages
+
+- **Holding the button.** Gio has no long press. `updateSelectPointer`
+  (`multiselect.go`) keeps the message pressed, when and where, asks for a
+  frame 500 ms later with `op.InvalidateCmd{At: …}`, and starts selecting
+  if the button is still down and the pointer moved less than 6 dp.
+  Dragging to select text moves further, so it does not start it. A press
+  whose end never comes, as of a message scrolled out of the list, is
+  dropped after a second more.
+- **Clicks that must do nothing.** While selecting, each message is
+  covered by an area that takes the pointer (`selectArea`, without
+  `PassOp`), so links, pictures, names and reactions under it get
+  nothing. This also takes care of the release that ends the hold: Gio
+  works out again what is under the pointer after every frame
+  (`pointerQueue.Frame`), the link under the new area gets a `Leave`, and
+  `gesture.Click` reports a release after a `Leave` as cancelled, not as
+  a click. Handlers laid out over the message with `PassOp` (the double
+  click that replies, the right click) still get the press and check
+  `c.msel.on` themselves.
+- **An area over a message blocks what is beside it, not the list.** The
+  wheel still scrolls the messages: the list's handler is an ancestor of
+  the area, and only handlers under it in the same branch are covered.
+- **The gap between messages is not part of them.** A click exactly
+  between two rows ticks nothing.
+- **Many messages, one request each.** A user's account has no request
+  that deletes or reacts to several messages (bulk delete is for bots),
+  so `bulkReact` and `bulkDelete` send what one message's button sends
+  (`requestReact`, `requestDelete`), and forwarding those selected goes
+  through the form's own run. `runSteps` (`bulkpace.go`) sends one at a
+  time, in the order shown, and never two at once.
+- **The waits.** `bulkpace.go` has every number: 1.5 to 4 s between
+  deletes, 0.8 to 2.5 s between reactions, 2 to 5 s between messages
+  forwarded, most of them in the lower half of the range, with a pause
+  of 5 to 12 s after every 8 to 15 messages. A 429 that Arikawa waited
+  out makes the rest 1.5 to 2 times slower; the second one of a run
+  stops it and says how many were done. A run takes at most 50 messages.
+  This is the pace of doing it by hand, so that a run is not a burst of
+  requests; it lowers the risk of Discord limiting or flagging the
+  account, and nothing can promise how Discord judges one.
+- **Stopping.** Stop ends the run after the request on its way; what was
+  deleted, sent or reacted to stays so. Changing channel stops it too.
+- **The demo** sends nothing and waits a tenth of the time (`demoPace`).
+- **How to test.** `go test ./internal/gui -run 'RangeIDs|MultiSelect|Selectable|SplitDeletable|CopyLines|Pace|Pacer|RunSteps|RetryAfter|Bulk'`.
+  `TestRenderDemo` holds the button with `press:x,y;wait:700;release:x,y`.

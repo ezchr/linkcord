@@ -562,6 +562,12 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 	}
 	th := c.u.th
 	cs := &c.comp
+	if c.msel.on {
+		// While selecting, the bar of those selected takes the box's place.
+		dims := c.layoutSelectionBar(gtx)
+		cs.boxH = dims.Size.Y
+		return dims
+	}
 	canSend := !c.selChannel.GuildID.IsValid() || c.can(c.selChannel.ID, discord.PermissionSendMessages)
 	dims := layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,

@@ -141,6 +141,8 @@ type emojiPicker struct {
 	// react is the message the picked emoji reacts to; with none, the emoji
 	// goes in the box to write.
 	react discord.MessageID
+	// reactAll is that it reacts to every message selected instead.
+	reactAll bool
 
 	// tab is the page shown: GIFs, stickers or emoji.
 	tab  int
@@ -161,6 +163,10 @@ const (
 	tabStickers
 	tabEmoji
 )
+
+// reacting reports whether the emoji picked is a reaction, to one message
+// or to those selected, and not text for the box.
+func (p *emojiPicker) reacting() bool { return p.reactAll || p.react.IsValid() }
 
 func newEmojiPicker() *emojiPicker {
 	p := &emojiPicker{cells: make(map[string]*emojiCell), railClicks: make(map[string]*widget.Clickable), tab: tabEmoji}

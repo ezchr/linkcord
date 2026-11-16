@@ -318,7 +318,7 @@ func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
 			return c.layoutMessageBody(gtx, m, grouped, name, nameColor, look)
 		})
 		// A double click on a message answers it.
-		if c.doubleClicked(gtx, c.rightTag("reply"+m.ID.String()), dims.Size) {
+		if c.doubleClicked(gtx, c.rightTag("reply"+m.ID.String()), dims.Size) && !c.msel.on {
 			c.startReply(m)
 		}
 		// A right click opens its menu, after the text selected opened its

@@ -60,8 +60,9 @@ type reactionKey struct {
 	emoji string
 }
 
-// hoverTags are the pointer targets of a message and of its toolbar.
-type hoverTags struct{ row, bar int }
+// hoverTags are the pointer targets of a message and of its toolbar, and
+// sel that of the button held on it or, while selecting, ticking it.
+type hoverTags struct{ row, bar, sel int }
 
 type actionState struct {
 	tags map[discord.MessageID]*hoverTags
@@ -161,11 +162,8 @@ func (c *chatView) canReact() bool {
 }
 
 func (c *chatView) canDelete(m discord.Message) bool {
-	if m.Author.ID == c.me.ID {
-		return true
-	}
 	ch := c.selChannel
-	return ch != nil && ch.GuildID.IsValid() && c.can(ch.ID, discord.PermissionManageMessages)
+	return canDeleteMessage(m, c.me.ID, ch != nil && ch.GuildID.IsValid() && c.can(ch.ID, discord.PermissionManageMessages))
 }
 
 func (c *chatView) messageIndex(id discord.MessageID) int {
@@ -213,15 +211,34 @@ func (c *chatView) layoutWithActions(gtx layout.Context, m discord.Message, w la
 	over := a.hover == m.ID || a.barOver == m.ID
 	// A deleted message is gone from Discord: nothing can be done with it.
 	// Neither can one that only this user sees, which Discord never stored.
-	showBar := over && a.editing != m.ID && a.deleting == nil && !isEphemeral(m)
+	// Nor while selecting, when a click on a message ticks it.
+	selecting := c.msel.on
+	showBar := over && a.editing != m.ID && a.deleting == nil && !isEphemeral(m) && !selecting
 	if !showBar && a.barOver == m.ID {
 		// A toolbar that is not drawn gets no Leave; forget it.
 		a.barOver = 0
 	}
+	c.updateSelectPointer(gtx, m, tags)
 
 	macro := op.Record(gtx.Ops)
-	dims := w(gtx)
+	var dims layout.Dimensions
+	if selecting {
+		// The messages move right, for the ticks at their left.
+		gut := gtx.Dp(selectGutter)
+		wgtx := gtx
+		wgtx.Constraints.Max.X = max(gtx.Constraints.Max.X-gut, 0)
+		wgtx.Constraints.Min.X = min(wgtx.Constraints.Min.X, wgtx.Constraints.Max.X)
+		t := op.Offset(image.Pt(gut, 0)).Push(gtx.Ops)
+		dims = w(wgtx)
+		t.Pop()
+		dims.Size.X += gut
+	} else {
+		dims = w(gtx)
+	}
 	call := macro.Stop()
+	if selecting && c.msel.ids[m.ID] {
+		paint.FillShape(gtx.Ops, withAlpha(colorAccent, 0x30), clip.Rect{Max: dims.Size}.Op())
+	}
 	switch {
 	case isEphemeral(m):
 		// Messages only this user sees have a tint and a bar on their left.
@@ -232,7 +249,7 @@ func (c *chatView) layoutWithActions(gtx layout.Context, m discord.Message, w la
 		paint.FillShape(gtx.Ops, withAlpha(colorMentioned, 0x0a), clip.Rect{Max: dims.Size}.Op())
 		paint.FillShape(gtx.Ops, colorMentioned, clip.Rect{Max: image.Pt(gtx.Dp(2), dims.Size.Y)}.Op())
 	}
-	if over || a.editing == m.ID {
+	if (over && !selecting) || a.editing == m.ID {
 		// A faint veil of the text's color, which suits every theme, as
 		// Discord's barely lighter row.
 		paint.FillShape(gtx.Ops, withAlpha(colorHeader, 0x0a), clip.Rect{Max: dims.Size}.Op())
@@ -247,6 +264,10 @@ func (c *chatView) layoutWithActions(gtx layout.Context, m discord.Message, w la
 	event.Op(gtx.Ops, &tags.row)
 	pass.Pop()
 	area.Pop()
+	if selecting {
+		c.paintSelectMark(gtx, m, dims.Size)
+	}
+	c.selectArea(gtx, tags, dims.Size)
 	if showBar {
 		c.layoutToolbar(gtx, m, dims, tags)
 	}
@@ -422,7 +443,7 @@ func (c *chatView) runAction(gtx layout.Context, m discord.Message, k actionKind
 // openMessageMenu opens the menu of a right click on a message, with what
 // its toolbar does.
 func (c *chatView) openMessageMenu(m discord.Message) {
-	if c.messageIndex(m.ID) < 0 || isEphemeral(m) || c.act.editing == m.ID {
+	if c.messageIndex(m.ID) < 0 || isEphemeral(m) || c.act.editing == m.ID || c.msel.on {
 		return
 	}
 	gone := c.deleted.has(m.ID)
@@ -445,6 +466,10 @@ func (c *chatView) openMessageMenu(m discord.Message) {
 	}
 	if m.Author.ID == c.me.ID && !gone {
 		items = append(items, menuItem{text: "Edit Message", act: func() { c.startEdit(m) }})
+	}
+	if selectableMessage(m, gone) {
+		// Holding the button on a message does the same.
+		items = append(items, menuItem{text: "Select", act: func() { c.enterSelection(m) }})
 	}
 	if c.canDelete(m) || gone {
 		items = append(items, menuItem{sep: true}, menuItem{text: "Delete Message", col: colorRed, act: func() { c.askDelete(m, false) }})
@@ -737,7 +762,7 @@ func (c *chatView) deleteMessage(m discord.Message) {
 	}
 	chID := c.selChannel.ID
 	go func() {
-		err := c.st.DeleteMessage(chID, m.ID, "")
+		err := c.requestDelete(chID, m.ID)
 		c.u.post(func() {
 			if err != nil {
 				c.sendErr = "Could not delete the message: " + err.Error()
@@ -946,7 +971,7 @@ func (c *chatView) toggleReaction(id discord.MessageID, e discord.Emoji) {
 	go func() {
 		var err error
 		if add {
-			err = c.st.React(chID, id, e.APIString())
+			err = c.requestReact(chID, id, e)
 		} else {
 			err = c.st.Unreact(chID, id, e.APIString())
 		}

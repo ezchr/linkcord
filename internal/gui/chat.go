@@ -361,8 +361,10 @@ type chatView struct {
 
 	// act is what can be done to messages: see actions.go.
 	act actionState
-	// fwd is the form that asks where to forward messages.
-	fwd forwardForm
+	// fwd is the form that asks where to forward messages, and msel the
+	// messages selected to do something with all of them.
+	fwd  forwardForm
+	msel multiSelect
 
 	// call is the voice channel open in the middle, and sounds the sounds of
 	// the soundboard.
@@ -850,6 +852,7 @@ func (c *chatView) closeChannel() {
 	c.notePage()
 	c.comp.files, c.comp.mentions, c.comp.mentionOn, c.comp.emoji = nil, nil, false, nil
 	c.act.reset()
+	c.leaveSelection()
 	c.memberRows, c.memberChunk = nil, 0
 }
 
@@ -1096,6 +1099,7 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	clear(c.revealed)
 	c.comp.files, c.comp.mentions, c.comp.mentionOn, c.comp.emoji = nil, nil, false, nil
 	c.act.reset()
+	c.leaveSelection()
 	c.memberRows, c.memberChunk = nil, 0
 	c.memberList.Position = layout.Position{}
 	c.rebuildMembers()
@@ -1460,6 +1464,7 @@ func (c *chatView) update(gtx layout.Context) {
 			c.openProfile(ch.DMRecipients[0], discord.NullGuildID)
 		}
 	}
+	c.updateMultiSelect(gtx)
 	c.updateComposer(gtx)
 }
 
@@ -1561,6 +1566,7 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 	if c.act.deleting != nil {
 		c.layoutDeleteConfirm(gtx)
 	}
+	c.layoutBulkDeleteConfirm(gtx)
 	c.layoutSchedule(gtx)
 	if c.inter.modal != nil {
 		c.layoutModal(gtx)
