@@ -263,10 +263,11 @@ func drawBelow(gtx, wgtx layout.Context, p image.Point, tag event.Tag, w layout.
 }
 
 // layoutColumns lays out the server list, the channels, the chat and the
-// members where the user put them, with the bar of a voice channel lost
-// across the top.
+// members where the user put them, over the background picture if there is
+// one, with the bar of a voice channel lost across the top.
 func (c *chatView) layoutColumns(gtx layout.Context) {
 	l := c.paneLayout()
+	c.pictureShown = c.u.layoutBackground(gtx)
 	size := gtx.Constraints.Max
 	area := image.Rectangle{Max: size}
 	if c.lostVoice.ch != nil {
@@ -293,14 +294,14 @@ func (c *chatView) layoutColumns(gtx layout.Context) {
 	c.cols = r
 	c.comp.paneX, c.comp.paneW, c.comp.paneBottom = r.chat.Min.X, r.chat.Dx(), r.chat.Max.Y
 
-	layoutPane(gtx, r.servers, colorServers, c.layoutGuilds)
-	layoutPane(gtx, r.channels, colorSidebar, c.layoutChannels)
-	layoutPane(gtx, r.chat, colorChat, c.layoutMessages)
+	layoutPane(gtx, r.servers, c.paneFill(colorServers, paneAlphaServers), c.layoutGuilds)
+	layoutPane(gtx, r.channels, c.paneFill(colorSidebar, paneAlphaSidebar), c.layoutChannels)
+	layoutPane(gtx, r.chat, c.paneFill(colorChat, paneAlphaChat), c.layoutMessages)
 	switch {
 	case searching:
-		layoutPane(gtx, r.side, colorSidebar, c.layoutSearchResults)
+		layoutPane(gtx, r.side, c.paneFill(colorSidebar, paneAlphaSidebar), c.layoutSearchResults)
 	case showMembers:
-		layoutPane(gtx, r.side, colorSidebar, c.layoutMembers)
+		layoutPane(gtx, r.side, c.paneFill(colorSidebar, paneAlphaSidebar), c.layoutMembers)
 	}
 
 	// The edges to drag are between each column and the chat; the width

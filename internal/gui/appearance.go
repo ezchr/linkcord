@@ -137,11 +137,12 @@ var themePresets = []themePreset{
 
 // appearanceSettings are the colors the user chose: a preset, and colors
 // changed over it, as #rrggbb by key, kept in appearance.json beside the log.
-// Layout is where the bars are.
+// Picture is the background picture, and Layout where the bars are.
 type appearanceSettings struct {
-	Preset string            `json:"preset,omitempty"`
-	Colors map[string]string `json:"colors,omitempty"`
-	Layout paneLayout        `json:"layout,omitzero"`
+	Preset  string            `json:"preset,omitempty"`
+	Colors  map[string]string `json:"colors,omitempty"`
+	Picture *pictureSettings  `json:"picture,omitempty"`
+	Layout  paneLayout        `json:"layout,omitzero"`
 }
 
 func appearancePath() string {
@@ -179,6 +180,12 @@ func saveAppearance(a appearanceSettings) {
 // presetColor is the color key has in the preset named, before the user
 // changes it.
 func presetColor(preset, key string) colorT {
+	if preset == pictureKey {
+		if v, ok := pictureTheme[key]; ok {
+			return v
+		}
+		return themeDefaults[key]
+	}
 	for _, p := range themePresets {
 		if p.key == preset {
 			if v, ok := p.colors[key]; ok {
@@ -191,6 +198,15 @@ func presetColor(preset, key string) colorT {
 
 // applyAppearance sets every color of the interface as a says.
 func applyAppearance(a appearanceSettings) {
+	pictureTheme = nil
+	if a.Picture != nil {
+		pictureTheme = make(map[string]colorT, len(a.Picture.Colors))
+		for k, hex := range a.Picture.Colors {
+			if v, ok := parseHex(hex); ok {
+				pictureTheme[k] = v
+			}
+		}
+	}
 	for _, g := range themeGroups {
 		for _, c := range g.colors {
 			*c.v = presetColor(a.Preset, c.key)

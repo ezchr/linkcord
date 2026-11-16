@@ -150,8 +150,10 @@ type ui struct {
 	// watchingAny reports whether a stream is watched, for the pop-out's
 	// redraws.
 	watchingAny atomic.Bool
-	// appearance are the colors the user chose.
+	// appearance are the colors the user chose, and bg the background
+	// picture made for the window.
 	appearance appearanceSettings
+	bg         backgroundPicture
 	// app is how Linkcord looks and behaves otherwise.
 	app appSettings
 	// rpcStarted reports whether Discord's RPC is served, and rpcMe is who

@@ -23,7 +23,7 @@ type appearanceView struct {
 	hex      widget.Editor
 	resetOne widget.Clickable
 	resetAll widget.Clickable
-	// custom is the places of the bars.
+	// custom is the background picture and the places of the bars.
 	custom customizeView
 }
 
@@ -39,10 +39,15 @@ func themeColorOf(key string) *themeColor {
 	return nil
 }
 
+// themeGen counts the changes of colors, for the messages to color their
+// links and mentions again.
+var themeGen int
+
 // themeChanged has what keeps its own copy of the colors follow them, and
 // keeps them unless in the demo.
 func (c *chatView) themeChanged(save bool) {
 	u := c.u
+	themeGen++
 	u.th.Palette = material.Palette{Fg: colorText, Bg: colorChat, ContrastBg: colorAccent, ContrastFg: colorHeader}
 	if save && !c.demo {
 		saveAppearance(u.appearance)
@@ -77,9 +82,9 @@ func (c *chatView) updateAppearance(gtx layout.Context) {
 		av.hex.SingleLine, av.hex.Submit = true, true
 	}
 	c.updateCustomize(gtx)
-	for _, p := range themePresets {
+	for _, p := range c.presetList() {
 		if clickOf(av.presets, p.key).Clicked(gtx) {
-			// The layout stays.
+			// The picture and the layout stay.
 			u.appearance.Preset, u.appearance.Colors = p.key, nil
 			applyAppearance(u.appearance)
 			c.themeChanged(true)
@@ -138,8 +143,8 @@ func (c *chatView) updateAppearance(gtx layout.Context) {
 	}
 }
 
-// appearanceRows are the Appearance page: the layout, presets, then every
-// color.
+// appearanceRows are the Appearance page: the background picture and the
+// layout, presets, then every color.
 func (c *chatView) appearanceRows() []layout.Widget {
 	u := c.u
 	th := u.th
@@ -147,7 +152,7 @@ func (c *chatView) appearanceRows() []layout.Widget {
 	if av.presets == nil {
 		return nil
 	}
-	presets := themePresets
+	presets := c.presetList()
 	rows := append(c.customizeRows(),
 		settingsHeading(th, "PRESETS"),
 		settingsText(th, "A preset sets every color at once; the colors below change on top of it."),

@@ -290,10 +290,12 @@ type chatView struct {
 	panes                               paneSettings
 	panesLoaded                         bool
 	channelResize, memberResize         paneResize
-	// cols are where the columns were laid out, as the bars were placed,
-	// and guildWheel takes the wheel over the server strip.
-	cols       paneRects
-	guildWheel bool
+	// cols are where the columns were laid out, as the bars were placed;
+	// pictureShown is whether the background picture is behind them, and
+	// guildWheel takes the wheel over the server strip.
+	cols         paneRects
+	pictureShown bool
+	guildWheel   bool
 
 	composer    widget.Editor
 	typingUntil time.Time

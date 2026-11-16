@@ -417,9 +417,10 @@ func (c *chatView) layoutRich(gtx layout.Context, state *richtextState, m discor
 	c.updateSelection(gtx, state)
 
 	revealed := c.revealed[m.ID]
-	// Re-parse only when the message, its spoilers or the minute change
-	// (the minute keeps "5 minutes ago" timestamps and mention names fresh).
-	key := fmt.Sprintf("%v|%v|%d|%v|%s", m.EditedTimestamp, revealed, time.Now().Unix()/60, size, text)
+	// Re-parse only when the message, its spoilers, the colors or the minute
+	// change (the minute keeps "5 minutes ago" timestamps and mention names
+	// fresh).
+	key := fmt.Sprintf("%v|%v|%d|%d|%v|%s", m.EditedTimestamp, revealed, themeGen, time.Now().Unix()/60, size, text)
 	if state.key != key {
 		state.key = key
 		state.parts, state.all = c.buildContent(m, text, size, revealed)

@@ -91,8 +91,8 @@ func TestPaneLayoutSaved(t *testing.T) {
 	}
 }
 
-// TestAppearanceFiles checks that appearance.json written before layouts
-// still loads, and that what is saved now loads back the same.
+// TestAppearanceFiles checks that appearance.json written before pictures
+// and layouts still loads, and that what is saved now loads back the same.
 func TestAppearanceFiles(t *testing.T) {
 	t.Setenv("LOCALAPPDATA", t.TempDir())
 	if err := os.MkdirAll(filepath.Dir(appearancePath()), 0o700); err != nil {
@@ -103,7 +103,7 @@ func TestAppearanceFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := loadAppearance()
-	if a.Preset != "nord" || a.Colors["accent"] != "#ff0000" || a.Layout != (paneLayout{}) {
+	if a.Preset != "nord" || a.Colors["accent"] != "#ff0000" || a.Picture != nil || a.Layout != (paneLayout{}) {
 		t.Fatalf("old file read as %+v", a)
 	}
 	// The old file writes back as it was: nothing new in it.
@@ -115,6 +115,8 @@ func TestAppearanceFiles(t *testing.T) {
 		t.Errorf("old settings written as %s", data)
 	}
 
+	a.Picture = &pictureSettings{Path: `C:\pics\sky.jpg`, Dim: 40, Blur: 3, Colors: map[string]string{"chat": "#101820"}}
+	a.Preset = pictureKey
 	a.Layout = paneLayout{Servers: placeBottom, Members: placeLeft}
 	data, err = json.Marshal(a)
 	if err != nil {
@@ -124,7 +126,21 @@ func TestAppearanceFiles(t *testing.T) {
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
-	if back.Preset != "nord" || back.Layout != a.Layout {
+	if back.Preset != pictureKey || back.Layout != a.Layout || back.Picture == nil || back.Picture.Path != a.Picture.Path {
 		t.Errorf("read back as %+v", back)
+	}
+	if back.Picture.Dim != 40 || back.Picture.Blur != 3 || back.Picture.Colors["chat"] != "#101820" {
+		t.Errorf("picture read back as %+v", back.Picture)
+	}
+
+	// The picture's colors are the preset's, under the user's own.
+	defer applyAppearance(appearanceSettings{})
+	back.Colors = map[string]string{"text": "#eeeeee"}
+	applyAppearance(back)
+	if colorChat != rgb(0x101820) || colorText != rgb(0xeeeeee) {
+		t.Errorf("chat %v text %v", colorChat, colorText)
+	}
+	if presetColor(pictureKey, "chat") != rgb(0x101820) || presetColor(pictureKey, "green") != themeDefaults["green"] {
+		t.Error("presetColor of the picture wrong")
 	}
 }
