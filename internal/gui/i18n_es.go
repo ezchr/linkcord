@@ -1420,4 +1420,8 @@ var spanish = map[string]string{
 	"Top": "Arriba",
 	"Bottom": "Abajo",
 	"Reset Layout": "Restablecer disposición",
+	"Servers": "Servidores",
+	"Channels": "Canales",
+	"Chat": "Chat",
+	"You": "Tú",
 }

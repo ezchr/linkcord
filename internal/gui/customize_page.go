@@ -3,6 +3,7 @@ package gui
 import (
 	"fmt"
 	"image"
+	"math"
 	"path/filepath"
 
 	"gioui.org/f32"
@@ -259,19 +260,17 @@ func (c *chatView) customizeRows() []layout.Widget {
 		settingsHeading(th, "LAYOUT"),
 		settingsText(th, "Where each bar of the window goes."),
 		func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{}.Layout(gtx,
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					var children []layout.FlexChild
-					for _, b := range barChoices {
-						children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return c.layoutBarChoice(gtx, b)
-						}))
-					}
-					return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
-				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
-				layout.Rigid(c.layoutLayoutDiagram),
-			)
+			var children []layout.FlexChild
+			for _, b := range barChoices {
+				children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return c.layoutBarChoice(gtx, b)
+				}))
+			}
+			// The window in small goes under the choices, where it has room.
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(4), Bottom: unit.Dp(10)}.Layout(gtx, c.layoutLayoutDiagram)
+			}))
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 		},
 		func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -374,12 +373,29 @@ func (c *chatView) layoutBarChoice(gtx layout.Context, b barChoice) layout.Dimen
 	})
 }
 
+// hoveredBar is the bar whose place buttons the pointer is over, by its
+// key, or "".
+func (c *chatView) hoveredBar() string {
+	cv := &c.settings.look.custom
+	for _, b := range barChoices {
+		for _, place := range b.places {
+			if clickOf(cv.places, b.key+"/"+place).Hovered() {
+				return b.key
+			}
+		}
+	}
+	return ""
+}
+
 // layoutLayoutDiagram is the window drawn small, with the bars where they
-// are, in the colors of the theme and over the picture if there is one.
+// are and what each holds, in the colors of the theme and over the picture
+// if there is one. The bar whose buttons the pointer is over is outlined.
 func (c *chatView) layoutLayoutDiagram(gtx layout.Context) layout.Dimensions {
-	size := image.Pt(gtx.Dp(200), gtx.Dp(125))
+	th := c.u.th
+	size := image.Pt(min(gtx.Dp(320), gtx.Constraints.Max.X), gtx.Dp(200))
 	l := c.paneLayout()
-	r := placePanes(l, image.Rectangle{Max: size}, gtx.Dp(14), gtx.Dp(44), gtx.Dp(38), true)
+	// The same placing as the window's, with the widths made small.
+	r := placePanes(l, image.Rectangle{Max: size}, gtx.Dp(24), gtx.Dp(78), gtx.Dp(66), true)
 	rad := gtx.Dp(6)
 	defer clip.UniformRRect(image.Rectangle{Max: size}, rad).Push(gtx.Ops).Pop()
 	shown := false
@@ -405,31 +421,153 @@ func (c *chatView) layoutLayoutDiagram(gtx layout.Context) layout.Dimensions {
 	fill(r.channels, colorSidebar, paneAlphaSidebar)
 	fill(r.chat, colorChat, paneAlphaChat)
 	fill(r.side, colorSidebar, paneAlphaSidebar)
-	// The user panel, and the box to write in.
-	ph := gtx.Dp(12)
-	panel := image.Rect(r.channels.Min.X, r.channels.Max.Y-ph, r.channels.Max.X, r.channels.Max.Y)
-	if l.UserPanel == placeTop {
-		top := r.channels.Min.Y + gtx.Dp(8)
-		panel = image.Rect(r.channels.Min.X, top, r.channels.Max.X, top+ph)
+
+	dp := func(v float32) int { return gtx.Dp(unit.Dp(v)) }
+	// bar is a line of text drawn as a rounded bar, and dot a picture
+	// drawn as a circle.
+	bar := func(x, y, w, h int, col colorT) {
+		if w <= 0 {
+			return
+		}
+		paint.FillShape(gtx.Ops, col, clip.UniformRRect(image.Rect(x, y, x+w, y+h), h/2).Op(gtx.Ops))
 	}
-	paint.FillShape(gtx.Ops, colorPanel, clip.Rect(panel).Op())
-	in := gtx.Dp(4)
-	box := image.Rect(r.chat.Min.X+in, r.chat.Max.Y-in-gtx.Dp(8), r.chat.Max.X-in, r.chat.Max.Y-in)
-	paint.FillShape(gtx.Ops, colorInput, clip.UniformRRect(box, gtx.Dp(2)).Op(gtx.Ops))
-	// The servers, as dots along their bar.
-	dot := gtx.Dp(8)
-	for i := range 4 {
-		var p image.Point
-		if l.serversAcross() {
-			p = image.Pt(r.servers.Min.X+gtx.Dp(4)+i*(dot+gtx.Dp(4)), r.servers.Min.Y+(r.servers.Dy()-dot)/2)
+	dot := func(x, y, d int, col colorT) {
+		paint.FillShape(gtx.Ops, col, clip.Ellipse(image.Rect(x, y, x+d, y+d)).Op(gtx.Ops))
+	}
+	// text draws a small name of a region at p, if it fits in w.
+	text := func(p image.Point, w int, col colorT, txt string) layout.Dimensions {
+		lgtx := gtx
+		lgtx.Constraints = layout.Constraints{Max: image.Pt(1<<20, 1<<20)}
+		macro := op.Record(gtx.Ops)
+		d := label(th, 9, col, txt).Layout(lgtx)
+		call := macro.Stop()
+		if d.Size.X > w {
+			return layout.Dimensions{}
+		}
+		t := op.Offset(p).Push(gtx.Ops)
+		call.Add(gtx.Ops)
+		t.Pop()
+		return d
+	}
+	name, line, faint := withAlpha(colorHeader, 0xb0), withAlpha(colorMuted, 0x90), withAlpha(colorMuted, 0x50)
+	in := dp(5)
+
+	// The servers: round icons along their bar, the first one chosen.
+	across := l.serversAcross()
+	if s := r.servers; !s.Empty() {
+		d, gap := dp(14), dp(5)
+		for i := range 5 {
+			col := colorSelected
+			if i == 0 {
+				col = colorAccent
+			}
+			if across {
+				dot(s.Min.X+in+i*(d+gap), s.Min.Y+(s.Dy()-d)/2, d, col)
+			} else {
+				dot(s.Min.X+(s.Dx()-d)/2, s.Min.Y+in+i*(d+gap), d, col)
+			}
+		}
+		if across {
+			text(image.Pt(s.Min.X+in+5*(d+gap)+dp(4), s.Min.Y+dp(6)), s.Dx(), colorMuted, "Servers")
 		} else {
-			p = image.Pt(r.servers.Min.X+(r.servers.Dx()-dot)/2, r.servers.Min.Y+gtx.Dp(4)+i*(dot+gtx.Dp(4)))
+			// Down the column the name reads turned, as there is no room across.
+			lgtx := gtx
+			lgtx.Constraints = layout.Constraints{Max: image.Pt(1<<20, 1<<20)}
+			macro := op.Record(gtx.Ops)
+			d := label(th, 9, colorMuted, "Servers").Layout(lgtx)
+			call := macro.Stop()
+			at := f32.Pt(float32(s.Min.X+(s.Dx()-d.Size.Y)/2), float32(s.Max.Y-in))
+			t := op.Affine(f32.Affine2D{}.Rotate(f32.Point{}, -math.Pi/2).Offset(at)).Push(gtx.Ops)
+			call.Add(gtx.Ops)
+			t.Pop()
 		}
-		col := colorSelected
-		if i == 0 {
-			col = colorAccent
+	}
+
+	// The channels: the server's name, lines with #, and the user panel.
+	ph := dp(24)
+	ch := r.channels
+	panel := image.Rect(ch.Min.X, ch.Max.Y-ph, ch.Max.X, ch.Max.Y)
+	list := image.Rect(ch.Min.X, ch.Min.Y, ch.Max.X, ch.Max.Y-ph)
+	if l.UserPanel == placeTop {
+		panel = image.Rect(ch.Min.X, ch.Min.Y, ch.Max.X, ch.Min.Y+ph)
+		list = image.Rect(ch.Min.X, ch.Min.Y+ph, ch.Max.X, ch.Max.Y)
+	}
+	if !ch.Empty() {
+		head := dp(18)
+		bar(list.Min.X+in, list.Min.Y+dp(7), list.Dx()*6/10, dp(5), name)
+		paint.FillShape(gtx.Ops, colorServers, clip.Rect(image.Rect(list.Min.X, list.Min.Y+head-1, list.Max.X, list.Min.Y+head)).Op())
+		y := list.Min.Y + head + dp(3)
+		y += text(image.Pt(list.Min.X+in, y), list.Dx()-in, colorMuted, "Channels").Size.Y + dp(3)
+		for i := 0; y+dp(10) < list.Max.Y-dp(2) && i < 6; i++ {
+			col := line
+			if i == 1 {
+				// The channel open, as the list marks it.
+				paint.FillShape(gtx.Ops, colorSelected, clip.UniformRRect(image.Rect(list.Min.X+dp(3), y-dp(1), list.Max.X-dp(3), y+dp(11)), dp(3)).Op(gtx.Ops))
+				col = name
+			}
+			text(image.Pt(list.Min.X+in+dp(1), y-dp(1)), list.Dx(), col, "#")
+			bar(list.Min.X+in+dp(10), y+dp(3), list.Dx()*(4+(i*3)%4)/10-dp(10), dp(4), col)
+			y += dp(14)
 		}
-		paint.FillShape(gtx.Ops, col, clip.Ellipse(image.Rectangle{Min: p, Max: p.Add(image.Pt(dot, dot))}).Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, colorPanel, clip.Rect(panel).Op())
+		d := dp(14)
+		dot(panel.Min.X+in, panel.Min.Y+(ph-d)/2, d, colorGreen)
+		text(image.Pt(panel.Min.X+in+d+dp(5), panel.Min.Y+dp(6)), panel.Dx(), colorHeader, "You")
+	}
+
+	// The chat: its header, messages, and the box to write in.
+	if chat := r.chat; !chat.Empty() {
+		head := dp(18)
+		text(image.Pt(chat.Min.X+in, chat.Min.Y+dp(3)), chat.Dx()-in, colorHeader, "Chat")
+		paint.FillShape(gtx.Ops, colorServers, clip.Rect(image.Rect(chat.Min.X, chat.Min.Y+head-1, chat.Max.X, chat.Min.Y+head)).Op())
+		boxH := dp(16)
+		box := image.Rect(chat.Min.X+in, chat.Max.Y-in-boxH, chat.Max.X-in, chat.Max.Y-in)
+		paint.FillShape(gtx.Ops, colorInput, clip.UniformRRect(box, dp(4)).Op(gtx.Ops))
+		bar(box.Min.X+dp(6), box.Min.Y+(boxH-dp(4))/2, box.Dx()*4/10, dp(4), faint)
+		d := dp(14)
+		y := chat.Min.Y + head + dp(8)
+		tw := chat.Dx() - 2*in - d - dp(6)
+		for i := 0; y+dp(28) < box.Min.Y && i < 4; i++ {
+			x := chat.Min.X + in
+			dot(x, y, d, []colorT{colorAccent, colorYellow, colorGreen, colorRed}[i])
+			x += d + dp(6)
+			bar(x, y, tw*3/10, dp(5), name)
+			bar(x, y+dp(9), tw*(9-(i*2)%4)/10, dp(4), line)
+			bar(x, y+dp(16), tw*(4+(i*3)%5)/10, dp(4), line)
+			y += dp(32)
+		}
+	}
+
+	// The members: their pictures and names.
+	if side := r.side; !side.Empty() {
+		y := side.Min.Y + dp(5)
+		y += text(image.Pt(side.Min.X+in, y), side.Dx()-in, colorMuted, "Members").Size.Y + dp(5)
+		d := dp(12)
+		for i := 0; y+d < side.Max.Y-dp(2) && i < 7; i++ {
+			col := colorGreen
+			if i > 3 {
+				col = colorSelected
+			}
+			dot(side.Min.X+in, y, d, col)
+			bar(side.Min.X+in+d+dp(5), y+dp(4), (side.Dx()-2*in-d-dp(5))*(6+(i*3)%4)/10, dp(4), line)
+			y += dp(18)
+		}
+	}
+
+	// The bar whose buttons are under the pointer, outlined.
+	var mark image.Rectangle
+	switch c.hoveredBar() {
+	case "servers":
+		mark = r.servers
+	case "channels":
+		mark = r.channels
+	case "members":
+		mark = r.side
+	case "panel":
+		mark = panel
+	}
+	if !mark.Empty() {
+		paint.FillShape(gtx.Ops, colorAccent, clip.Stroke{Path: clip.Rect(mark.Inset(1)).Path(), Width: float32(dp(2))}.Op())
 	}
 	return layout.Dimensions{Size: size}
 }
