@@ -409,9 +409,8 @@ func (c *chatView) sendForwards() {
 					data = api.SendMessageData{Content: note, Nonce: newNonce()}
 				}
 				_, err := c.st.SendMessageComplex(d.ch.ID, data)
-				if err != nil {
-					failed[d.ch.ID] = true
-				}
+				// Sent again after a 429, it may go through.
+				failed[d.ch.ID] = err != nil
 				return err
 			}
 		}
