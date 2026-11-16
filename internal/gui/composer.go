@@ -108,8 +108,9 @@ type composerState struct {
 	silent    bool
 	silentBtn widget.Clickable
 
-	// The place of the box, for the popups drawn above it.
-	paneX, paneW, boxH int
+	// The place of the box, for the popups drawn above it: paneBottom is
+	// the bottom of the chat, above the server strip when it is there.
+	paneX, paneW, paneBottom, boxH int
 }
 
 func (c *chatView) attachFiles() {
@@ -978,7 +979,11 @@ func (c *chatView) layoutComposerPopups(gtx layout.Context) {
 		return
 	}
 	size := gtx.Constraints.Max
-	bottom := size.Y - cs.boxH + gtx.Dp(4)
+	paneBottom := size.Y
+	if cs.paneBottom > 0 {
+		paneBottom = cs.paneBottom
+	}
+	bottom := paneBottom - cs.boxH + gtx.Dp(4)
 	if cs.mentionOn && len(cs.mentionItems) > 0 {
 		pgtx := gtx
 		w := cs.paneW - gtx.Dp(32)

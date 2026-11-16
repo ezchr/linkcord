@@ -70,7 +70,7 @@ func (c *chatView) layoutGuildHeader(gtx layout.Context, title string) layout.Di
 			c.closeMenu()
 			gm.open = false
 		} else {
-			c.openGuildMenu(c.selGuild, image.Pt(gtx.Dp(72)+gtx.Dp(8), gtx.Dp(52)))
+			c.openGuildMenu(c.selGuild, c.cols.channels.Min.Add(image.Pt(gtx.Dp(8), gtx.Dp(52))))
 		}
 	}
 	height := gtx.Dp(48)

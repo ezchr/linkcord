@@ -26,7 +26,7 @@ type paneResize struct {
 	// limit is the most the window allows.
 	limit unit.Dp
 	// origin is the window x, in pixels, that the width is measured from:
-	// the left of the channels, or the right edge for the members.
+	// the outer edge of the column, away from the chat.
 	origin float32
 }
 
@@ -34,7 +34,10 @@ func paneSettingsPath() string {
 	return filepath.Join(filepath.Dir(logPath()), "panes.json")
 }
 
-func (c *chatView) paneWidths(gtx layout.Context) (int, int, bool) {
+// paneWidths are the widths of the channels and the members, and whether
+// the members show, in a window width wide with a server column serverW
+// wide beside them.
+func (c *chatView) paneWidths(gtx layout.Context, width, serverW int) (int, int, bool) {
 	if !c.panesLoaded {
 		c.panes = paneSettings{Channels: 240, Members: 240}
 		if !c.demo {
@@ -52,12 +55,22 @@ func (c *chatView) paneWidths(gtx layout.Context) (int, int, bool) {
 		}
 		c.panesLoaded = true
 	}
-	changed := c.channelResize.update(gtx, &c.panes.Channels, 1)
-	changed = c.memberResize.update(gtx, &c.panes.Members, -1) || changed
+	// The edges are dragged away from the chat: to the left for a column
+	// on the left.
+	l := c.paneLayout()
+	channelDir, memberDir := float32(1), float32(-1)
+	if l.Channels == placeRight {
+		channelDir = -1
+	}
+	if l.Members == placeLeft {
+		memberDir = 1
+	}
+	changed := c.channelResize.update(gtx, &c.panes.Channels, channelDir)
+	changed = c.memberResize.update(gtx, &c.panes.Members, memberDir) || changed
 	if changed && !c.demo {
 		c.savePanes()
 	}
-	available := max(gtx.Constraints.Max.X-gtx.Dp(72), 0)
+	available := max(width-serverW, 0)
 	channels := min(gtx.Dp(c.panes.Channels), max(available-gtx.Dp(280), 0))
 	members := gtx.Dp(c.panes.Members)
 	show := c.membersShown() && available >= gtx.Dp(160+320+160)
@@ -66,8 +79,6 @@ func (c *chatView) paneWidths(gtx layout.Context) (int, int, bool) {
 		members = min(members, max(available-channels-gtx.Dp(320), 0))
 	}
 	dp := func(px int) unit.Dp { return unit.Dp(float32(px) / max(gtx.Metric.PxPerDp, 1e-3)) }
-	c.channelResize.origin = float32(min(gtx.Dp(72), gtx.Constraints.Max.X))
-	c.memberResize.origin = float32(gtx.Constraints.Max.X)
 	c.channelResize.limit = dp(max(available-gtx.Dp(280), 0))
 	if show {
 		c.channelResize.limit = dp(max(available-gtx.Dp(320+160), 0))

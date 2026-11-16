@@ -23,6 +23,8 @@ type appearanceView struct {
 	hex      widget.Editor
 	resetOne widget.Clickable
 	resetAll widget.Clickable
+	// custom is the places of the bars.
+	custom customizeView
 }
 
 // themeColorOf returns the color of the interface named key.
@@ -74,15 +76,14 @@ func (c *chatView) updateAppearance(gtx layout.Context) {
 		av.colors = make(map[string]*widget.Clickable)
 		av.hex.SingleLine, av.hex.Submit = true, true
 	}
+	c.updateCustomize(gtx)
 	for _, p := range themePresets {
 		if clickOf(av.presets, p.key).Clicked(gtx) {
-			u.appearance = appearanceSettings{Preset: p.key}
+			// The layout stays.
+			u.appearance.Preset, u.appearance.Colors = p.key, nil
 			applyAppearance(u.appearance)
 			c.themeChanged(true)
-			if tc := themeColorOf(av.editing); tc != nil {
-				av.hex.SetText(hexOf(*tc.v))
-				av.picker.set(*tc.v)
-			}
+			c.refreshColorEditor()
 		}
 	}
 	for _, g := range themeGroups {
@@ -137,7 +138,8 @@ func (c *chatView) updateAppearance(gtx layout.Context) {
 	}
 }
 
-// appearanceRows are the Appearance page: presets, then every color.
+// appearanceRows are the Appearance page: the layout, presets, then every
+// color.
 func (c *chatView) appearanceRows() []layout.Widget {
 	u := c.u
 	th := u.th
@@ -145,12 +147,13 @@ func (c *chatView) appearanceRows() []layout.Widget {
 	if av.presets == nil {
 		return nil
 	}
-	rows := []layout.Widget{
+	presets := themePresets
+	rows := append(c.customizeRows(),
 		settingsHeading(th, "PRESETS"),
 		settingsText(th, "A preset sets every color at once; the colors below change on top of it."),
-	}
-	for i := 0; i < len(themePresets); i += 3 {
-		group := themePresets[i:min(i+3, len(themePresets))]
+	)
+	for i := 0; i < len(presets); i += 3 {
+		group := presets[i:min(i+3, len(presets))]
 		rows = append(rows, func(gtx layout.Context) layout.Dimensions {
 			children := make([]layout.FlexChild, 0, 2*len(group))
 			for j, p := range group {

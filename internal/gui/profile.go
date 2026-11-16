@@ -399,8 +399,8 @@ func (c *chatView) layoutProfile(gtx layout.Context) layout.Dimensions {
 	margin := gtx.Dp(12)
 	cardW := min(gtx.Dp(340), size.X-2*margin)
 	bottom := size.Y - margin
-	if p.self {
-		bottom = size.Y - gtx.Dp(60)
+	if p.self && !c.userPanelTop() {
+		bottom = c.channelsRect(gtx).Max.Y - gtx.Dp(60)
 	}
 	cgtx := gtx
 	cgtx.Constraints = layout.Constraints{Min: image.Pt(cardW, 0), Max: image.Pt(cardW, bottom-margin)}
@@ -410,7 +410,8 @@ func (c *chatView) layoutProfile(gtx layout.Context) layout.Dimensions {
 
 	pos := image.Pt((size.X-cardW)/2, (size.Y-dims.Size.Y)/2)
 	if p.self {
-		pos = image.Pt(gtx.Dp(8), bottom-dims.Size.Y)
+		// By the user panel.
+		pos = c.selfCardAt(gtx, cardW, dims.Size.Y)
 	}
 	t := op.Offset(pos).Push(gtx.Ops)
 	call.Add(gtx.Ops)

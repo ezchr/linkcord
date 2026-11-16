@@ -1380,4 +1380,13 @@ var spanish = map[string]string{
 	"Mark All as Read": "Marcar todo como leído",
 	"Nothing here yet. Mentions and replies to you show here.": "Aún no hay nada. Aquí aparecen las menciones y las respuestas a ti.",
 	"Discord did not give the mentions: ": "Discord no dio las menciones: ",
+	"LAYOUT": "DISPOSICIÓN",
+	"Where each bar of the window goes.": "Dónde va cada barra de la ventana.",
+	"Channel List": "Lista de canales",
+	"Member List": "Lista de miembros",
+	"Left": "Izquierda",
+	"Right": "Derecha",
+	"Top": "Arriba",
+	"Bottom": "Abajo",
+	"Reset Layout": "Restablecer disposición",
 }

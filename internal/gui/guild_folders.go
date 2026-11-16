@@ -196,12 +196,12 @@ func (c *chatView) layoutGuildEntry(gtx layout.Context, e guildEntry) layout.Dim
 	id := e.guild
 	guild, err := c.st.Cabinet.Guild(id)
 	if err != nil {
-		return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, gtx.Dp(56))}
+		return layout.Dimensions{Size: c.across(image.Rect(0, 0, gtx.Dp(72), gtx.Dp(56))).Max}
 	}
 	if e.folder != nil {
 		// The servers of an open folder lie on its color.
 		r := image.Rect(gtx.Dp(12)-gtx.Dp(2), 0, gtx.Dp(12)+gtx.Dp(50), gtx.Dp(56)+gtx.Dp(4))
-		paint.FillShape(gtx.Ops, withAlpha(c.folderColor(e.folder), 0x28), clip.Rect(r).Op())
+		paint.FillShape(gtx.Ops, withAlpha(c.folderColor(e.folder), 0x28), clip.Rect(c.across(r)).Op())
 	}
 	return c.guildButton(gtx, c.click(discord.Snowflake(id)), id == c.selGuild, c.guildUnread(id), c.guildMentions(id), c.voiceBadge(id), func(gtx layout.Context, active bool) layout.Dimensions {
 		// Servers are rounded squares, as on Discord.
@@ -238,13 +238,13 @@ func (c *chatView) guildDropArea(gtx layout.Context, head int) {
 	case d.target < 0 || d.target >= len(entries):
 	case d.where == 0:
 		r := image.Rect(gtx.Dp(12), y+gtx.Dp(8)-gtx.Dp(2), gtx.Dp(12)+gtx.Dp(52), y+rowH+gtx.Dp(2))
-		paint.FillShape(gtx.Ops, withAlpha(colorAccent, 0x60), clip.UniformRRect(r, gtx.Dp(18)).Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, withAlpha(colorAccent, 0x60), clip.UniformRRect(c.across(r), gtx.Dp(18)).Op(gtx.Ops))
 	default:
 		ly := y + gtx.Dp(4)
 		if d.where > 0 {
 			ly = y + rowH + gtx.Dp(4)
 		}
-		paint.FillShape(gtx.Ops, colorGreen, clip.UniformRRect(image.Rect(gtx.Dp(14), ly-gtx.Dp(2), gtx.Dp(58), ly+gtx.Dp(2)), gtx.Dp(2)).Op(gtx.Ops))
+		paint.FillShape(gtx.Ops, colorGreen, clip.UniformRRect(c.across(image.Rect(gtx.Dp(14), ly-gtx.Dp(2), gtx.Dp(58), ly+gtx.Dp(2))), gtx.Dp(2)).Op(gtx.Ops))
 	}
 }
 
@@ -269,7 +269,8 @@ func (c *chatView) guildScroll(gtx layout.Context) int {
 	return c.itemTop(gtx, p.First) + p.Offset
 }
 
-// entryAt is the entry at y in the column and where on it.
+// entryAt is the entry at y in the column, or x along the strip, and where
+// on it.
 func (c *chatView) entryAt(gtx layout.Context, y float32, n int) (int, int) {
 	rowH := float32(guildRowH(gtx))
 	pos := y - float32(c.itemTop(gtx, c.dragHead)) + float32(c.guildScroll(gtx))
@@ -309,8 +310,8 @@ func (c *chatView) updateGuildDrag(gtx layout.Context) {
 			if e.Buttons != pointer.ButtonPrimary {
 				continue
 			}
-			i, _ := c.entryAt(gtx, e.Position.Y, len(entries))
-			if e.Position.Y < float32(c.itemTop(gtx, c.dragHead)-c.guildScroll(gtx)) || i < 0 || i >= len(entries) {
+			i, _ := c.entryAt(gtx, c.along(e.Position), len(entries))
+			if c.along(e.Position) < float32(c.itemTop(gtx, c.dragHead)-c.guildScroll(gtx)) || i < 0 || i >= len(entries) {
 				continue
 			}
 			*d = guildDrag{pressed: true, from: i, start: e.Position, at: e.Position, target: -1}
@@ -319,11 +320,11 @@ func (c *chatView) updateGuildDrag(gtx layout.Context) {
 				continue
 			}
 			d.at = e.Position
-			if !d.dragging && abs32(e.Position.Y-d.start.Y) > float32(gtx.Dp(6)) {
+			if !d.dragging && abs32(c.along(e.Position)-c.along(d.start)) > float32(gtx.Dp(6)) {
 				d.dragging = true
 			}
 			if d.dragging {
-				d.target, d.where = c.entryAt(gtx, e.Position.Y, len(entries))
+				d.target, d.where = c.entryAt(gtx, c.along(e.Position), len(entries))
 				gtx.Execute(op.InvalidateCmd{})
 			}
 		case pointer.Release:

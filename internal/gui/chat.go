@@ -290,6 +290,10 @@ type chatView struct {
 	panes                               paneSettings
 	panesLoaded                         bool
 	channelResize, memberResize         paneResize
+	// cols are where the columns were laid out, as the bars were placed,
+	// and guildWheel takes the wheel over the server strip.
+	cols       paneRects
+	guildWheel bool
 
 	composer    widget.Editor
 	typingUntil time.Time
@@ -1513,52 +1517,10 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 	}
 	// Before the results are drawn, which takes their clicks.
 	c.updateSearch(gtx)
-	channels, members, showMembers := c.paneWidths(gtx)
-	serverWidth := min(gtx.Dp(72), gtx.Constraints.Max.X)
-	messageX := serverWidth + channels
-	children := []layout.FlexChild{
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return pane(gtx, colorServers, serverWidth, c.layoutGuilds)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return pane(gtx, colorSidebar, channels, c.layoutChannels)
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			c.comp.paneX, c.comp.paneW = messageX, gtx.Constraints.Max.X
-			return pane(gtx, colorChat, gtx.Constraints.Max.X, c.layoutMessages)
-		}),
-	}
-	// The results of a search take the members' place.
-	searching := c.search.open && c.selChannel != nil
-	if searching {
-		showMembers = false
-		w := min(gtx.Dp(420), max(gtx.Constraints.Max.X-messageX-gtx.Dp(320), gtx.Dp(260)))
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return pane(gtx, colorSidebar, w, c.layoutSearchResults)
-		}))
-	}
-	if showMembers {
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return pane(gtx, colorSidebar, members, c.layoutMembers)
-		}))
-	}
-	var dims layout.Dimensions
-	if c.lostVoice.ch != nil {
-		// The bar of a voice channel lost goes over the columns.
-		dims = layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(c.layoutLostVoice),
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Flex{}.Layout(gtx, children...) }),
-		)
-	} else {
-		dims = layout.Flex{}.Layout(gtx, children...)
-	}
-	c.channelResize.layout(gtx, messageX)
-	if showMembers {
-		c.memberResize.layout(gtx, gtx.Constraints.Max.X-members)
-	}
+	c.layoutColumns(gtx)
 	c.layoutComposerPopups(gtx)
 	c.layoutOverlays(gtx)
-	return dims
+	return layout.Dimensions{Size: gtx.Constraints.Max}
 }
 
 // layoutOverlays draws what opens over the columns: cards, viewers, forms
@@ -1575,7 +1537,11 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 		pgtx := gtx
 		w := l.panelW - gtx.Dp(16)
 		pgtx.Constraints = layout.Constraints{Min: image.Pt(w, 0), Max: image.Pt(w, gtx.Dp(240))}
-		drawAbove(gtx, pgtx, image.Pt(gtx.Dp(72)+gtx.Dp(8), gtx.Constraints.Max.Y-l.panelH-gtx.Dp(6)), l, c.layoutVoiceLog)
+		if at, below := c.voiceLogAt(gtx); below {
+			drawBelow(gtx, pgtx, at, l, c.layoutVoiceLog)
+		} else {
+			drawAbove(gtx, pgtx, at, l, c.layoutVoiceLog)
+		}
 	}
 	if !c.viewerOnly && c.imgEdit != nil {
 		c.layoutImageEditor(gtx)
@@ -1633,6 +1599,12 @@ func (c *chatView) layoutGuilds(gtx layout.Context) layout.Dimensions {
 		c.syncFolders()
 	}
 	entries := c.guildEntries()
+	across := c.serversAcross()
+	c.guildList.Axis = layout.Vertical
+	if across {
+		c.guildList.Axis = layout.Horizontal
+		c.updateGuildWheel(gtx)
+	}
 	dims := listLayout(gtx, th, &c.guildList, len(entries)+head, func(gtx layout.Context, i int) layout.Dimensions {
 		if i < head {
 			var dims layout.Dimensions
@@ -1652,6 +1624,18 @@ func (c *chatView) layoutGuilds(gtx layout.Context) layout.Dimensions {
 				return dims
 			}
 			// A line separates the servers from the direct messages.
+			if across {
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return dims }),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						w, h := gtx.Dp(2), gtx.Dp(32)
+						return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							paint.FillShape(gtx.Ops, colorSelected, clip.Rect{Max: image.Pt(w, h)}.Op())
+							return layout.Dimensions{Size: image.Pt(w, h)}
+						})
+					}),
+				)
+			}
 			return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return dims }),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1674,49 +1658,79 @@ func (c *chatView) layoutGuilds(gtx layout.Context) layout.Dimensions {
 // mentions is the number on the red pill at its bottom right, and corner a
 // badge at its top right, such as the voice one, as on Discord.
 func (c *chatView) guildButton(gtx layout.Context, click *widget.Clickable, selected bool, unread ningen.UnreadIndication, mentions int, corner layout.Widget, w func(gtx layout.Context, active bool) layout.Dimensions) layout.Dimensions {
+	btn := func(gtx layout.Context) layout.Dimensions {
+		return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			pointer.CursorPointer.Add(gtx.Ops)
+			dims := w(gtx, selected || click.Hovered())
+			// The number of mentions on a red pill at the bottom
+			// right, ringed in the column's color.
+			if mentions > 0 {
+				macro := op.Record(gtx.Ops)
+				bd := outlinedBadge(gtx, c, mentions)
+				call := macro.Stop()
+				t := op.Offset(image.Pt(dims.Size.X-bd.Size.X+gtx.Dp(4), dims.Size.Y-bd.Size.Y+gtx.Dp(4))).Push(gtx.Ops)
+				call.Add(gtx.Ops)
+				t.Pop()
+			}
+			if corner != nil {
+				macro := op.Record(gtx.Ops)
+				cgtx := gtx
+				cgtx.Constraints.Min = image.Point{}
+				bd := corner(cgtx)
+				call := macro.Stop()
+				t := op.Offset(image.Pt(dims.Size.X-bd.Size.X+gtx.Dp(4), -gtx.Dp(4))).Push(gtx.Ops)
+				call.Add(gtx.Ops)
+				t.Pop()
+			}
+			return dims
+		})
+	}
+	// pillLen is the length of the pill, none for a server read.
+	pillLen := func(gtx layout.Context) int {
+		switch {
+		case selected:
+			return gtx.Dp(40)
+		case click.Hovered():
+			return gtx.Dp(20)
+		case unread != ningen.ChannelRead:
+			return gtx.Dp(8)
+		}
+		return 0
+	}
+	if c.serversAcross() {
+		// Along a strip, the pill lies at the strip's outer edge, half out
+		// of the window as at the column's left.
+		bottom := c.paneLayout().Servers == placeBottom
+		return layout.Inset{Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Stack{Alignment: layout.N}.Layout(gtx,
+				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.Y = gtx.Constraints.Max.Y
+					return layout.W.Layout(gtx, btn)
+				}),
+				layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+					if h := pillLen(gtx); h > 0 {
+						x, y := (gtx.Constraints.Min.X-h)/2, 0
+						if bottom {
+							y = gtx.Constraints.Min.Y
+						}
+						r := image.Rect(x, y-gtx.Dp(4), x+h, y+gtx.Dp(4))
+						paint.FillShape(gtx.Ops, colorHeader, clip.UniformRRect(r, gtx.Dp(4)).Op(gtx.Ops))
+					}
+					return layout.Dimensions{Size: gtx.Constraints.Min}
+				}),
+			)
+		})
+	}
 	return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		return layout.Stack{Alignment: layout.W}.Layout(gtx,
 			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Min.X = gtx.Constraints.Max.X
-				return layout.N.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						pointer.CursorPointer.Add(gtx.Ops)
-						dims := w(gtx, selected || click.Hovered())
-						// The number of mentions on a red pill at the bottom
-						// right, ringed in the column's color.
-						if mentions > 0 {
-							macro := op.Record(gtx.Ops)
-							bd := outlinedBadge(gtx, c, mentions)
-							call := macro.Stop()
-							t := op.Offset(image.Pt(dims.Size.X-bd.Size.X+gtx.Dp(4), dims.Size.Y-bd.Size.Y+gtx.Dp(4))).Push(gtx.Ops)
-							call.Add(gtx.Ops)
-							t.Pop()
-						}
-						if corner != nil {
-							macro := op.Record(gtx.Ops)
-							cgtx := gtx
-							cgtx.Constraints.Min = image.Point{}
-							bd := corner(cgtx)
-							call := macro.Stop()
-							t := op.Offset(image.Pt(dims.Size.X-bd.Size.X+gtx.Dp(4), -gtx.Dp(4))).Push(gtx.Ops)
-							call.Add(gtx.Ops)
-							t.Pop()
-						}
-						return dims
-					})
-				})
+				return layout.N.Layout(gtx, btn)
 			}),
 			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-				var h int
-				switch {
-				case selected:
-					h = gtx.Dp(40)
-				case click.Hovered():
-					h = gtx.Dp(20)
-				case unread != ningen.ChannelRead:
-					h = gtx.Dp(8)
-				default:
+				h := pillLen(gtx)
+				if h == 0 {
 					return layout.Dimensions{Size: gtx.Constraints.Min}
 				}
 				y := (gtx.Constraints.Min.Y - h) / 2
@@ -1749,6 +1763,18 @@ func (c *chatView) layoutChannels(gtx layout.Context) layout.Dimensions {
 			title = g.Name
 		}
 	}
+	panel := layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		d := c.layoutUserPanel(gtx)
+		// The voice history opens by it, as wide as the channels.
+		c.voiceLog.panelH, c.voiceLog.panelW = d.Size.Y, d.Size.X
+		return d
+	})
+	// The user panel goes under the header when moved to the top.
+	none := layout.Rigid(func(layout.Context) layout.Dimensions { return layout.Dimensions{} })
+	top, bottom := none, panel
+	if c.userPanelTop() {
+		top, bottom = panel, none
+	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if c.selGuild.IsValid() {
@@ -1756,6 +1782,7 @@ func (c *chatView) layoutChannels(gtx layout.Context) layout.Dimensions {
 			}
 			return header(gtx, th, title)
 		}),
+		top,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			// Channels, categories and people in voice can be dragged,
 			// read before the rows take their clicks.
@@ -1773,12 +1800,7 @@ func (c *chatView) layoutChannels(gtx layout.Context) layout.Dimensions {
 			c.channelDropArea(gtx)
 			return dims
 		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			d := c.layoutUserPanel(gtx)
-			// The voice history opens above it, as wide as the channels.
-			c.voiceLog.panelH, c.voiceLog.panelW = d.Size.Y, d.Size.X
-			return d
-		}),
+		bottom,
 	)
 }
 

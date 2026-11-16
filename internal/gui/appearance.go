@@ -137,9 +137,11 @@ var themePresets = []themePreset{
 
 // appearanceSettings are the colors the user chose: a preset, and colors
 // changed over it, as #rrggbb by key, kept in appearance.json beside the log.
+// Layout is where the bars are.
 type appearanceSettings struct {
 	Preset string            `json:"preset,omitempty"`
 	Colors map[string]string `json:"colors,omitempty"`
+	Layout paneLayout        `json:"layout,omitzero"`
 }
 
 func appearancePath() string {

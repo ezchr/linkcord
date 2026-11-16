@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"encoding/json"
 	"image"
 	"image/png"
 	"os"
@@ -39,6 +40,19 @@ func TestRenderDemo(t *testing.T) {
 	}
 	const w, h = 1100, 680
 	u := &ui{win: new(app.Window), th: newTheme(), focused: true}
+	// LINKCORD_RENDER_APPEARANCE is an appearance.json to draw with, such
+	// as one with a background picture and the bars moved.
+	if path := os.Getenv("LINKCORD_RENDER_APPEARANCE"); path != "" {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			err = json.Unmarshal(data, &u.appearance)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		applyAppearance(u.appearance)
+		defer applyAppearance(appearanceSettings{})
+	}
 	u.images = newImages(u)
 	u.startDemo()
 

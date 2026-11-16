@@ -133,6 +133,10 @@ func (c *chatView) layoutLiveHover(gtx layout.Context) {
 	th := c.u.th
 	w := gtx.Dp(300)
 	x := c.comp.paneX + gtx.Dp(8)
+	if c.paneLayout().Channels == placeRight {
+		// By the channels, on the chat's right.
+		x = c.comp.paneX + c.comp.paneW - w - gtx.Dp(8)
+	}
 	cgtx := gtx
 	cgtx.Constraints = layout.Constraints{Min: image.Pt(w, 0), Max: image.Pt(w, gtx.Constraints.Max.Y)}
 	key := c.streamKeyOf(h.vs)
