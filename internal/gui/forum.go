@@ -452,11 +452,9 @@ func (c *chatView) layoutForumSquare(gtx layout.Context, post discord.Channel) l
 		defer clip.UniformRRect(r, gtx.Dp(8)).Push(gtx.Ops).Pop()
 		paint.FillShape(gtx.Ops, bg, clip.Rect(r).Op())
 		// The text takes what it needs at the bottom, the picture the rest.
-		textH := gtx.Dp(64)
-		if hasFirst && len(first.Reactions) > 0 {
-			textH = gtx.Dp(104)
-		}
-		textH = min(textH, size.Y*2/3)
+		// The same in every square, with room for the reactions, so that the
+		// names line up across a row whether a post has any or not.
+		textH := min(gtx.Dp(104), size.Y*2/3)
 		picH := size.Y - textH
 		pic := image.Rectangle{Max: image.Pt(size.X, picH)}
 		proxy, url, ok := postPicture(first)
