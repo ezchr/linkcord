@@ -323,9 +323,8 @@ type chatView struct {
 	// The member list at the right of the messages.
 	showMembers   bool
 	membersToggle widget.Clickable
-	// The buttons of the header for threads: a channel's list of them,
-	// joining the thread open, and its menu.
-	threadsBtn, joinThreadBtn, threadMoreBtn widget.Clickable
+	// The buttons of the header in a thread: joining it, and its menu.
+	joinThreadBtn, threadMoreBtn widget.Clickable
 	// callBtn and videoCallBtn call the direct message or group open.
 	callBtn, videoCallBtn widget.Clickable
 	// firstBtn goes to the first message of the channel; loadingNewer is

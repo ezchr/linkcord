@@ -184,6 +184,13 @@ func (c *chatView) channelMenuItems() []menuItem {
 		}
 		c.markRead(ch.ID)
 	}}, {sep: true}}
+	if hasThreads(ch.Type) {
+		// The channel's threads, which Discord lists from its header.
+		items = append(items, menuItem{key: "threads", text: "Threads", lead: menuIcon(iconMenuThreads, colorMuted), act: func() {
+			c.openThreadBrowser(ch)
+			c.menu.stay = true
+		}}, menuItem{sep: true})
+	}
 	if category {
 		items = append(items,
 			menuItem{key: "collapse", text: "Collapse Category", check: checked(c.collapsed[ch.ID]), act: func() {

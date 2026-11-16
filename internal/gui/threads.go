@@ -1007,8 +1007,8 @@ func (c *chatView) layoutThreadTitle(gtx layout.Context, ch discord.Channel) lay
 	)
 }
 
-// layoutThreadButtons are the header's buttons for threads: a channel's
-// threads, or, in a thread, joining it and its menu.
+// layoutThreadButtons are the header's buttons in a thread: joining it and
+// its menu. A channel's threads are in its menu in the channel list.
 func (c *chatView) layoutThreadButtons(gtx layout.Context) layout.Dimensions {
 	ch := c.selChannel
 	if ch == nil || !ch.GuildID.IsValid() {
@@ -1016,10 +1016,6 @@ func (c *chatView) layoutThreadButtons(gtx layout.Context) layout.Dimensions {
 	}
 	th := c.u.th
 	switch {
-	case hasThreads(ch.Type):
-		return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return iconButton(gtx, &c.threadsBtn, iconMenuThreads, colorMuted, colorHeader)
-		})
 	case isThread(ch.Type):
 		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -1057,9 +1053,6 @@ func smallButton(gtx layout.Context, th *material.Theme, click *widget.Clickable
 // updateThreadButtons handles the clicks of the header's thread buttons.
 func (c *chatView) updateThreadButtons(gtx layout.Context) {
 	ch := c.selChannel
-	if c.threadsBtn.Clicked(gtx) && ch != nil && hasThreads(ch.Type) {
-		c.openThreadBrowser(*ch)
-	}
 	if c.joinThreadBtn.Clicked(gtx) && ch != nil && isThread(ch.Type) {
 		c.joinThread(*ch)
 	}
