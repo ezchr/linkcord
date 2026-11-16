@@ -247,7 +247,7 @@ func (c *chatView) forgetStaleThreads(ev *gateway.ThreadListSyncEvent) {
 
 // threadRows are the lines of the threads under a channel of the list.
 func (c *chatView) threadRows(chs []discord.Channel, parent discord.Channel) []channelRow {
-	if !hasThreads(parent.Type) {
+	if !holdsThreads(parent.Type) {
 		return nil
 	}
 	var rows []channelRow
@@ -452,45 +452,8 @@ func (c *chatView) patchThread(ch discord.Channel, body map[string]any, demo fun
 // openThreadBrowser lists the threads of a channel at the pointer: making
 // one, those active, and those archived, which Discord is asked for.
 func (c *chatView) openThreadBrowser(parent discord.Channel) {
-	t := &c.threads
-	t.browseParent, t.archived, t.loadErr, t.loading = parent.ID, nil, "", true
+	c.loadOlderThreads(parent)
 	c.openMenu(c.pointerAt, 300, func() []menuItem { return c.threadBrowserItems(parent) })
-	if c.demo {
-		for _, th := range t.demoArchived {
-			if th.ParentID == parent.ID {
-				t.archived = append(t.archived, th)
-			}
-		}
-		t.loading = false
-		return
-	}
-	go func() {
-		// As Discord's app lists a channel's older threads.
-		res, err := c.st.SearchThreads(parent.ID, api.SearchThreadsData{
-			Archived: true, SortBy: api.LastMessageTime, SortOrder: api.SortDescending, Limit: 25,
-		})
-		c.u.post(func() {
-			if t.browseParent != parent.ID {
-				return
-			}
-			t.loading = false
-			if err != nil {
-				t.loadErr = "Older threads could not be loaded"
-				return
-			}
-			for i := range res.Threads {
-				if !res.Threads[i].GuildID.IsValid() {
-					res.Threads[i].GuildID = parent.GuildID
-				}
-			}
-			for _, m := range res.Members {
-				if m.UserID == c.me.ID || !m.UserID.IsValid() {
-					t.setJoined(m.ID, true)
-				}
-			}
-			t.archived = res.Threads
-		})
-	}()
 }
 
 func (c *chatView) threadBrowserItems(parent discord.Channel) []menuItem {
@@ -557,10 +520,13 @@ func (c *chatView) canCreateThread(parent discord.Channel) bool {
 // createThread is the form that starts a thread, from a message or on its
 // own, as Discord's.
 type createThread struct {
-	open    bool
-	parent  discord.Channel
-	from    *discord.Message
-	name    widget.Editor
+	open   bool
+	parent discord.Channel
+	from   *discord.Message
+	name   widget.Editor
+	// message is the first message of a forum's post, which Discord wants
+	// with it.
+	message widget.Editor
 	private bool
 	focused bool
 	busy    bool
@@ -592,6 +558,7 @@ func (c *chatView) openCreateThread(parent discord.Channel, from *discord.Messag
 	*ct = createThread{open: true, parent: parent, from: from}
 	ct.name.SingleLine, ct.name.Submit = true, true
 	ct.name.MaxLen = 100
+	ct.message.MaxLen = 2000
 }
 
 func (c *chatView) submitCreateThread() {
@@ -604,6 +571,11 @@ func (c *chatView) submitCreateThread() {
 		return
 	}
 	parent := ct.parent
+	first := strings.TrimSpace(ct.message.Text())
+	if isForum(parent.Type) && first == "" {
+		ct.err = "A post needs a message."
+		return
+	}
 	archive := parent.DefaultAutoArchiveDuration
 	if archive == 0 {
 		archive = discord.ThreeDaysArchive
@@ -634,6 +606,10 @@ func (c *chatView) submitCreateThread() {
 	ct.busy, ct.err = true, ""
 	// As the web app sends it, with the kind of thread from a message too.
 	body := map[string]any{"name": name, "type": kind, "auto_archive_duration": archive}
+	if isForum(parent.Type) {
+		// A post is made with its first message, and has no kind to choose.
+		body = map[string]any{"name": name, "auto_archive_duration": archive, "message": map[string]any{"content": first}}
+	}
 	url := api.EndpointChannels + parent.ID.String() + "/threads"
 	if from != nil {
 		url = api.EndpointChannels + parent.ID.String() + "/messages/" + from.ID.String() + "/threads"
@@ -724,6 +700,10 @@ func (c *chatView) layoutCreateThread(gtx layout.Context) {
 	if hint == "" {
 		hint = "New Thread"
 	}
+	title, nameLabel, createLabel := "Create Thread", "Thread Name", "Create Thread"
+	if isForum(ct.parent.Type) {
+		title, nameLabel, createLabel, hint = "Create Post", "Post Title", "Post", "Title"
+	}
 	w := min(gtx.Dp(460), size.X-gtx.Dp(32))
 	cgtx := gtx
 	cgtx.Constraints = layout.Constraints{Min: image.Pt(w, 0), Max: image.Pt(w, size.Y-gtx.Dp(64))}
@@ -733,7 +713,7 @@ func (c *chatView) layoutCreateThread(gtx layout.Context) {
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconMenuThreads, 22, colorMuted) }),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-				layout.Flexed(1, bold(label(th, 20, colorHeader, "Create Thread")).Layout),
+				layout.Flexed(1, bold(label(th, 20, colorHeader, title)).Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return ct.x.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						pointer.CursorPointer.Add(gtx.Ops)
@@ -766,10 +746,21 @@ func (c *chatView) layoutCreateThread(gtx layout.Context) {
 		}), layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout))
 	}
 	rows = append(rows,
-		layout.Rigid(bold(label(th, 14, colorHeader, "Thread Name")).Layout),
+		layout.Rigid(bold(label(th, 14, colorHeader, nameLabel)).Layout),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return textField(gtx, th, &ct.name, hint) }),
 	)
+	if isForum(ct.parent.Type) {
+		rows = append(rows,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+			layout.Rigid(bold(label(th, 14, colorHeader, "Message")).Layout),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Max.Y = min(gtx.Constraints.Max.Y, gtx.Dp(180))
+				return textField(gtx, th, &ct.message, "Enter a message…")
+			}),
+		)
+	}
 	if ct.from == nil && ct.parent.Type == discord.GuildText && c.can(ct.parent.ID, discord.PermissionCreatePrivateThreads) {
 		rows = append(rows,
 			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
@@ -799,7 +790,7 @@ func (c *chatView) layoutCreateThread(gtx layout.Context) {
 			return layout.Flex{}.Layout(gtx,
 				half(&ct.cancel, colorSecondaryButton, "Cancel"),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
-				half(&ct.create, create, "Create Thread"),
+				half(&ct.create, create, createLabel),
 			)
 		}),
 	)

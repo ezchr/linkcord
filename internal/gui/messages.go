@@ -51,6 +51,13 @@ func (c *chatView) layoutMessages(gtx layout.Context) layout.Dimensions {
 	if !c.selChannel.GuildID.IsValid() {
 		title = "@ " + c.dmName(*c.selChannel)
 	}
+	if isForum(c.selChannel.Type) && !c.selectedHidden() {
+		// A forum lists its posts, and has nothing to type in.
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.chatHeader(gtx, c.selChannel.Name) }),
+			layout.Flexed(1, c.layoutForum),
+		)
+	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.chatHeader(gtx, title) }),
 		layout.Rigid(c.layoutCallBanner),

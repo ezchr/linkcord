@@ -117,6 +117,8 @@ type chatView struct {
 	// is the form that starts one.
 	threads   threadState
 	newThread createThread
+	// forum is the list of posts of the forum open.
+	forum forumState
 	// search finds messages of the server or conversation open.
 	search searchView
 	// gset is the settings of a server, open over everything, and cset a
@@ -893,8 +895,8 @@ func (c *chatView) rebuildRows() {
 		switch {
 		case ch.Type == discord.GuildCategory:
 			categories = append(categories, ch)
-		case !isTextual(ch.Type) && !isVoice(ch.Type):
-			// Forums and other kinds are not supported yet.
+		case !isTextual(ch.Type) && !isVoice(ch.Type) && !isForum(ch.Type):
+			// Other kinds are not supported yet.
 		case isThread(ch.Type):
 			// Listed under their channel.
 		case !c.can(ch.ID, discord.PermissionViewChannel) && !c.u.app.ShowHiddenChannels:
@@ -1099,6 +1101,12 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	if c.hiddenChannel(ch) {
 		// Its messages cannot be read; what is known of it shows instead.
 		c.loading = false
+		return
+	}
+	if isForum(ch.Type) {
+		// A forum has posts in place of messages.
+		c.loading = false
+		c.openForum(ch)
 		return
 	}
 	id, epoch := ch.ID, c.historyEpoch
@@ -1856,6 +1864,9 @@ func (c *chatView) layoutRow(gtx layout.Context, r channelRow, first bool) layou
 					})
 				default:
 					return locked(gtx, privateChannel(r.ch) || c.hiddenChannel(r.ch), func(gtx layout.Context) layout.Dimensions {
+						if isForum(r.ch.Type) {
+							return forumSign(gtx)
+						}
 						gtx.Constraints.Min.X = gtx.Dp(20)
 						l := label(th, 20, colorChannel, "#")
 						l.Alignment = text.Middle
