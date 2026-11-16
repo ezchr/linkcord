@@ -90,5 +90,6 @@ func newState(token string) *ningen.State {
 		slog.Error("state log", "err", err)
 	}
 	st.OnRequest = append(st.OnRequest, http.PageHeaders(currentPage))
+	st.Client.Client.OnResponse = append(st.Client.Client.OnResponse, noteRateLimit)
 	return st
 }

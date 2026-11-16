@@ -232,6 +232,7 @@ When merging upstream discordo changes, replace `github.com/ayn2op/discordo` mod
 - **gioui.org/x v0.10.3:** draws image glyphs in rich text so color emoji remain visible; also supports the project's rich-text span callback, and reports where every span and its letters are laid out, for selecting text.
 - **Arikawa (ayn2op fork, 2026-10-12):** users carry their avatar decoration, nameplate and server tag (`avatar_decoration_data`, `collectibles`, `primary_guild`), which Discord sends with every user and Arikawa dropped. A voice session tells every voice server it is moved to that it speaks, as it told the first; otherwise, after Discord moves a call to another server, nobody hears the user.
 - **Arikawa, polls:** messages carry their poll (`poll`), which Arikawa dropped.
+- **Arikawa, forwards:** a message that forwards another (`message_reference` of type 1) is sent with no content of its own, which Arikawa refused as empty. `MessageReference` already carried `type`.
 - **RNNoise 0.1.1:** vendored unchanged in `third_party/rnnoise`, with its trained model and an empty `config.h`, for noise suppression.
 - **dave-go v0.5.1:** adds end-to-end encryption of H264 frames laid out as libdave does, taking a fresh nonce for every retry, for screen sharing. Upstream encrypts Opus only.
 

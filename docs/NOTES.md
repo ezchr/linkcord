@@ -117,3 +117,45 @@ that no test reads or writes the real `inbox.json`.
   touching the installed one; the demo also skips the single instance lock.
 - The checkout has CRLF line endings (`core.autocrlf=true`), so `gofmt -l`
   lists every file; check the files changed with `gofmt -d`.
+
+## Forwarding messages
+
+- **The request.** A forward is a message create in the place it goes to
+  (`POST /channels/{id}/messages`) whose `message_reference` has `type: 1`
+  and the message's `message_id`, `channel_id` and, in a server,
+  `guild_id`. It has no content of its own; Discord fills
+  `message_snapshots` in what it creates. `forwardData` (`forward.go`)
+  builds it and it goes through `SendMessageComplex`, as the box's
+  messages do, so the nonce, `tts`, `flags` and the headers are the same.
+  The text written in the form is a second, plain message after it.
+- **Arikawa refused it.** `SendMessageComplex` answers `ErrEmptyMessage`
+  for a message without content, embeds, files or components, before any
+  request. It now lets a reference of type forward through
+  (`third_party/patches/arikawa-forward.patch`). `MessageReference`
+  already had `type`.
+- **What cannot be forwarded** (`forwardable`): system messages, messages
+  only the user sees, polls, messages deleted and kept here, and messages
+  of a channel whose history the user may not read. Voice messages are
+  offered; whether Discord takes them was not tried.
+- **Where to.** `dmDests` and `guildDests` list the direct messages, the
+  most recent first, then each server's channels in the order of its
+  channel list with the threads joined under their channel. They are
+  worked out once when the form opens, as the permissions of every
+  channel of every server are too much for each frame.
+- **Several places.** One request at a time, 0.5 to 1.5 s apart
+  (`paceDest`). A place that refuses a message gets no more of them and
+  says why on its line; the others go on. "Send Again" sends only what a
+  place lacks (`forwardPlan`).
+- **Arikawa hides 429s.** Its client waits what `Retry-After` says and
+  sends the request again, up to 5 times, so the caller never sees most
+  of them. `noteRateLimit`, an `OnResponse` hook set in `newState`,
+  counts them in `rateLimitHits`. `st.OnResponse` is `api.Client`'s
+  method, not the list of hooks: that is `st.Client.Client.OnResponse`.
+- **Not tried against Discord.** Nobody sent a forward with this build:
+  the body is what the web app is known to send, less its empty
+  `content` and `mobile_network_type`, which Linkcord's other messages
+  leave out too. Slow mode answers 429 with code 20016, which Arikawa
+  may wait out like a rate limit before the form hears of it.
+- **How to test.** `go test ./internal/gui -run 'Forward|Dests|SendErrorText'`.
+  In the demo the form sends nothing and adds the forward to the place
+  chosen. `TestRenderDemo` has `rclick:x,y` for the message's menu.

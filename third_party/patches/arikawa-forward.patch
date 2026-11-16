@@ -1,0 +1,16 @@
+diff --git a/api/send.go b/api/send.go
+index e448802..ff5d892 100644
+--- a/api/send.go
++++ b/api/send.go
+@@ -177,7 +177,10 @@ func (data SendMessageData) WriteMultipart(body *multipart.Writer) error {
+ // Content-Disposition subpart header MUST contain a filename parameter.
+ func (c *Client) SendMessageComplex(
+ 	channelID discord.ChannelID, data SendMessageData) (*discord.Message, error) {
+-	if data.Content == "" && len(data.Embeds) == 0 && len(data.Files) == 0 && len(data.Components) == 0 {
++	// A forward carries the message it points to and nothing of its own.
++	// (Added by Linkcord.)
++	forward := data.Reference != nil && data.Reference.Type == discord.MessageReferenceTypeForward
++	if data.Content == "" && len(data.Embeds) == 0 && len(data.Files) == 0 && len(data.Components) == 0 && !forward {
+ 		return nil, ErrEmptyMessage
+ 	}
+ 

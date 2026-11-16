@@ -321,6 +321,11 @@ func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
 		if c.doubleClicked(gtx, c.rightTag("reply"+m.ID.String()), dims.Size) {
 			c.startReply(m)
 		}
+		// A right click opens its menu, after the text selected opened its
+		// own, which it takes the place of.
+		if rightClicked(gtx, c.rightTag("menu"+m.ID.String()), dims.Size) {
+			c.u.post(func() { c.openMessageMenu(m) })
+		}
 		return dims
 	})
 }

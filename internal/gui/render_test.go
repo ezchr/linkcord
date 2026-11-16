@@ -27,7 +27,8 @@ import (
 // LINKCORD_RENDER is the folder for the pictures. LINKCORD_RENDER_STEPS is
 // what to do, separated by ";":
 //
-//	move:x,y  click:x,y  shiftclick:x,y  scroll:x,y,dy  key:Name  ctrlkey:Name  text:abc  wait:ms  snap:name
+//	move:x,y  click:x,y  shiftclick:x,y  rclick:x,y  press:x,y  release:x,y  scroll:x,y,dy
+//	key:Name  ctrlkey:Name  text:abc  wait:ms  snap:name
 //
 // Keys are Return, Escape, Up, Down or Gio's names.
 func TestRenderDemo(t *testing.T) {
@@ -106,6 +107,22 @@ func TestRenderDemo(t *testing.T) {
 				pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, Position: p, Buttons: pointer.ButtonPrimary, Modifiers: mods},
 				pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, Position: p, Modifiers: mods},
 			)
+		case "rclick":
+			p := point(arg)
+			router.Queue(
+				pointer.Event{Kind: pointer.Move, Source: pointer.Mouse, Position: p},
+				pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, Position: p, Buttons: pointer.ButtonSecondary},
+				pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, Position: p},
+			)
+		case "press":
+			// press and release apart, with a wait between, hold the button.
+			p := point(arg)
+			router.Queue(
+				pointer.Event{Kind: pointer.Move, Source: pointer.Mouse, Position: p},
+				pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, Position: p, Buttons: pointer.ButtonPrimary},
+			)
+		case "release":
+			router.Queue(pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, Position: point(arg)})
 		case "scroll":
 			// scroll:x,y,dy with dy in pixels, negative to go up.
 			xy, dy, _ := strings.Cut(arg, ";")

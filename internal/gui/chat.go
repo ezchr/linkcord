@@ -361,6 +361,8 @@ type chatView struct {
 
 	// act is what can be done to messages: see actions.go.
 	act actionState
+	// fwd is the form that asks where to forward messages.
+	fwd forwardForm
 
 	// call is the voice channel open in the middle, and sounds the sounds of
 	// the soundboard.
@@ -1571,6 +1573,9 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 	}
 	if c.newThread.open {
 		c.layoutCreateThread(gtx)
+	}
+	if c.fwd.open {
+		c.layoutForward(gtx)
 	}
 	c.layoutSearchMenu(gtx)
 	c.layoutInbox(gtx)

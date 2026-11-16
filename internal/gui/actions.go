@@ -26,7 +26,7 @@ import (
 )
 
 // What can be done to a message: the toolbar shown while the pointer is over
-// it (react, reply, edit, copy, delete), replying, editing in place,
+// it (react, reply, forward, edit, copy, delete), replying, editing in place,
 // deleting after a confirmation, and the reactions under it.
 
 var (
@@ -40,6 +40,8 @@ type actionKind int
 const (
 	actReact actionKind = iota
 	actReply
+	// actForward sends the message somewhere else.
+	actForward
 	actEdit
 	actCopy
 	actDelete
@@ -303,6 +305,9 @@ func (c *chatView) layoutToolbar(gtx layout.Context, m discord.Message, row layo
 	if c.canSendHere() && !gone {
 		kinds = append(kinds, actReply)
 	}
+	if c.canForward(m) {
+		kinds = append(kinds, actForward)
+	}
 	if ch := c.selChannel; ch != nil && !gone && m.Thread == nil && isRegular(m) && !isEphemeral(m) && c.canCreateThread(*ch) {
 		kinds = append(kinds, actThread)
 	}
@@ -369,6 +374,8 @@ func actionIcon(k actionKind) (*widget.Icon, colorT) {
 		return iconEmoji, colorYellow
 	case actReply:
 		return iconReply, colorHeader
+	case actForward:
+		return iconForward, colorHeader
 	case actEdit:
 		return iconEdit, colorHeader
 	case actCopy:
@@ -395,6 +402,8 @@ func (c *chatView) runAction(gtx layout.Context, m discord.Message, k actionKind
 		c.u.post(func() { c.openReactionPicker(m) })
 	case actReply:
 		c.u.post(func() { c.startReply(m) })
+	case actForward:
+		c.u.post(func() { c.openForward([]discord.Message{m}, false) })
 	case actEdit:
 		c.u.post(func() { c.startEdit(m) })
 	case actDelete:
@@ -408,6 +417,42 @@ func (c *chatView) runAction(gtx layout.Context, m discord.Message, k actionKind
 			}
 		})
 	}
+}
+
+// openMessageMenu opens the menu of a right click on a message, with what
+// its toolbar does.
+func (c *chatView) openMessageMenu(m discord.Message) {
+	if c.messageIndex(m.ID) < 0 || isEphemeral(m) || c.act.editing == m.ID {
+		return
+	}
+	gone := c.deleted.has(m.ID)
+	var items []menuItem
+	if !c.sel.empty() {
+		items = append(items, menuItem{text: "Copy", act: c.copySelection}, menuItem{sep: true})
+	}
+	if c.canSendHere() && !gone {
+		items = append(items, menuItem{text: "Reply", act: func() { c.startReply(m) }})
+	}
+	if c.canForward(m) {
+		items = append(items, menuItem{text: "Forward", act: func() { c.openForward([]discord.Message{m}, false) }})
+	}
+	if m.Content != "" {
+		text := c.renderContent(m)
+		items = append(items, menuItem{text: "Copy Text", act: func() {
+			c.copyText = text
+			c.showNotice("Text copied")
+		}})
+	}
+	if m.Author.ID == c.me.ID && !gone {
+		items = append(items, menuItem{text: "Edit Message", act: func() { c.startEdit(m) }})
+	}
+	if c.canDelete(m) || gone {
+		items = append(items, menuItem{sep: true}, menuItem{text: "Delete Message", col: colorRed, act: func() { c.askDelete(m, false) }})
+	}
+	if len(items) == 0 {
+		return
+	}
+	c.openMenu(c.pointerAt, 200, func() []menuItem { return items })
 }
 
 // Replies.
