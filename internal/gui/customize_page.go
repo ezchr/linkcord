@@ -28,6 +28,9 @@ type customizeView struct {
 	// places are the buttons of the bars' places, by bar and place.
 	places      map[string]*widget.Clickable
 	resetLayout widget.Clickable
+	// The buttons of the app's icon, and why a picture could not be it.
+	pickIcon, resetIcon widget.Clickable
+	iconErr             string
 }
 
 // barChoice is a bar the user can move, and where it can go.
@@ -149,6 +152,13 @@ func (c *chatView) updateCustomize(gtx layout.Context) {
 	if cv.removePicture.Clicked(gtx) {
 		c.removePicture()
 	}
+	if cv.pickIcon.Clicked(gtx) {
+		c.pickIcon()
+	}
+	if cv.resetIcon.Clicked(gtx) {
+		cv.iconErr = ""
+		c.setIcon("")
+	}
 	if p := u.appearance.Picture; p != nil {
 		if r := cv.dim.update(gtx); r.changed || r.released {
 			p.Dim = int(r.value*maxDim + 0.5)
@@ -269,6 +279,35 @@ func (c *chatView) customizeRows() []layout.Widget {
 					return button(gtx, th, &cv.resetLayout, colorSecondaryButton, "Reset Layout")
 				})
 			})
+		},
+		func(gtx layout.Context) layout.Dimensions { return settingsDivider(gtx, 16) },
+		settingsHeading(th, "APP ICON"),
+		settingsText(th, "A picture as Linkcord's icon on the taskbar, in the notification area and on its shortcuts. The linkcord.exe file itself keeps its own icon in the folder."),
+		func(gtx layout.Context) layout.Dimensions {
+			chosen := c.u.appearance.Icon != ""
+			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					txt := "Choose an Icon"
+					if chosen {
+						txt = "Change Icon"
+					}
+					return button(gtx, th, &cv.pickIcon, colorAccent, txt)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if !chosen {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return button(gtx, th, &cv.resetIcon, colorSecondaryButton, "Use Linkcord's")
+					})
+				}),
+			)
+		},
+		func(gtx layout.Context) layout.Dimensions {
+			if cv.iconErr == "" {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, label(th, 14, colorRed, cv.iconErr).Layout)
 		},
 		func(gtx layout.Context) layout.Dimensions { return settingsDivider(gtx, 16) },
 	}

@@ -47,6 +47,9 @@ func (u *ui) viewEvent(e app.ViewEvent) {
 	if v, ok := e.(app.Win32ViewEvent); ok {
 		first := u.hwnd == 0 && v.HWND != 0
 		u.hwnd = v.HWND
+		if first && u.appearance.Icon != "" {
+			u.applyIcon()
+		}
 		if first && os.Getenv("LINKCORD_MINIMIZED") == "1" {
 			os.Unsetenv("LINKCORD_MINIMIZED")
 			// Shown that way, it says nothing of still running.

@@ -187,6 +187,29 @@ func makeShortcut(link, target string) error {
 	return err
 }
 
+// SetShortcutIcons gives the shortcuts to Linkcord on the desktop, in the
+// Start menu and pinned to the taskbar the icon in the .ico at icon, or the
+// executable's own if icon is "".
+func SetShortcutIcons(icon string) error {
+	script := "$icon = " + psQuote(icon) + "\n" +
+		"$sh = New-Object -ComObject WScript.Shell\n" +
+		"$dirs = @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'), ($env:APPDATA + '\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar'))\n" +
+		"foreach ($d in $dirs) {\n" +
+		"  if (-not (Test-Path $d)) { continue }\n" +
+		"  Get-ChildItem -Path $d -Filter *.lnk -Recurse -ErrorAction SilentlyContinue | ForEach-Object {\n" +
+		"    $s = $sh.CreateShortcut($_.FullName)\n" +
+		"    if ($s.TargetPath -like '*\\linkcord.exe') {\n" +
+		"      if ($icon) { $s.IconLocation = $icon + ',0' } else { $s.IconLocation = $s.TargetPath + ',0' }\n" +
+		"      $s.Save()\n" +
+		"    }\n" +
+		"  }\n" +
+		"}\n" +
+		// Explorer draws the new icons once told they changed.
+		"& ie4uinit.exe -show 2>$null"
+	_, err := powershell(script)
+	return err
+}
+
 func psQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }

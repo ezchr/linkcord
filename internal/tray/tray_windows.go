@@ -199,10 +199,47 @@ func (t *Tray) run(tip string, ready chan<- error) {
 	}
 }
 
-// appIcon is the icon of the executable, small, or Windows' own.
+// iconFile is the .ico shown in place of the executable's icon, or "".
+var (
+	iconMu   sync.Mutex
+	iconFile string
+)
+
+// SetIconFile has the notification area show the icon in the .ico at path,
+// or the executable's own if path is "", now and when the icon is made.
+func SetIconFile(path string) {
+	iconMu.Lock()
+	iconFile = path
+	iconMu.Unlock()
+	t := current
+	if t == nil {
+		return
+	}
+	instance, _, _ := procGetModuleHandleW.Call(0)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.nid.icon = appIcon(instance)
+	if t.shown {
+		t.notify(nimModify)
+	}
+}
+
+// appIcon is the icon chosen, or that of the executable, small, or
+// Windows' own.
 func appIcon(instance uintptr) windows.Handle {
 	cx, _, _ := procGetSystemMetrics.Call(smCxSmIcon)
 	cy, _, _ := procGetSystemMetrics.Call(smCySmIcon)
+	iconMu.Lock()
+	file := iconFile
+	iconMu.Unlock()
+	if file != "" {
+		if p, err := windows.UTF16PtrFromString(file); err == nil {
+			// 0x10 loads it from the file.
+			if h, _, _ := procLoadImageW.Call(0, uintptr(unsafe.Pointer(p)), imageIcon, cx, cy, 0x10); h != 0 {
+				return windows.Handle(h)
+			}
+		}
+	}
 	if h, _, _ := procLoadImageW.Call(instance, 1, imageIcon, cx, cy, 0); h != 0 {
 		return windows.Handle(h)
 	}

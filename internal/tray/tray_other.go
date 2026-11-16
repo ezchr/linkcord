@@ -17,6 +17,8 @@ func (*Tray) Show(title, text string) error { return nil }
 func (*Tray) Hide()                         {}
 func (*Tray) Close()                        {}
 
+func SetIconFile(string) {}
+
 func HideWindow(uintptr) {}
 func ShowWindow(uintptr) {}
 

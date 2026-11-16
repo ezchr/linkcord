@@ -7,3 +7,5 @@ package install
 const PortableEnvVar = "LINKCORD_PORTABLE"
 
 func Ensure(version string, newer func(a, b string) (bool, error)) bool { return false }
+
+func SetShortcutIcons(icon string) error { return nil }
