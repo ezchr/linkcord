@@ -616,6 +616,10 @@ func (c *chatView) layoutFriendsHeader(gtx layout.Context) layout.Dimensions {
 	}
 	layout.Inset{Left: unit.Dp(16), Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return vcenter(gtx, func(gtx layout.Context) layout.Dimensions {
+			// The inbox's button goes at the right, as in the channels.
+			tabs = append(tabs,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)} }),
+				layout.Rigid(c.layoutInboxButton))
 			return layout.Flex{Alignment: layout.Middle}.Layout(gtx, tabs...)
 		})
 	})
@@ -832,7 +836,14 @@ func (c *chatView) layoutMessageRequests(gtx layout.Context) layout.Dimensions {
 	th := c.u.th
 	f := &c.friends
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return header(gtx, th, "Message Requests") }),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Stack{Alignment: layout.E}.Layout(gtx,
+				layout.Stacked(func(gtx layout.Context) layout.Dimensions { return header(gtx, th, "Message Requests") }),
+				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, c.layoutInboxButton)
+				}),
+			)
+		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Left: unit.Dp(20), Right: unit.Dp(20), Top: unit.Dp(16)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,

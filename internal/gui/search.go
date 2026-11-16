@@ -245,8 +245,9 @@ func (c *chatView) layoutSearchBox(gtx layout.Context) layout.Dimensions {
 	if s.focused {
 		w = gtx.Dp(300)
 	}
-	// What is left beside the title, and the members' button after it.
-	w = max(min(w, gtx.Constraints.Max.X-gtx.Dp(44)), 0)
+	// What is left beside the title, and the buttons after it: the first
+	// message, the members and the inbox.
+	w = max(min(w, gtx.Constraints.Max.X-gtx.Dp(108)), 0)
 	gtx.Constraints.Min.X, gtx.Constraints.Max.X = w, w
 	return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return rounded(gtx, colorServers, 6, func(gtx layout.Context) layout.Dimensions {

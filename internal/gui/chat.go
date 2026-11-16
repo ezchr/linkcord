@@ -121,6 +121,8 @@ type chatView struct {
 	forum forumState
 	// search finds messages of the server or conversation open.
 	search searchView
+	// inbox is the latest messages that mention or answer the user.
+	inbox inboxView
 	// gset is the settings of a server, open over everything, and cset a
 	// channel's; chmenu is a channel's menu.
 	gset   guildSettings
@@ -1240,6 +1242,7 @@ func (c *chatView) apply(ev gateway.Event) {
 	}
 	sel := c.selChannel
 	defer c.recordRefreshEvent(ev)
+	c.noteInbox(ev)
 	// The unread mark of the server it happened in is worked out again.
 	// So are the conversations with unread messages, for one outside them.
 	if g, ok := eventGuild(ev); ok {
@@ -1603,6 +1606,7 @@ func (c *chatView) layoutOverlays(gtx layout.Context) {
 		c.layoutCreateThread(gtx)
 	}
 	c.layoutSearchMenu(gtx)
+	c.layoutInbox(gtx)
 	c.layoutClips(gtx)
 	c.layoutLiveHover(gtx)
 	// What the popped-out call opened shows in its window.

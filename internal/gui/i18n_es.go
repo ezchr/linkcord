@@ -1372,4 +1372,12 @@ var spanish = map[string]string{
 	" Messages ›": " mensajes ›",
 	"in #": "en #",
 	"Others see you connected from the web, as Linkcord talks to Discord as its web app does. Showing a phone, console or the desktop app is no longer offered: only part of the connection could say so, which Discord can tell apart.": "Los demás te ven conectado desde la web, porque Linkcord habla con Discord como su aplicación web. Ya no se ofrece mostrar un teléfono, una consola o la aplicación de escritorio: solo una parte de la conexión podía decirlo, y Discord puede notarlo.",
+	"Inbox": "Bandeja de entrada",
+	"Mentions": "Menciones",
+	"Replies": "Respuestas",
+	"Mention": "Mención",
+	"Reply": "Respuesta",
+	"Mark All as Read": "Marcar todo como leído",
+	"Nothing here yet. Mentions and replies to you show here.": "Aún no hay nada. Aquí aparecen las menciones y las respuestas a ti.",
+	"Discord did not give the mentions: ": "Discord no dio las menciones: ",
 }

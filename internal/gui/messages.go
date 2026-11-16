@@ -153,6 +153,9 @@ func (c *chatView) chatHeader(gtx layout.Context, title string) layout.Dimension
 				}
 				return iconButton(gtx, &c.membersToggle, iconMembers, col, colorHeader)
 			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return vcenter(gtx, c.layoutInboxButton)
+			}),
 		)
 	})
 	return layout.Dimensions{Size: size}
