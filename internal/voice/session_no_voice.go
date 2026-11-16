@@ -33,6 +33,7 @@ func (*Session) SetTalking(bool)                   {}
 func (*Session) SetNoiseSuppression(bool)          {}
 func (*Session) SetAutoGain(bool)                  {}
 func (*Session) SetNoiseStrength(float32)          {}
+func (*Session) SetEchoCancellation(bool)          {}
 
 // Effects plays nothing.
 type Effects struct{}

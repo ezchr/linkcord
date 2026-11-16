@@ -8,14 +8,21 @@ import "github.com/gen2brain/malgo"
 // The callback must not block. The returned function releases the device
 // and must be called outside the audio callback.
 func StartMediaAudio(fill func([]byte)) (func(), error) {
+	// The echo of it is taken out of what the microphone captures too.
+	tap := newTap()
 	device, err := startDevice(malgo.Playback, 2, func(output, _ []byte) {
 		clear(output)
 		fill(output)
+		tap.played(output)
 	})
 	if err != nil {
+		tap.close()
 		return nil, err
 	}
-	return func() { device.Uninit() }, nil
+	return func() {
+		device.Uninit()
+		tap.close()
+	}, nil
 }
 
 // StartLoopback captures what the speakers play, in stereo, 48 kHz, signed

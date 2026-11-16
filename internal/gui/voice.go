@@ -152,6 +152,10 @@ type voiceSettings struct {
 	// Discord.
 	NoNoiseSuppression bool `json:"no_noise_suppression,omitempty"`
 	NoAutoGain         bool `json:"no_auto_gain,omitempty"`
+	// NoEchoCancellation turns off the removal of the echo of what is
+	// played from what the microphone captures, on by default as in
+	// Discord.
+	NoEchoCancellation bool `json:"no_echo_cancellation,omitempty"`
 	// NoiseStrength is how much of the noise is removed, from 0 to 1; nil
 	// is 1.
 	NoiseStrength *float32 `json:"noise_strength,omitempty"`
@@ -222,6 +226,7 @@ func (u *ui) applyVoiceSettings() {
 		vs.SetNoiseSuppression(!s.NoNoiseSuppression)
 		vs.SetNoiseStrength(s.noiseStrength())
 		vs.SetAutoGain(!s.NoAutoGain)
+		vs.SetEchoCancellation(!s.NoEchoCancellation)
 		vs.SetLinkcordOnly(s.VoiceLinkcordOnly)
 	}
 	if c := u.chat; c != nil && c.settings.test != nil {

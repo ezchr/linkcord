@@ -33,7 +33,7 @@ Shift-click Delete skips confirmation. Up Arrow in an empty composer edits your 
 Windows and two user-installed tools are required; administrator permissions are unnecessary.
 
 1. **Go with Windows 7 support:** [go-legacy-win7 v1.27.2-1](https://github.com/thongtech/go-legacy-win7/releases/tag/v1.27.2-1), asset `go-legacy-win7-1.27.2-1.windows_amd64.zip`. Extract it to `%LOCALAPPDATA%\Programs\go-legacy-win7`. Standard Go builds do not retain Windows 7 runtime support.
-2. **C compiler for voice audio:** [WinLibs GCC 16.2.0 with MSVCRT](https://github.com/brechtsanders/winlibs_mingw/releases/tag/16.2.0posix-14.0.0-msvcrt-r2), asset `winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64msvcrt-14.0.0-r2.zip`. Extract its `mingw64` folder to `%LOCALAPPDATA%\Programs\mingw64`. Use **MSVCRT**, which is available on Windows 7, rather than UCRT.
+2. **C compiler for voice audio:** [WinLibs GCC 16.2.0 with MSVCRT](https://github.com/brechtsanders/winlibs_mingw/releases/tag/16.2.0posix-14.0.0-msvcrt-r2), asset `winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64msvcrt-14.0.0-r2.zip`. Extract its `mingw64` folder to `%LOCALAPPDATA%\Programs\mingw64`. Use **MSVCRT**, which is available on Windows 7, rather than UCRT. Its C++ compiler builds the echo canceller, which takes about a minute the first time.
 
 From the repository:
 
@@ -147,6 +147,8 @@ The gear beside the microphone and headset buttons opens the settings; Escape or
 
 What the microphone captures is made as loud as the input volume says, cleared of noise by Xiph's RNNoise, evened out by an automatic gain control, and kept from clipping by a limiter, in blocks of 10 ms; the microphone test plays it back as it is sent. Noise suppression and the gain control are on by default, as in Discord.
 
+Before all that, Echo Cancellation, on by default, takes out of what the microphone captures the echo of what Linkcord plays, for the others not to hear themselves when the sound comes from speakers: the voices of the call, the sound of a stream watched and Discord's sounds. It is WebRTC's AEC3, the canceller of Discord's own calls. After it, while something is played, what is captured is sent only when clearly louder than the echo expected, which Linkcord learns from the moments in which the user is silent. Sound played by other programs is not taken out. It does not depend on the noise suppression.
+
 Discord's sounds are downloaded from discord.com, as its web app does, the first time Linkcord starts, and kept in `%LOCALAPPDATA%\linkcord\sounds`. `internal/dcsound` names their files; should Discord change them, it finds them again in the web app's script.
 
 In a voice channel, the log says every minute how many voice packets were sent and how they were encrypted (`voice stats`). When nothing anyone says can be decrypted for five seconds, as when the keys of the call changed without Linkcord following, Linkcord joins the channel again. If the window stops answering for 20 seconds, what every part of Linkcord was doing is written to `freeze.txt` beside the log.
@@ -204,6 +206,7 @@ Local application data:
 | `internal/gui/voicecall.go`, `voicemenu.go` | Call view, soundboard, device menu, and the right-click menu of voice members with its moderation actions. |
 | `internal/gui/golive.go` | Stream picker, the user's own stream on its card, and who watches it. |
 | `internal/golive/` | Go Live: screen and window capture, H264 encoding with OpenH264, sound capture, and the stream's voice connection. |
+| `internal/voice/echo.go`, `third_party/aec3/` | Echo cancellation: WebRTC's AEC3 on what the microphone captures, and the gate after it. |
 | `internal/gui/menu.go` | Context menus opened at the pointer. |
 | `internal/gui/theme.go`, `widgets.go` | Colors, fonts, and shared interface components. |
 | `internal/gui/demo.go` | Account-free demo fixtures. |
@@ -234,6 +237,7 @@ When merging upstream discordo changes, replace `github.com/ayn2op/discordo` mod
 - **Arikawa, polls:** messages carry their poll (`poll`), which Arikawa dropped.
 - **Arikawa, forwards:** a message that forwards another (`message_reference` of type 1) is sent with no content of its own, which Arikawa refused as empty. `MessageReference` already carried `type`.
 - **RNNoise 0.1.1:** vendored unchanged in `third_party/rnnoise`, with its trained model and an empty `config.h`, for noise suppression.
+- **WebRTC AEC3 (webrtc-audio-processing 2.1):** the echo canceller and the 81 source files of WebRTC it needs, with their headers, vendored unchanged in `third_party/aec3/webrtc`, and the 34 headers of Abseil 20240722.0 they include in `third_party/aec3/abseil`. The rest of the audio processing module is left out. The files beside them are Linkcord's: `webrtc_*.cc` build the sources, as cgo compiles only the files of a package's folder, `aec3_c.cc` is the C interface, and `aec3_noavx2.cc` stands in for the AVX2 files, which are not built. It links statically; no DLL is added. To update, replace both folders with the same files of a newer release and run the tests of `third_party/aec3` and `internal/voice`.
 - **dave-go v0.5.1:** adds end-to-end encryption of H264 frames laid out as libdave does, taking a fresh nonce for every retry, for screen sharing. Upstream encrypts Opus only.
 
 ## Fonts and color emoji
@@ -273,4 +277,4 @@ Refreshing a Discord web-build number can update client metadata. Actual API, ga
 
 Linkcord is **GPL-3.0**, inherited from discordo; see `LICENSE`. Distributing the executable requires making its corresponding source available under that license.
 
-Gio uses MIT/Unlicense terms. RNNoise, in `third_party/rnnoise`, is BSD-3-Clause; see the `COPYING` beside it. The OpenH264 headers in `third_party/openh264` are BSD-2-Clause; see the `LICENSE` beside them. Noto Color Emoji uses the SIL Open Font License 1.1; see `internal/gui/fonts/OFL.txt`.
+Gio uses MIT/Unlicense terms. RNNoise, in `third_party/rnnoise`, is BSD-3-Clause; see the `COPYING` beside it. WebRTC's AEC3, in `third_party/aec3/webrtc`, is BSD-3-Clause with a patent grant; see the `LICENSE` and `PATENTS` there, and the `LICENSE` of the Ooura FFT in `common_audio/third_party/ooura`. The Abseil headers in `third_party/aec3/abseil` are Apache-2.0; see the `LICENSE` beside them. The OpenH264 headers in `third_party/openh264` are BSD-2-Clause; see the `LICENSE` beside them. Noto Color Emoji uses the SIL Open Font License 1.1; see `internal/gui/fonts/OFL.txt`.

@@ -82,6 +82,7 @@ type settingsView struct {
 	checkBtn       widget.Clickable
 	vadBtn, pttBtn widget.Clickable
 	nsBtn, agcBtn  widget.Clickable
+	echoBtn        widget.Clickable
 	// voiceOnlyBtn makes the user heard by Linkcord users only.
 	voiceOnlyBtn widget.Clickable
 	soundsBtn      widget.Clickable
@@ -355,6 +356,11 @@ func (c *chatView) updateSettings(gtx layout.Context) {
 	}
 	if s.agcBtn.Clicked(gtx) {
 		settings.NoAutoGain = !settings.NoAutoGain
+		u.applyVoiceSettings()
+		u.saveVoiceSettings()
+	}
+	if s.echoBtn.Clicked(gtx) {
+		settings.NoEchoCancellation = !settings.NoEchoCancellation
 		u.applyVoiceSettings()
 		u.saveVoiceSettings()
 	}
@@ -726,6 +732,10 @@ func (c *chatView) voiceSettingsRows() []layout.Widget {
 	rows = append(rows,
 		func(gtx layout.Context) layout.Dimensions { return settingsDivider(gtx, 24) },
 		settingsHeading(th, "VOICE PROCESSING"),
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &s.echoBtn, "Echo Cancellation", "Keeps the others from hearing themselves when your microphone picks up your speakers.", !settings.NoEchoCancellation)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &s.nsBtn, "Noise Suppression", "Removes the noise around what you say, such as fans, keyboards and traffic.", !settings.NoNoiseSuppression)
 		},

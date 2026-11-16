@@ -27,10 +27,13 @@ type Effects struct {
 	playing [][]int16
 	last    time.Time
 	closing bool
+	// tap keeps what is played for its echo to be taken out of what the
+	// microphone captures.
+	tap *tap
 }
 
 // NewEffects returns an Effects that plays nothing yet.
-func NewEffects() *Effects { return new(Effects) }
+func NewEffects() *Effects { return &Effects{tap: newTap()} }
 
 // Play plays pcm, 48 kHz stereo samples, volume times as loud, on the
 // speakers with the ID output, "" for the default ones.
@@ -105,6 +108,7 @@ func (e *Effects) mix(output, _ []byte) {
 	if len(kept) > 0 {
 		e.last = time.Now()
 	}
+	e.tap.played(output)
 }
 
 // closeIdle closes the speakers once no sound played for effectsIdle.

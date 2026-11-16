@@ -149,6 +149,8 @@ type Session struct {
 	// proc readies what the microphone captures to be sent, and volume is how many times as loud everyone is played, as the bits of a float32.
 	proc   *processor
 	volume atomic.Uint32
+	// echo removes from what the microphone captures the echo of what is played.
+	echo *echo
 	// pushToTalk sends what the microphone captures only while talking, which a key held reports, rather than when it is loud enough.
 	pushToTalk, talking atomic.Bool
 	// updates is sent to when the status or who is speaking changes.
@@ -207,6 +209,7 @@ func New(state *state.State, sensitivity float64) *Session {
 	s := &Session{
 		state:    state,
 		proc:     newProcessor(),
+		echo:     newEcho(),
 		updates:  make(chan struct{}, 1),
 		mic:      make(chan []byte, 4),
 		speaking: make(map[discord.UserID]bool),
@@ -244,6 +247,11 @@ func (s *Session) SetNoiseStrength(strength float32) {
 // SetAutoGain evens out how loud what is said is sent, if on. Whether on or not, it is kept from clipping.
 func (s *Session) SetAutoGain(on bool) {
 	s.proc.autoGain.Store(on)
+}
+
+// SetEchoCancellation removes from what the microphone captures the echo of what Linkcord plays, which it picks up from speakers, if on.
+func (s *Session) SetEchoCancellation(on bool) {
+	s.echo.on.Store(on)
 }
 
 // SetOutputVolume plays everyone volume times as loud, on top of how loud each is played.
@@ -419,6 +427,7 @@ func (s *Session) setDevices(mute, deafen bool) error {
 // left stops the devices, in no voice channel.
 func (s *Session) left() {
 	s.setDevices(true, true)
+	s.echo.reset()
 	s.setStatus(Status{})
 	s.joinedChannel = 0
 }
@@ -613,8 +622,6 @@ func (s *Session) queue(pcm []byte) {
 // mix fills output with what everyone says. It is what the playback device calls.
 func (s *Session) mix(output, _ []byte) {
 	s.stateMu.Lock()
-	defer s.stateMu.Unlock()
-
 	master := math.Float32frombits(s.volume.Load())
 	for _, speaker := range s.speakers {
 		volume, ok := s.volumes[speaker.user]
@@ -624,6 +631,10 @@ func (s *Session) mix(output, _ []byte) {
 
 		speaker.mix(output, volume*master, s.autoLevel.Load())
 	}
+	s.stateMu.Unlock()
+
+	// What is played is what the microphone may pick up.
+	s.echo.played(output)
 }
 
 // SetAutoLevel lowers voices that come in saturated, as some microphones
@@ -816,12 +827,18 @@ func (s *Session) send(session *voice.Session) {
 			for i := range samples {
 				samples[i] = int16(binary.LittleEndian.Uint16(pcm[2*i:]))
 			}
+			// The echo of what is played is taken out first, as captured,
+			// before anything changes how loud it is.
+			user := s.echo.capture(samples)
 			// Made as loud as chosen, without noise and evened out, before it
 			// is told whether loud enough to send.
 			s.proc.process(samples)
+			// What is loud enough but is the echo of what is played, not
+			// the user, is not sent either.
 			for i := range samples {
-				if int(samples[i]) >= threshold || -int(samples[i]) >= threshold {
+				if user && (int(samples[i]) >= threshold || -int(samples[i]) >= threshold) {
 					quiet = 0
+					break
 				}
 			}
 
