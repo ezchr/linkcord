@@ -243,12 +243,7 @@ func (c *chatView) inlineSpans(s string, m discord.Message, base richtext.SpanSt
 				case mt[1] != "":
 					id, _ := discord.ParseSnowflake(mt[1])
 					uid := discord.UserID(id)
-					name := c.memberName(guildID, uid, nil)
-					for _, u := range m.Mentions {
-						if u.ID == uid {
-							name = c.memberName(guildID, u.ID, u.Member)
-						}
-					}
+					name := c.mentionName(guildID, uid, m)
 					special("@"+name, colorMention, metaUser, mt[1], false)
 				case mt[2] != "":
 					id, _ := discord.ParseSnowflake(mt[2])

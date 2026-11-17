@@ -93,6 +93,8 @@ type channelRow struct {
 }
 
 type chatView struct {
+	// askedMembers are the mentioned users whose member was asked for.
+	askedMembers map[discord.UserID]bool
 	// watch is the stream of someone else being watched.
 	watch watchSet
 	// mediaBytes is the file size of the attachments drawn, by URL, which
@@ -1046,19 +1048,70 @@ func (c *chatView) voiceAvatarURL(guildID discord.GuildID, vs discord.VoiceState
 // memberName is how a user is called in a server: their nickname, display
 // name, or username. member may be nil.
 func (c *chatView) memberName(guildID discord.GuildID, userID discord.UserID, member *discord.Member) string {
-	if member == nil && guildID.IsValid() {
-		member, _ = c.st.Cabinet.Member(guildID, userID)
+	if n := c.knownName(guildID, userID, member); n != "" {
+		return n
+	}
+	return "User"
+}
+
+// knownName is memberName, or nothing when the name is not known.
+func (c *chatView) knownName(guildID discord.GuildID, userID discord.UserID, member *discord.Member) string {
+	// The member that comes with a mention has no user, and often no
+	// nickname: then the member the state knows is asked, and the user.
+	if (member == nil || (member.Nick == "" && member.User.DisplayOrUsername() == "")) && guildID.IsValid() {
+		if known, err := c.st.Cabinet.Member(guildID, userID); err == nil {
+			member = known
+		}
 	}
 	if member != nil {
 		if member.Nick != "" {
 			return member.Nick
 		}
-		return member.User.DisplayOrUsername()
+		if n := member.User.DisplayOrUsername(); n != "" {
+			return n
+		}
 	}
-	if u, err := c.st.Cabinet.User(userID); err == nil {
+	if u, err := c.st.Cabinet.User(userID); err == nil && u.DisplayOrUsername() != "" {
 		return u.DisplayOrUsername()
 	}
-	return "User"
+	return ""
+}
+
+// mentionName is the name shown for a mention of the user id in m: that of
+// the server's member, else of the user as the message gives it. A member not
+// known is asked for, so that the name shows when the answer comes.
+func (c *chatView) mentionName(guildID discord.GuildID, id discord.UserID, m discord.Message) string {
+	var given string
+	for _, u := range m.Mentions {
+		if u.ID != id {
+			continue
+		}
+		if n := c.knownName(guildID, id, u.Member); n != "" {
+			return n
+		}
+		given = u.User.DisplayOrUsername()
+	}
+	if given == "" {
+		if n := c.knownName(guildID, id, nil); n != "" {
+			return n
+		}
+		if m.Author.ID == id {
+			given = m.Author.DisplayOrUsername()
+		}
+	}
+	if guildID.IsValid() && !c.demo && id.IsValid() {
+		if c.askedMembers == nil {
+			c.askedMembers = make(map[discord.UserID]bool)
+		}
+		if !c.askedMembers[id] {
+			c.askedMembers[id] = true
+			go c.st.MemberState.RequestMember(guildID, id)
+		}
+	}
+	if given == "" {
+		return "unknown-user"
+	}
+	return given
 }
 
 func (c *chatView) selectChannel(ch discord.Channel) {

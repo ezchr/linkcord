@@ -59,6 +59,9 @@ type forumState struct {
 	searching int
 	asked     map[discord.ChannelID]bool
 	askedN    int
+	// pos is where each forum's list was scrolled to, so that coming back
+	// from a post shows the list where it was left.
+	pos map[discord.ChannelID]layout.Position
 	// The buttons that show the posts as a list or as squares, and that
 	// take or add a column of them.
 	asList, asGrid, fewer, more widget.Clickable
@@ -118,7 +121,12 @@ func (f *forumState) click(id discord.ChannelID) *widget.Clickable {
 // land in the thread state while parent is still the one browsed.
 func (c *chatView) loadOlderThreads(parent discord.Channel) {
 	t := &c.threads
-	t.browseParent, t.archived, t.loadErr, t.loading = parent.ID, nil, "", true
+	if t.browseParent != parent.ID {
+		// The same list asked again stays meanwhile, so that its scroll
+		// position holds.
+		t.archived = nil
+	}
+	t.browseParent, t.loadErr, t.loading = parent.ID, "", true
 	if c.demo {
 		for _, th := range t.demoArchived {
 			if th.ParentID == parent.ID {
@@ -159,7 +167,7 @@ func (c *chatView) loadOlderThreads(parent discord.Channel) {
 // openForum shows the posts of a forum in place of messages.
 func (c *chatView) openForum(ch discord.Channel) {
 	c.forum.list.Axis = layout.Vertical
-	c.forum.list.Position = layout.Position{}
+	c.forum.list.Position = c.forum.pos[ch.ID]
 	c.loadOlderThreads(ch)
 	c.loadFirstMessages(ch)
 }
@@ -233,18 +241,32 @@ func (c *chatView) needFirstMessage(post discord.Channel) {
 	f.askedN++
 	forum := post.ParentID
 	go func() {
-		m, err := c.st.Client.Message(post.ID, discord.MessageID(post.ID))
+		// The endpoint of a single message is for bots only: the list of
+		// the post's messages around its first gives it.
+		msgs, err := c.st.Client.RequestJSON[[]discord.Message]("GET",
+			api.EndpointChannels+post.ID.String()+"/messages?limit=1&around="+post.ID.String())
 		c.u.post(func() {
 			if f.firstOf == forum && f.askedN > 0 {
 				f.askedN--
 			}
 			if err != nil {
+				slog.Warn("could not get a post's first message", "post", post.ID, "err", err)
 				return
 			}
-			if !m.ChannelID.IsValid() {
-				m.ChannelID = post.ID
+			var got []discord.Message
+			for _, m := range msgs {
+				if m.ID == discord.MessageID(post.ID) {
+					if !m.ChannelID.IsValid() {
+						m.ChannelID = post.ID
+					}
+					got = append(got, m)
+				}
 			}
-			c.noteFirstMessages(forum, []discord.Message{*m})
+			if len(got) == 0 {
+				// The first message was deleted: the post shows its sign.
+				got = []discord.Message{{ID: discord.MessageID(post.ID), ChannelID: post.ID}}
+			}
+			c.noteFirstMessages(forum, got)
 		})
 	}()
 }
@@ -352,6 +374,10 @@ func (c *chatView) layoutForum(gtx layout.Context) layout.Dimensions {
 	}
 	active, older := c.forumPosts(forum)
 	t := &c.threads
+	if c.forum.pos == nil {
+		c.forum.pos = make(map[discord.ChannelID]layout.Position)
+	}
+	c.forum.pos[forum.ID] = c.forum.list.Position
 
 	var lines []forumLine
 	if len(active) > 0 {
@@ -362,7 +388,7 @@ func (c *chatView) layoutForum(gtx layout.Context) layout.Dimensions {
 	}
 	lines = append(lines, forumLine{title: "Older Posts"})
 	switch {
-	case t.browseParent == forum.ID && t.loading:
+	case t.browseParent == forum.ID && t.loading && len(older) == 0:
 		lines = append(lines, forumLine{note: "Loading…", noteC: colorMuted})
 	case t.browseParent == forum.ID && t.loadErr != "":
 		lines = append(lines, forumLine{note: t.loadErr, noteC: colorRed})

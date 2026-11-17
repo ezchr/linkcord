@@ -1039,12 +1039,7 @@ func (c *chatView) renderContent(m discord.Message) string {
 	}
 	s = reUserMention.ReplaceAllStringFunc(s, func(match string) string {
 		id, _ := discord.ParseSnowflake(reUserMention.FindStringSubmatch(match)[1])
-		for _, u := range m.Mentions {
-			if discord.Snowflake(u.ID) == id {
-				return "@" + c.memberName(guildID, u.ID, u.Member)
-			}
-		}
-		return "@" + c.memberName(guildID, discord.UserID(id), nil)
+		return "@" + c.mentionName(guildID, discord.UserID(id), m)
 	})
 	s = reRoleMention.ReplaceAllStringFunc(s, func(match string) string {
 		id, _ := discord.ParseSnowflake(reRoleMention.FindStringSubmatch(match)[1])
