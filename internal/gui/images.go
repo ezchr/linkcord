@@ -159,10 +159,6 @@ func (im *images) get(url string, size int) *paint.ImageOp {
 	im.mu.Lock()
 	defer im.mu.Unlock()
 	e, ok := im.entries[key]
-	if !ok && im.pendingLoads >= imagePendingLoads && time.Since(dbgFullLogged) > 2*time.Second {
-		dbgFullLogged = time.Now()
-		slog.Info("image dbg: too many loads waiting, not started", "pending", im.pendingLoads, "url", url)
-	}
 	if ok && e.state == imageFailed && time.Since(e.failedAt) > imageRetryAfter {
 		delete(im.entries, key)
 		ok = false
@@ -229,15 +225,7 @@ func (im *images) failed(url string, size int) bool {
 	return ok && e.state == imageFailed
 }
 
-var dbgFullLogged time.Time
-
 func (im *images) load(key, url string, size int, e *imageEntry) {
-	dbgStart := time.Now()
-	defer func() {
-		if d := time.Since(dbgStart); d > 2*time.Second || strings.Contains(url, "attachments") {
-			slog.Info("image dbg: load", "url", url, "size", size, "took", d.Round(time.Millisecond), "state", e.state, "pending", im.pendingLoads)
-		}
-	}()
 	// The limit is for reading the disk only: holding it while downloading
 	// let two pictures load at a time, which made emoji and stickers crawl.
 	im.decode <- struct{}{}
