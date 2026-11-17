@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"image"
+	"log/slog"
 	"maps"
 	"slices"
 	"strings"
@@ -47,6 +48,17 @@ type forumState struct {
 	// they were asked for.
 	first   map[discord.ChannelID]discord.Message
 	firstOf discord.ChannelID
+	// firstBy keeps the first messages of every forum opened, so that a
+	// forum opened again shows its pictures at once while they are asked
+	// for again.
+	firstBy map[discord.ChannelID]map[discord.ChannelID]discord.Message
+	// searching counts the searches of the open forum not answered yet;
+	// asked are the posts whose first message was asked for on its own,
+	// as the searches give the 25 latest posts only, and askedN how many
+	// of those requests are on their way.
+	searching int
+	asked     map[discord.ChannelID]bool
+	askedN    int
 	// The buttons that show the posts as a list or as squares, and that
 	// take or add a column of them.
 	asList, asGrid, fewer, more widget.Clickable
@@ -155,37 +167,86 @@ func (c *chatView) openForum(ch discord.Channel) {
 // noteFirstMessages keeps the first messages of posts of the forum.
 func (c *chatView) noteFirstMessages(forum discord.ChannelID, msgs []discord.Message) {
 	f := &c.forum
-	if f.firstOf != forum {
-		return
+	if f.firstBy == nil {
+		f.firstBy = make(map[discord.ChannelID]map[discord.ChannelID]discord.Message)
 	}
-	if f.first == nil {
-		f.first = make(map[discord.ChannelID]discord.Message)
+	first := f.firstBy[forum]
+	if first == nil {
+		first = make(map[discord.ChannelID]discord.Message)
+		f.firstBy[forum] = first
 	}
 	for _, m := range msgs {
-		f.first[m.ChannelID] = m
+		first[m.ChannelID] = m
+	}
+	if f.firstOf == forum {
+		f.first = first
 	}
 }
 
 // loadFirstMessages asks Discord for the first messages of the forum's
 // posts, active and older, which its list shows: the search of a channel's
-// threads gives them with the threads, as Discord's app gets them.
+// threads gives them with the threads, as Discord's app gets them. Those
+// known from before show meanwhile.
 func (c *chatView) loadFirstMessages(forum discord.Channel) {
-	c.forum.first, c.forum.firstOf = nil, forum.ID
+	f := &c.forum
+	f.first, f.firstOf = f.firstBy[forum.ID], forum.ID
+	f.asked, f.askedN = nil, 0
 	if c.demo {
-		c.forum.first = maps.Clone(c.forum.demoFirst)
+		f.first = maps.Clone(f.demoFirst)
 		return
 	}
+	f.searching = 2
 	for _, archived := range []bool{false, true} {
 		go func() {
 			res, err := c.st.SearchThreads(forum.ID, api.SearchThreadsData{
 				Archived: archived, SortBy: api.LastMessageTime, SortOrder: api.SortDescending, Limit: 25,
 			})
+			c.u.post(func() {
+				if f.firstOf == forum.ID && f.searching > 0 {
+					f.searching--
+				}
+				if err != nil {
+					slog.Warn("forum search failed", "forum", forum.ID, "archived", archived, "err", err)
+					return
+				}
+				c.noteFirstMessages(forum.ID, res.FirstMessages)
+			})
+		}()
+	}
+}
+
+// needFirstMessage asks for the first message of a post shown without one,
+// once the searches are answered: they give the latest posts only. A post's
+// first message has the post's id.
+func (c *chatView) needFirstMessage(post discord.Channel) {
+	f := &c.forum
+	if c.demo || f.searching > 0 || f.firstOf != post.ParentID || f.askedN >= 4 {
+		return
+	}
+	if _, ok := f.first[post.ID]; ok || f.asked[post.ID] {
+		return
+	}
+	if f.asked == nil {
+		f.asked = make(map[discord.ChannelID]bool)
+	}
+	f.asked[post.ID] = true
+	f.askedN++
+	forum := post.ParentID
+	go func() {
+		m, err := c.st.Client.Message(post.ID, discord.MessageID(post.ID))
+		c.u.post(func() {
+			if f.firstOf == forum && f.askedN > 0 {
+				f.askedN--
+			}
 			if err != nil {
 				return
 			}
-			c.u.post(func() { c.noteFirstMessages(forum.ID, res.FirstMessages) })
-		}()
-	}
+			if !m.ChannelID.IsValid() {
+				m.ChannelID = post.ID
+			}
+			c.noteFirstMessages(forum, []discord.Message{*m})
+		})
+	}()
 }
 
 // postPicture is the picture a post shows in the list: the first picture
@@ -446,6 +507,9 @@ func (c *chatView) layoutForumSquare(gtx layout.Context, post discord.Channel) l
 	size := gtx.Constraints.Max
 	cl := c.forum.click(post.ID)
 	first, hasFirst := c.forum.first[post.ID]
+	if !hasFirst {
+		c.needFirstMessage(post)
+	}
 	return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		pointer.CursorPointer.Add(gtx.Ops)
 		bg := colorSidebar
@@ -595,6 +659,9 @@ func (c *chatView) layoutForumPost(gtx layout.Context, post discord.Channel) lay
 	cl := c.forum.click(post.ID)
 	unread := c.channelUnread(post.ID) != ningen.ChannelRead && c.threadJoined(post.ID)
 	first, hasFirst := c.forum.first[post.ID]
+	if !hasFirst {
+		c.needFirstMessage(post)
+	}
 	return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16), Top: unit.Dp(3), Bottom: unit.Dp(3)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			pointer.CursorPointer.Add(gtx.Ops)

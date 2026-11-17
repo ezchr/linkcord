@@ -142,3 +142,18 @@ func TestMinimizedAnimationDoesNotRedraw(t *testing.T) {
 		t.Fatal("low-power preview requested an animation redraw")
 	}
 }
+
+func TestImageKeyIgnoresSignature(t *testing.T) {
+	a := "https://cdn.discordapp.com/attachments/1/2/p.png?ex=aa&is=bb&hm=cc&width=300&height=200"
+	b := "https://cdn.discordapp.com/attachments/1/2/p.png?ex=dd&is=ee&hm=ff&width=300&height=200"
+	if imageKey(300, a) != imageKey(300, b) {
+		t.Fatalf("keys differ: %q %q", imageKey(300, a), imageKey(300, b))
+	}
+	if imageKey(300, a) == imageKey(300, "https://cdn.discordapp.com/attachments/1/3/p.png?hm=cc&width=300&height=200") {
+		t.Fatal("different pictures share a key")
+	}
+	other := "https://example.com/p.png?hm=1"
+	if unsignedURL(other) != other {
+		t.Fatal("non-Discord address changed")
+	}
+}

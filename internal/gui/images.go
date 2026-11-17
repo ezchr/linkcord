@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,6 +43,9 @@ const (
 
 type imageEntry struct {
 	state imageState
+	// failedAt is when the load failed: it is tried again after
+	// imageRetryAfter, as a download that timed out may work now.
+	failedAt time.Time
 	bytes int64
 	used  uint64
 	// op is the picture, or the first frame of an animation.
@@ -67,7 +71,33 @@ const (
 	imagePendingLoads     = 64
 	animationMaxSide      = 2048
 	animationCanvasBudget = 48 << 20
+	imageRetryAfter       = 20 * time.Second
 )
+
+// imageKey is what a picture is kept under, in memory and on disk. The
+// signature Discord adds to attachment addresses (ex, is, hm) changes when it
+// expires, so it is left out: the same picture is not downloaded again
+// because its address was signed again.
+func imageKey(size int, url string) string {
+	return fmt.Sprintf("%d:%s", size, unsignedURL(url))
+}
+
+// unsignedURL is url without the signature of Discord's attachment addresses.
+func unsignedURL(raw string) string {
+	if !strings.Contains(raw, "hm=") {
+		return raw
+	}
+	u, err := neturl.Parse(raw)
+	if err != nil || !discordMediaHost(u.Hostname()) {
+		return raw
+	}
+	q := u.Query()
+	q.Del("ex")
+	q.Del("is")
+	q.Del("hm")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
 
 // images loads small pictures such as avatars and server icons in the
 // background, scales them to the size they are shown at, and keeps them in
@@ -125,10 +155,14 @@ func (im *images) get(url string, size int) *paint.ImageOp {
 	if url == "" {
 		return nil
 	}
-	key := fmt.Sprintf("%d:%s", size, url)
+	key := imageKey(size, url)
 	im.mu.Lock()
 	defer im.mu.Unlock()
 	e, ok := im.entries[key]
+	if ok && e.state == imageFailed && time.Since(e.failedAt) > imageRetryAfter {
+		delete(im.entries, key)
+		ok = false
+	}
 	if !ok {
 		if im.pendingLoads >= imagePendingLoads {
 			return nil
@@ -157,7 +191,7 @@ func (im *images) frame(gtx layout.Context, url string, size int) *paint.ImageOp
 	}
 	im.mu.Lock()
 	defer im.mu.Unlock()
-	e := im.entries[fmt.Sprintf("%d:%s", size, url)]
+	e := im.entries[imageKey(size, url)]
 	if e == nil || len(e.frames) < 2 || e.cycle <= 0 {
 		return img
 	}
@@ -187,7 +221,7 @@ func (im *images) frame(gtx layout.Context, url string, size int) *paint.ImageOp
 func (im *images) failed(url string, size int) bool {
 	im.mu.Lock()
 	defer im.mu.Unlock()
-	e, ok := im.entries[fmt.Sprintf("%d:%s", size, url)]
+	e, ok := im.entries[imageKey(size, url)]
 	return ok && e.state == imageFailed
 }
 
@@ -223,6 +257,7 @@ func (im *images) load(key, url string, size int, e *imageEntry) {
 	case err != nil:
 		slog.Warn("failed to load image", "url", url, "err", err)
 		e.state = imageFailed
+		e.failedAt = time.Now()
 	case len(frames) > 1:
 		for _, f := range frames {
 			e.frames = append(e.frames, paint.NewImageOp(f))
@@ -322,7 +357,7 @@ func (im *images) fetch(url string) ([]byte, error) {
 	// so that showing them at another size needs no download.
 	raw := ""
 	if im.dir != "" && !isGIFVideoURL(url) {
-		raw = strings.TrimSuffix(im.path("raw:"+url), ".png") + ".raw"
+		raw = strings.TrimSuffix(im.path("raw:"+unsignedURL(url)), ".png") + ".raw"
 		if data, err := os.ReadFile(raw); err == nil {
 			return data, nil
 		}
