@@ -4,7 +4,9 @@
 // later have. Unlike desktop duplication it is handed every picture the
 // compositor makes, video played in full screen too. It is WinRT, used here
 // through its vtables and loaded when needed, so that Linkcord starts on
-// Windows that lack it, where desktop duplication goes on as before.
+// Windows that lack it, where desktop duplication goes on as before. It is
+// used only where Windows lets it leave out its yellow frame (Windows 11):
+// on Windows 10 the screen is duplicated, without one.
 
 #define COBJMACROS
 #define WIN32_LEAN_AND_MEAN
@@ -162,9 +164,15 @@ lc_wgc *lc_wgc_open(void *dev, void *monitor) {
 	if (FAILED(LC_QI(c->session, &lc_IID_Session2, &s2)) || FAILED(LC_CALL(s2, 7, m_flag, 0))) {
 		goto done;
 	}
-	// No yellow frame around the screen, where Windows allows that.
-	if (SUCCEEDED(LC_QI(c->session, &lc_IID_Session3, &s3))) {
-		LC_CALL(s3, 7, m_flag, 0);
+	// No yellow frame around the screen. Windows 11 lets it be left out
+	// (IGraphicsCaptureSession3.IsBorderRequired); Windows 10 has no way to,
+	// and draws it for as long as the stream lasts. There, as Discord does,
+	// the screen is taken by desktop duplication, which shows nothing
+	// (LINKCORD_WGC_BORDER keeps this capture with its frame).
+	if (FAILED(LC_QI(c->session, &lc_IID_Session3, &s3)) || FAILED(LC_CALL(s3, 7, m_flag, 0))) {
+		if (GetEnvironmentVariableW(L"LINKCORD_WGC_BORDER", NULL, 0) == 0) {
+			goto done;
+		}
 	}
 	ok = SUCCEEDED(LC_CALL(c->session, 6, m_none));
 done:

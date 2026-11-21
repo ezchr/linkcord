@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -43,25 +44,13 @@ var (
 // Linkcord. The titles are read without sending the windows messages, which
 // a window that does not answer, or Linkcord's own, would wait on.
 func windowExecutables() []string {
-	self := windows.GetCurrentProcessId()
-	pids := make(map[uint32]bool)
-	var title [2]uint16
-	cb := windows.NewCallback(func(hwnd windows.HWND, _ uintptr) uintptr {
-		var pid uint32
-		procGetWindowThreadProcessId.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&pid)))
-		if pid == 0 || pid == self || pids[pid] {
-			return 1
-		}
-		if v, _, _ := procIsWindowVisible.Call(uintptr(hwnd)); v == 0 {
-			return 1
-		}
-		if n, _, _ := procInternalGetWindowText.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&title[0])), uintptr(len(title))); n == 0 {
-			return 1
-		}
-		pids[pid] = true
-		return 1
-	})
-	windows.EnumWindows(cb, nil)
+	enumMu.Lock()
+	enumSelf = windows.GetCurrentProcessId()
+	enumPids = make(map[uint32]bool)
+	windows.EnumWindows(enumCallback, nil)
+	pids := enumPids
+	enumPids = nil
+	enumMu.Unlock()
 	var out []string
 	for pid := range pids {
 		if p := processPath(pid); p != "" {
@@ -84,3 +73,30 @@ func processPath(pid uint32) string {
 	}
 	return windows.UTF16ToString(buf[:n])
 }
+
+// enumCallback is EnumWindows' callback for windowExecutables, made once: Go
+// has room for some two thousand callbacks for a whole run and never frees
+// one, and a new one was made each time the games were looked for,
+// until Linkcord stopped with "too many callback functions". It fills
+// enumPids, under enumMu.
+var (
+	enumMu       sync.Mutex
+	enumSelf     uint32
+	enumPids     map[uint32]bool
+	enumCallback = windows.NewCallback(func(hwnd windows.HWND, _ uintptr) uintptr {
+		var title [2]uint16
+		var pid uint32
+		procGetWindowThreadProcessId.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&pid)))
+		if pid == 0 || pid == enumSelf || enumPids[pid] {
+			return 1
+		}
+		if v, _, _ := procIsWindowVisible.Call(uintptr(hwnd)); v == 0 {
+			return 1
+		}
+		if n, _, _ := procInternalGetWindowText.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&title[0])), uintptr(len(title))); n == 0 {
+			return 1
+		}
+		enumPids[pid] = true
+		return 1
+	})
+)

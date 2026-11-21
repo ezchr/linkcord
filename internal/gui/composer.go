@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -81,6 +82,11 @@ type composerState struct {
 	// stickerBtn and gifBtn open the picker on its tab.
 	stickerBtn, gifBtn widget.Clickable
 	sending            bool
+	// While files upload: the bytes of them read into the request so far,
+	// out of upTotal (the request is streamed, so what is read is what has
+	// gone out, but for what the connection still buffers).
+	upSent  *atomic.Int64
+	upTotal int64
 	// emojiBackdrop closes the emoji picker when clicked.
 	emojiBackdrop widget.Clickable
 
@@ -666,8 +672,8 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 				if c.act.notice != "" && time.Now().Before(c.act.noticeUntil) {
 					txt, col = c.act.notice, colorGreen
 				}
-				if cs.sending {
-					txt, col = "Uploading files…", colorMuted
+				if cs.sending && c.sendErr == "" {
+					return c.layoutUploadProgress(gtx)
 				}
 				if c.sendErr != "" {
 					txt, col = c.sendErr, colorRed
@@ -862,6 +868,11 @@ func (c *chatView) send() {
 		return
 	}
 	cs.sending = len(files) > 0
+	sentBytes := new(atomic.Int64)
+	cs.upSent, cs.upTotal = sentBytes, 0
+	for _, f := range files {
+		cs.upTotal += f.size
+	}
 	go func() {
 		var opened []*os.File
 		defer func() {
@@ -901,7 +912,7 @@ func (c *chatView) send() {
 						return
 					}
 					opened = append(opened, file)
-					data.Files = append(data.Files, sendpart.File{Name: f.name, Reader: file})
+					data.Files = append(data.Files, sendpart.File{Name: f.name, Reader: &countingReader{r: file, n: sentBytes}})
 				}
 			}
 			if _, err = c.st.SendMessageComplex(id, data); err != nil {
@@ -1023,4 +1034,61 @@ func drawAbove(gtx, wgtx layout.Context, p image.Point, tag event.Tag, w layout.
 	solid(gtx, tag, dims)
 	call.Add(gtx.Ops)
 	t.Pop()
+}
+
+// countingReader adds what is read through it to n: the upload's progress.
+type countingReader struct {
+	r io.Reader
+	n *atomic.Int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	k, err := c.r.Read(p)
+	c.n.Add(int64(k))
+	return k, err
+}
+
+// layoutUploadProgress is the line below the box while files upload: how much
+// has gone out of how much, and a bar of it. It draws again ten times a second
+// until the upload ends.
+func (c *chatView) layoutUploadProgress(gtx layout.Context) layout.Dimensions {
+	th := c.u.th
+	cs := &c.comp
+	var sent int64
+	if cs.upSent != nil {
+		sent = cs.upSent.Load()
+	}
+	total := cs.upTotal
+	frac := float32(0)
+	if total > 0 {
+		frac = min(float32(sent)/float32(total), 1)
+	}
+	txt := tr("Uploading files…")
+	if total > 0 {
+		txt = fmt.Sprintf("%s %s / %s  %d%%", tr("Uploading"), formatSize(uint64(min(sent, total))), formatSize(uint64(total)), int(frac*100))
+		if sent >= total {
+			// Everything has gone; Discord is still answering.
+			txt = tr("Uploaded, sending…")
+		}
+	}
+	gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(100 * time.Millisecond)})
+	h := gtx.Dp(24)
+	gtx.Constraints = layout.Exact(image.Pt(gtx.Constraints.Max.X, h))
+	return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return oneLine(label(th, 12, colorMuted, txt)).Layout(gtx)
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			w, bh := gtx.Constraints.Max.X, gtx.Dp(6)
+			r := gtx.Dp(3)
+			track := clip.UniformRRect(image.Rect(0, 0, w, bh), r)
+			paint.FillShape(gtx.Ops, colorSidebar, track.Op(gtx.Ops))
+			if fw := int(float32(w) * frac); fw > 0 {
+				fill := clip.UniformRRect(image.Rect(0, 0, max(fw, 2*r), bh), r)
+				paint.FillShape(gtx.Ops, colorAccent, fill.Op(gtx.Ops))
+			}
+			return layout.Dimensions{Size: image.Pt(w, bh)}
+		}),
+	)
 }

@@ -677,6 +677,10 @@ int lc_gpucap_grab(lc_gpucap *g, int *w, int *h, int *changed, int *gone) {
 	if (g->d && (g->dmx != mx || g->dmy != my)) {
 		lc_dupl_close(g->d);
 		g->d = NULL;
+		// The next duplication's device counts from 1 again: without this
+		// it could match the old one's, and the textures made on the old
+		// device (and with them the device) would be kept.
+		g->devgen = -1;
 	}
 	if (!g->d) {
 		g->d = lc_dupl_open(mx, my);

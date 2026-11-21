@@ -38,6 +38,7 @@ func TestDeletedMessages(t *testing.T) {
 	}
 
 	// It is saved, and returns in its place in history that no longer has it.
+	c.deleted.flush() // written after a delay, or now when flushed
 	deadline := time.Now().Add(2 * time.Second)
 	var reloaded *deletedLog
 	for time.Now().Before(deadline) {

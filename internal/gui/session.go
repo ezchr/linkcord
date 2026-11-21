@@ -85,7 +85,9 @@ func newState(token string) *ningen.State {
 	// Discord's and Cloudflare's cookies go with every request, and are
 	// kept between starts, as a browser does.
 	sess.Client = http.NewPersistentClient(token)
-	st := ningen.FromState(state.NewFromSession(sess, defaultstore.New()))
+	cab := defaultstore.New()
+	cab.MessageStore = newRecentStore(storeMessagesPerChannel, storeChannels)
+	st := ningen.FromState(state.NewFromSession(sess, cab))
 	st.StateLog = func(err error) {
 		slog.Error("state log", "err", err)
 	}

@@ -32,6 +32,8 @@ type deletedLog struct {
 	// off is set when the user chose not to see deleted messages: none
 	// are kept, and those kept do not show.
 	off bool
+	// saveTimer is the write waiting (scheduleSave), nil when none is.
+	saveTimer *time.Timer
 }
 
 // setOff turns the keeping of deleted messages off, or back on.
@@ -74,19 +76,28 @@ func deletedLogPath() string {
 	return filepath.Join(filepath.Dir(logPath()), "deleted.json")
 }
 
+// deletedSaveDelay is how long a change to the log waits before it is
+// written, so that a burst of deletions (a bulk delete, a purge in a busy
+// server) is one write of the file, not one each.
+const deletedSaveDelay = 10 * time.Second
+
 // record keeps a message that was just deleted. It may be called from any
-// goroutine.
+// goroutine. Deletions come from every channel the store holds, a thousand an
+// hour on a busy account: record only notes the message and asks for a save
+// later; the file is written at most every deletedSaveDelay.
 func (d *deletedLog) record(m discord.Message) {
 	if d == nil || !m.ID.IsValid() {
 		return
 	}
 	d.mu.Lock()
+	defer d.mu.Unlock()
 	if _, ok := d.msgs[m.ID]; ok || d.mine[m.ID] || d.off {
-		d.mu.Unlock()
 		return
 	}
 	d.msgs[m.ID] = deletedEntry{Message: m, DeletedAt: time.Now()}
-	if len(d.msgs) > maxDeleted {
+	// Trimmed back to maxDeleted once it is a twentieth over, so that the
+	// sort runs once every few hundred deletions, not on each.
+	if len(d.msgs) > maxDeleted+maxDeleted/20 {
 		oldest := slices.SortedFunc(func(yield func(deletedEntry) bool) {
 			for _, e := range d.msgs {
 				if !yield(e) {
@@ -98,26 +109,46 @@ func (d *deletedLog) record(m discord.Message) {
 			delete(d.msgs, e.Message.ID)
 		}
 	}
+	d.scheduleSave()
+}
+
+// scheduleSave writes the log after deletedSaveDelay, unless a write is
+// already waiting. d.mu is held.
+func (d *deletedLog) scheduleSave() {
+	if d.path == "" || d.saveTimer != nil {
+		return
+	}
+	d.saveTimer = time.AfterFunc(deletedSaveDelay, d.flush)
+}
+
+// flush writes the log now if it has changes not written yet.
+func (d *deletedLog) flush() {
+	if d == nil || d.path == "" {
+		return
+	}
+	d.mu.Lock()
+	if d.saveTimer != nil {
+		d.saveTimer.Stop()
+		d.saveTimer = nil
+	}
 	entries := make([]deletedEntry, 0, len(d.msgs))
 	for _, e := range d.msgs {
 		entries = append(entries, e)
 	}
 	d.mu.Unlock()
-	if d.path != "" {
-		go d.save(entries)
-	}
+	d.save(entries)
 }
 
 var deletedSaveMu sync.Mutex
 
 func (d *deletedLog) save(entries []deletedEntry) {
+	deletedSaveMu.Lock()
+	defer deletedSaveMu.Unlock()
 	slices.SortFunc(entries, func(a, b deletedEntry) int { return cmp.Compare(a.Message.ID, b.Message.ID) })
 	data, err := json.Marshal(entries)
 	if err != nil {
 		return
 	}
-	deletedSaveMu.Lock()
-	defer deletedSaveMu.Unlock()
 	// Written whole and then renamed, so that a crash leaves the old file.
 	tmp := d.path + ".tmp"
 	if err := os.MkdirAll(filepath.Dir(d.path), 0o755); err != nil {
@@ -256,12 +287,6 @@ func (d *deletedLog) change(f func()) {
 	}
 	d.mu.Lock()
 	f()
-	entries := make([]deletedEntry, 0, len(d.msgs))
-	for _, e := range d.msgs {
-		entries = append(entries, e)
-	}
+	d.scheduleSave()
 	d.mu.Unlock()
-	if d.path != "" {
-		go d.save(entries)
-	}
 }

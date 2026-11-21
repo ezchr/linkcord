@@ -7,6 +7,7 @@ import (
 	"image"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -695,6 +696,8 @@ func (c *chatView) close() {
 	if c.stats != nil {
 		c.stats.save()
 	}
+	// A change to the deleted messages still waiting is written now.
+	c.deleted.flush()
 	st := c.st
 	go func() {
 		if err := st.Close(); err != nil {
@@ -1320,6 +1323,7 @@ func (c *chatView) apply(ev gateway.Event) {
 			// Over older messages, new ones wait for the jump to the present.
 			if !c.detached && !slices.ContainsFunc(c.messages, func(m discord.Message) bool { return m.ID == ev.ID }) {
 				c.messages = append(c.messages, ev.Message)
+				c.trimOpenMessages()
 			}
 			delete(c.typers, ev.Author.ID)
 			if c.u.focused {
@@ -2253,4 +2257,32 @@ func circleIcon(gtx layout.Context, bg colorT, ic *widget.Icon, active bool) lay
 		return icon(gtx, ic, 24, colorHeader)
 	})
 	return layout.Dimensions{Size: r.Max}
+}
+
+// A busy channel left open for hours gathered every message said in it, and
+// the state of each (its spans, its selection, its clicks). While the newest
+// are shown, the oldest go past openMessagesMax, a hundred at a time;
+// scrolling up loads them again.
+const (
+	openMessagesMax  = 600
+	openMessagesKeep = 500
+)
+
+// trimOpenMessages lets the oldest messages of the open channel go, when
+// there are too many and the list is at its newest.
+func (c *chatView) trimOpenMessages() {
+	if len(c.messages) <= openMessagesMax || c.messageList.Position.BeforeEnd || c.loadingOlder {
+		return
+	}
+	n := len(c.messages) - openMessagesKeep
+	for _, m := range c.messages[:n] {
+		delete(c.selectables, m.ID)
+		delete(c.richStates, m.ID)
+		delete(c.revealed, m.ID)
+	}
+	maps.DeleteFunc(c.msgClicks, func(k msgClickKey, _ *widget.Clickable) bool { return k.id < c.messages[n].ID })
+	clear(c.textStates) // keyed by text; made again for the messages shown
+	c.messages = slices.Clone(c.messages[n:])
+	c.noOlder = false
+	c.messageList.Position.First = max(c.messageList.Position.First-n, 0)
 }
