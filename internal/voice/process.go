@@ -4,6 +4,7 @@ package voice
 
 import (
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -86,7 +87,16 @@ func (p *processor) block(pcm []int16, gain float32, denoise, autoGain bool) {
 	}
 	if denoise {
 		strength := math.Float32frombits(p.strength.Load())
+		// Most microphones are mono, given as two equal channels: RNNoise,
+		// most of the processing's time, runs on the first and the second
+		// takes its result.
+		mono := slices.Equal(p.buf[0][:], p.buf[1][:])
 		for c := range channels {
+			if mono && c > 0 {
+				p.prev[c] = p.buf[c]
+				p.buf[c] = p.buf[0]
+				continue
+			}
 			if p.ns[c] == nil {
 				p.ns[c] = rnnoise.New()
 			}

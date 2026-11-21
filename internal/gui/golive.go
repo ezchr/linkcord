@@ -499,6 +499,7 @@ func (c *chatView) startStream(src golive.Source, q golive.Quality) {
 		CodecDir:     filepath.Dir(logPath()),
 	}
 	var s *golive.Stream
+	params.OnPreview = u.win.Invalidate
 	params.OnEnd = func(err error) {
 		u.post(func() {
 			if v.stream != nil && v.stream == s {

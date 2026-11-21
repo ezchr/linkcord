@@ -40,6 +40,7 @@ const tokenEnvVar = "LINKCORD_TOKEN"
 // Run opens the main window and blocks until it is closed.
 func Run() error {
 	moveLegacyDir()
+	tuneMemory()
 	// The demo, which tests run beside a signed-in Linkcord, keeps its own
 	// log rather than start that one's over.
 	log := logPath()
@@ -582,4 +583,18 @@ func (u *ui) showFromTray() {
 func (u *ui) quit() {
 	u.quitting.Store(true)
 	tray.CloseWindow(u.hwnd)
+}
+
+// tuneMemory bounds Go's heap. By default it lets the heap grow to twice what
+// is in use before collecting; Linkcord's live data is some 200 MB, and a
+// desktop program that sits open all day is better off collecting sooner:
+// at half again (GOGC 50), and harder near 512 MB in all. A GOGC or
+// GOMEMLIMIT set in the environment is left as it is.
+func tuneMemory() {
+	if os.Getenv("GOGC") == "" {
+		debug.SetGCPercent(50)
+	}
+	if os.Getenv("GOMEMLIMIT") == "" {
+		debug.SetMemoryLimit(512 << 20)
+	}
 }

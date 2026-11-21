@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"gioui.org/io/key"
@@ -53,6 +54,9 @@ type scheduleView struct {
 	cancels  map[int64]*widget.Clickable
 	// msgs are the messages waiting, of every channel.
 	msgs []scheduledMsg
+	// waiting is len(msgs), for the timer's goroutine: with none, it
+	// does not wake the window.
+	waiting atomic.Int32
 }
 
 // schedulePresets are how long after now the presets send.
@@ -71,6 +75,7 @@ var schedulePresets = []struct {
 func scheduledPath() string { return filepath.Join(filepath.Dir(logPath()), "scheduled.json") }
 
 func (c *chatView) saveScheduled() {
+	c.sched.waiting.Store(int32(len(c.sched.msgs)))
 	if c.demo {
 		return
 	}
@@ -91,11 +96,14 @@ func (c *chatView) watchScheduled() {
 	if data, err := os.ReadFile(scheduledPath()); err == nil {
 		json.Unmarshal(data, &c.sched.msgs)
 	}
+	c.sched.waiting.Store(int32(len(c.sched.msgs)))
 	go func() {
 		tick := time.NewTicker(10 * time.Second)
 		defer tick.Stop()
 		for {
-			c.u.post(c.sendDue)
+			if c.sched.waiting.Load() > 0 {
+				c.u.post(c.sendDue)
+			}
 			select {
 			case <-c.done:
 				return

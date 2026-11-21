@@ -1,6 +1,9 @@
 package gui
 
 import (
+	"strings"
+	"maps"
+	"bufio"
 	"cmp"
 	"encoding/json"
 	"image"
@@ -32,8 +35,10 @@ type deletedLog struct {
 	// off is set when the user chose not to see deleted messages: none
 	// are kept, and those kept do not show.
 	off bool
-	// saveTimer is the write waiting (scheduleSave), nil when none is.
-	saveTimer *time.Timer
+	// fmu guards f, the log file open for appending (nil until the first
+	// change is written).
+	fmu sync.Mutex
+	f   *os.File
 }
 
 // setOff turns the keeping of deleted messages off, or back on.
@@ -56,110 +61,179 @@ func newDeletedLog(path string) *deletedLog {
 	if path == "" {
 		return d
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return d
+	// Releases before 1.10.5 kept the messages as one JSON array, written
+	// whole on every change.
+	if data, err := os.ReadFile(path); err == nil {
+		var entries []deletedEntry
+		if err := json.Unmarshal(data, &entries); err != nil {
+			slog.Warn("failed to read deleted messages", "err", err)
+		}
+		for _, e := range entries {
+			d.msgs[e.Message.ID] = e
+		}
 	}
-	var entries []deletedEntry
-	if err := json.Unmarshal(data, &entries); err != nil {
-		slog.Warn("failed to read deleted messages", "err", err)
-		return d
-	}
-	for _, e := range entries {
-		d.msgs[e.Message.ID] = e
-	}
+	d.readLines()
+	d.trim()
+	d.compact()
 	return d
 }
 
-// deletedLogPath is %LocalAppData%\linkcord\deleted.json.
+// deletedLogPath is %LocalAppData%\linkcord\deleted.json, the file of old
+// releases; the log itself is deleted.jsonl beside it (linesPath).
 func deletedLogPath() string {
 	return filepath.Join(filepath.Dir(logPath()), "deleted.json")
 }
 
-// deletedSaveDelay is how long a change to the log waits before it is
-// written, so that a burst of deletions (a bulk delete, a purge in a busy
-// server) is one write of the file, not one each.
-const deletedSaveDelay = 10 * time.Second
+// The log is a file of JSON lines: one written per message deleted, as it is
+// deleted, a few hundred bytes, instead of the whole file again (5,000
+// messages, 6 MB, which with a deletion a few seconds apart on a busy
+// account was gigabytes of garbage an hour). A line is a deletedEntry, which
+// replaces any earlier one of the message, or {"forget": id}. At start the
+// file is read and written again with the newest maxDeleted only.
+type deletedLine struct {
+	deletedEntry
+	Forget discord.MessageID `json:"forget,omitempty"`
+}
+
+func (d *deletedLog) linesPath() string {
+	return strings.TrimSuffix(d.path, ".json") + ".jsonl"
+}
+
+// readLines applies the lines of the log to d.msgs.
+func (d *deletedLog) readLines() {
+	f, err := os.Open(d.linesPath())
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64<<10), 16<<20)
+	for sc.Scan() {
+		var l deletedLine
+		if json.Unmarshal(sc.Bytes(), &l) != nil {
+			continue // a line cut short by a crash
+		}
+		switch {
+		case l.Forget.IsValid():
+			delete(d.msgs, l.Forget)
+		case l.Message.ID.IsValid():
+			d.msgs[l.Message.ID] = l.deletedEntry
+		}
+	}
+}
+
+// trim keeps the newest maxDeleted messages. d.mu is held, or d is not
+// shared yet.
+func (d *deletedLog) trim() {
+	if len(d.msgs) <= maxDeleted {
+		return
+	}
+	oldest := slices.SortedFunc(func(yield func(deletedEntry) bool) {
+		for _, e := range d.msgs {
+			if !yield(e) {
+				return
+			}
+		}
+	}, func(a, b deletedEntry) int { return a.DeletedAt.Compare(b.DeletedAt) })
+	for _, e := range oldest[:len(d.msgs)-maxDeleted] {
+		delete(d.msgs, e.Message.ID)
+	}
+}
+
+// compact writes the log again with what d.msgs holds, one line each, and
+// removes the file of old releases. d is not shared yet.
+func (d *deletedLog) compact() {
+	entries := slices.SortedFunc(maps.Values(d.msgs), func(a, b deletedEntry) int { return cmp.Compare(a.Message.ID, b.Message.ID) })
+	if err := os.MkdirAll(filepath.Dir(d.path), 0o755); err != nil {
+		return
+	}
+	// Written whole and then renamed, so that a crash leaves the old file.
+	tmp := d.linesPath() + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		slog.Warn("failed to save deleted messages", "err", err)
+		return
+	}
+	w := bufio.NewWriter(f)
+	enc := json.NewEncoder(w)
+	for _, e := range entries {
+		if err := enc.Encode(e); err != nil {
+			break
+		}
+	}
+	err = w.Flush()
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp, d.linesPath())
+	}
+	if err != nil {
+		slog.Warn("failed to save deleted messages", "err", err)
+		return
+	}
+	_ = os.Remove(d.path)
+}
+
+// write appends a line to the log.
+func (d *deletedLog) write(l deletedLine) {
+	if d.path == "" {
+		return
+	}
+	data, err := json.Marshal(l)
+	if err != nil {
+		return
+	}
+	data = append(data, '\n')
+	d.fmu.Lock()
+	defer d.fmu.Unlock()
+	if d.f == nil {
+		f, err := os.OpenFile(d.linesPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			slog.Warn("failed to save deleted messages", "err", err)
+			return
+		}
+		d.f = f
+	}
+	if _, err := d.f.Write(data); err != nil {
+		slog.Warn("failed to save deleted messages", "err", err)
+	}
+}
 
 // record keeps a message that was just deleted. It may be called from any
 // goroutine. Deletions come from every channel the store holds, a thousand an
-// hour on a busy account: record only notes the message and asks for a save
-// later; the file is written at most every deletedSaveDelay.
+// hour on a busy account: each is one line added to the log.
 func (d *deletedLog) record(m discord.Message) {
 	if d == nil || !m.ID.IsValid() {
 		return
 	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	if _, ok := d.msgs[m.ID]; ok || d.mine[m.ID] || d.off {
+		d.mu.Unlock()
 		return
 	}
-	d.msgs[m.ID] = deletedEntry{Message: m, DeletedAt: time.Now()}
+	e := deletedEntry{Message: m, DeletedAt: time.Now()}
+	d.msgs[m.ID] = e
 	// Trimmed back to maxDeleted once it is a twentieth over, so that the
-	// sort runs once every few hundred deletions, not on each.
+	// sort runs once every few hundred deletions, not on each. The file
+	// keeps the others until the next start.
 	if len(d.msgs) > maxDeleted+maxDeleted/20 {
-		oldest := slices.SortedFunc(func(yield func(deletedEntry) bool) {
-			for _, e := range d.msgs {
-				if !yield(e) {
-					return
-				}
-			}
-		}, func(a, b deletedEntry) int { return a.DeletedAt.Compare(b.DeletedAt) })
-		for _, e := range oldest[:len(d.msgs)-maxDeleted] {
-			delete(d.msgs, e.Message.ID)
-		}
-	}
-	d.scheduleSave()
-}
-
-// scheduleSave writes the log after deletedSaveDelay, unless a write is
-// already waiting. d.mu is held.
-func (d *deletedLog) scheduleSave() {
-	if d.path == "" || d.saveTimer != nil {
-		return
-	}
-	d.saveTimer = time.AfterFunc(deletedSaveDelay, d.flush)
-}
-
-// flush writes the log now if it has changes not written yet.
-func (d *deletedLog) flush() {
-	if d == nil || d.path == "" {
-		return
-	}
-	d.mu.Lock()
-	if d.saveTimer != nil {
-		d.saveTimer.Stop()
-		d.saveTimer = nil
-	}
-	entries := make([]deletedEntry, 0, len(d.msgs))
-	for _, e := range d.msgs {
-		entries = append(entries, e)
+		d.trim()
 	}
 	d.mu.Unlock()
-	d.save(entries)
+	d.write(deletedLine{deletedEntry: e})
 }
 
-var deletedSaveMu sync.Mutex
-
-func (d *deletedLog) save(entries []deletedEntry) {
-	deletedSaveMu.Lock()
-	defer deletedSaveMu.Unlock()
-	slices.SortFunc(entries, func(a, b deletedEntry) int { return cmp.Compare(a.Message.ID, b.Message.ID) })
-	data, err := json.Marshal(entries)
-	if err != nil {
+// flush closes the log file; the next change opens it again.
+func (d *deletedLog) flush() {
+	if d == nil {
 		return
 	}
-	// Written whole and then renamed, so that a crash leaves the old file.
-	tmp := d.path + ".tmp"
-	if err := os.MkdirAll(filepath.Dir(d.path), 0o755); err != nil {
-		return
-	}
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		slog.Warn("failed to save deleted messages", "err", err)
-		return
-	}
-	if err := os.Rename(tmp, d.path); err != nil {
-		slog.Warn("failed to save deleted messages", "err", err)
+	d.fmu.Lock()
+	defer d.fmu.Unlock()
+	if d.f != nil {
+		d.f.Close()
+		d.f = nil
 	}
 }
 
@@ -263,30 +337,30 @@ func (c *chatView) layoutDeletedSign(gtx layout.Context, id discord.MessageID) l
 
 // forget takes a kept message away, for good, as the user asked.
 func (d *deletedLog) forget(id discord.MessageID) {
-	d.change(func() {
-		delete(d.msgs, id)
-		d.mine[id] = true
-	})
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	delete(d.msgs, id)
+	d.mine[id] = true
+	d.mu.Unlock()
+	d.write(deletedLine{Forget: id})
 }
 
 // setContent has a kept message say text, for good, as the user changed
 // it.
 func (d *deletedLog) setContent(id discord.MessageID, text string) {
-	d.change(func() {
-		if e, ok := d.msgs[id]; ok {
-			e.Message.Content = text
-			d.msgs[id] = e
-		}
-	})
-}
-
-// change applies f to the kept messages, and saves them.
-func (d *deletedLog) change(f func()) {
 	if d == nil {
 		return
 	}
 	d.mu.Lock()
-	f()
-	d.scheduleSave()
+	e, ok := d.msgs[id]
+	if ok {
+		e.Message.Content = text
+		d.msgs[id] = e
+	}
 	d.mu.Unlock()
+	if ok {
+		d.write(deletedLine{deletedEntry: e})
+	}
 }

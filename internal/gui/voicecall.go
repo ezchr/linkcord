@@ -413,7 +413,9 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 			if s := c.u.voice.stream; s != nil {
 				s.SetPreviewWidth(size.X)
 			}
-			gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(100 * time.Millisecond)})
+			// A new preview redraws the window (golive.Params.OnPreview);
+			// this only keeps a card whose stream went quiet up to date.
+			gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(time.Second)})
 			c.layoutCardName(gtx, vs, name, size, true)
 			if rightClicked(gtx, c.rightTag("card"+vs.UserID.String()), size) {
 				c.openUserMenu(vs.UserID, guildID, vs.ChannelID)
@@ -439,7 +441,10 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 		shown, btn := c.layoutWatchedCard(gtx, vs, size, radius, (size.Y+px)/2+gtx.Dp(12))
 		watchBtn = btn
 		if shown {
-			gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(30 * time.Millisecond)})
+			// Each picture of the stream redraws the window as it comes
+			// (OnFrame); redrawing 33 times a second besides cost a frame
+			// each for nothing on a still screen.
+			gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(time.Second)})
 			c.layoutCardName(gtx, vs, name, size, true)
 			if rightClicked(gtx, c.rightTag("card"+vs.UserID.String()), size) {
 				c.openUserMenu(vs.UserID, guildID, vs.ChannelID)

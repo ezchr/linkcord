@@ -347,6 +347,10 @@ type chatView struct {
 	// openChannel is the ID of the channel open, for the gateway's
 	// goroutine to tell what is in view.
 	openChannel atomic.Uint64
+	// openGuild is the ID of the server open, likewise.
+	openGuild atomic.Uint64
+	// followOn is c.following.IsValid(), for watchFollow's goroutine.
+	followOn atomic.Bool
 	// viewerOnly is set while only a viewer and what opens over it are
 	// drawn.
 	viewerOnly bool
@@ -543,6 +547,11 @@ func (c *chatView) pump() {
 			case *authTokenRefreshEvent:
 				c.u.post(func() { c.u.tokenRefreshed(c.st, ev.Token) })
 			case *gateway.GuildMemberListUpdateEvent:
+				// Only the list of the server open is shown: the others'
+				// changes need no frame.
+				if uint64(ev.GuildID) != c.openGuild.Load() {
+					break
+				}
 				c.u.postSoon(func() {
 					if ch := c.selChannel; ch != nil && ch.GuildID == ev.GuildID && c.st.MemberState.ListID(ch) == ev.ID {
 						c.rebuildMembers()
@@ -550,7 +559,12 @@ func (c *chatView) pump() {
 				})
 			case *gateway.PresenceUpdateEvent:
 				// Presences are read while laying out; one redraw at a time
-				// is enough for any number of updates.
+				// is enough for any number of updates. Those of a server not
+				// open show nowhere until it is (friends and conversations
+				// come without a server, and do redraw).
+				if ev.GuildID.IsValid() && uint64(ev.GuildID) != c.openGuild.Load() {
+					break
+				}
 				if c.presencePending.CompareAndSwap(false, true) {
 					c.u.postSoon(func() {
 						c.presencePending.Store(false)
@@ -1531,6 +1545,7 @@ func (c *chatView) layout(gtx layout.Context) layout.Dimensions {
 	} else {
 		c.openChannel.Store(0)
 	}
+	c.openGuild.Store(uint64(c.selGuild))
 	c.trackPointer(gtx)
 	c.update(gtx)
 	c.updateUnreadKeys(gtx)

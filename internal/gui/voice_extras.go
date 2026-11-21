@@ -95,6 +95,9 @@ func (c *chatView) watchFollow() {
 				return
 			case <-tick.C:
 			}
+			if !c.followOn.Load() {
+				continue // following no one: the window is not woken
+			}
 			c.u.post(func() {
 				if !c.following.IsValid() || !c.followGuild.IsValid() {
 					return
@@ -111,10 +114,12 @@ func (c *chatView) watchFollow() {
 func (c *chatView) toggleFollow(guildID discord.GuildID, id discord.UserID) {
 	if c.following == id {
 		c.following = 0
+		c.followOn.Store(false)
 		c.u.voiceInfo(tr("No longer following anyone in voice"))
 		return
 	}
 	c.following, c.followGuild = id, guildID
+	c.followOn.Store(true)
 	c.followTried = 0
 	c.u.voiceInfo(fmt.Sprintf(tr("Following %s in voice"), c.memberName(guildID, id, nil)))
 	c.watchFollow()

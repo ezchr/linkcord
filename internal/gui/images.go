@@ -15,6 +15,7 @@ import (
 	neturl "net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,10 +64,10 @@ var animEpoch = time.Now()
 
 // animBudget limits retained frames per animation. Source canvas limits are
 // separate so that reducing retained frames does not reject normal APNGs.
-const animBudget = 48 << 20
+const animBudget = 16 << 20
 
 const (
-	imageCacheBudget      = 64 << 20
+	imageCacheBudget      = 32 << 20
 	imageCacheEntries     = 512
 	imagePendingLoads     = 64
 	animationMaxSide      = 2048
@@ -136,6 +137,13 @@ func newImages(u *ui) *images {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		slog.Warn("failed to create image cache dir", "err", err)
 		dir = ""
+	}
+	if dir != "" {
+		go func() {
+			// Once the window has started, out of its way.
+			time.Sleep(time.Minute)
+			pruneDiskCache(dir, diskCacheMax, diskCacheKeep)
+		}()
 	}
 	return &images{
 		u:        u,
@@ -503,11 +511,15 @@ func (im *images) fromDisk(key string) (image.Image, error) {
 	if im.dir == "" {
 		return nil, os.ErrNotExist
 	}
-	f, err := os.Open(im.path(key))
+	p := im.path(key)
+	f, err := os.Open(p)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
+	// Its time is the last use, which pruneDiskCache keeps the newest by.
+	now := time.Now()
+	_ = os.Chtimes(p, now, now)
 	return png.Decode(f)
 }
 
@@ -516,7 +528,11 @@ func (im *images) toDisk(key string, img image.Image) {
 		return
 	}
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
+	// Fastest compression: a cached picture is written once and read a few
+	// times, and the default level took three times as long for a little
+	// less disk.
+	enc := png.Encoder{CompressionLevel: png.BestSpeed}
+	if err := enc.Encode(&buf, img); err != nil {
 		return
 	}
 	writeFile(im.path(key), buf.Bytes())
@@ -539,6 +555,10 @@ func (im *images) animFromDisk(key string, size int) ([]image.Image, []time.Dura
 		return nil, nil, os.ErrNotExist
 	}
 	data, err := os.ReadFile(im.animPath(key))
+	if err == nil {
+		now := time.Now()
+		_ = os.Chtimes(im.animPath(key), now, now)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -613,4 +633,55 @@ func (im *images) newFrame() {
 	im.mu.Lock()
 	defer im.mu.Unlock()
 	im.shown, im.frameStart = im.frameStart, im.clock+1
+}
+
+// The pictures kept on disk were never let go: 867 MB in 14,000 files after a
+// few weeks. Past diskCacheMax, the least recently used go until the folder
+// is down to diskCacheKeep, once at each start.
+const (
+	diskCacheMax  = 400 << 20
+	diskCacheKeep = 300 << 20
+)
+
+// pruneDiskCache removes the files of dir used longest ago (their time is
+// their last use) while it holds more than max bytes, down to keep.
+func pruneDiskCache(dir string, max, keep int64) {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	type file struct {
+		name string
+		size int64
+		at   time.Time
+	}
+	var files []file
+	var total int64
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, file{e.Name(), info.Size(), info.ModTime()})
+		total += info.Size()
+	}
+	if total <= max {
+		return
+	}
+	slices.SortFunc(files, func(a, b file) int { return a.at.Compare(b.at) })
+	removed, freed := 0, int64(0)
+	for _, f := range files {
+		if total <= keep {
+			break
+		}
+		if os.Remove(filepath.Join(dir, f.name)) == nil {
+			total -= f.size
+			freed += f.size
+			removed++
+		}
+	}
+	slog.Info("image cache pruned", "files", removed, "freed_mb", freed>>20, "kept_mb", total>>20)
 }

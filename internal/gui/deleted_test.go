@@ -1,6 +1,8 @@
 package gui
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -64,5 +66,35 @@ func TestDeletedMessages(t *testing.T) {
 	}
 	if got := reloaded.merge(11, history, 0, 0); len(got) != 2 {
 		t.Fatalf("message of another channel was merged: %v", got)
+	}
+}
+
+// The log of old releases (a JSON array) is read, the log of lines is
+// written beside it, and what is added and forgotten after stays so.
+func TestDeletedLogLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deleted.json")
+	old := []deletedEntry{{Message: discord.Message{ID: 1, ChannelID: 5, Content: "old"}, DeletedAt: time.Now()}}
+	data, _ := json.Marshal(old)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := newDeletedLog(path)
+	if !d.has(1) {
+		t.Fatal("the old file was not read")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("the old file was kept")
+	}
+	d.record(discord.Message{ID: 2, ChannelID: 5, Content: "two"})
+	d.record(discord.Message{ID: 3, ChannelID: 5, Content: "three"})
+	d.forget(2)
+	d.setContent(3, "edited")
+	d.flush()
+	r := newDeletedLog(path)
+	if !r.has(1) || r.has(2) || !r.has(3) {
+		t.Fatalf("reloaded: 1 %v, 2 %v, 3 %v", r.has(1), r.has(2), r.has(3))
+	}
+	if got := r.merge(5, nil, 0, 0); len(got) != 2 || got[1].Content != "edited" {
+		t.Fatalf("merged = %v", got)
 	}
 }

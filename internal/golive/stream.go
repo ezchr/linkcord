@@ -42,6 +42,10 @@ type Stream struct {
 	// previewW is how wide the preview is shown, in pixels, for it to be
 	// made as wide.
 	previewW atomic.Int32
+	// previewAsked is when SetPreviewWidth was last called, in Unix
+	// nanoseconds: previews are made only while someone shows them, each
+	// one read back from the graphics card otherwise for nothing.
+	previewAsked atomic.Int64
 	// keyframe asks the loop for a keyframe, and source to share another
 	// screen or window.
 	keyframe chan struct{}
@@ -593,14 +597,14 @@ func (s *Stream) loop(capt *capturer) {
 					}
 					job = streamFrame{tex: tex, dev: dev, w: ow, h: oh, nv12: true}
 					fresh = true
-					if now := time.Now(); now.Sub(lastThumb) >= previewEvery {
+					if now := time.Now(); now.Sub(lastThumb) >= previewEvery && s.previewWanted(now) {
 						lastThumb = now
 						tw := min(int(s.previewW.Load()), w)
 						if tw <= 0 {
 							tw = 320
 						}
 						if img := nextPreview(tw, max(tw*h/w, 1)); gpu.previewInto(img) {
-							s.preview.Store(img)
+							s.setPreview(img)
 						}
 					}
 				}
@@ -626,7 +630,7 @@ func (s *Stream) loop(capt *capturer) {
 				pic.toYUV(job.buf, ow, oh, nv12)
 				convertTime += time.Since(c0)
 				fresh = true
-				if now := time.Now(); now.Sub(lastThumb) >= previewEvery {
+				if now := time.Now(); now.Sub(lastThumb) >= previewEvery && s.previewWanted(now) {
 					lastThumb = now
 					tw := min(int(s.previewW.Load()), pic.w)
 					if tw <= 0 {
@@ -634,7 +638,7 @@ func (s *Stream) loop(capt *capturer) {
 					}
 					img := nextPreview(tw, max(tw*pic.h/pic.w, 1))
 					pic.intoRGBA(img)
-					s.preview.Store(img)
+					s.setPreview(img)
 				}
 			}
 		}
@@ -825,6 +829,20 @@ func (s *Stream) Preview() *image.RGBA {
 // or as what is shared if narrower.
 func (s *Stream) SetPreviewWidth(w int) {
 	s.previewW.Store(int32(w))
+	s.previewAsked.Store(time.Now().UnixNano())
+}
+
+// previewWanted reports whether the preview was shown lately. The first one
+// is always made, which is what a card waits for to show it at all.
+func (s *Stream) previewWanted(now time.Time) bool {
+	return s.preview.Load() == nil || now.UnixNano()-s.previewAsked.Load() < int64(time.Second)
+}
+
+func (s *Stream) setPreview(img *image.RGBA) {
+	s.preview.Store(img)
+	if f := s.p.OnPreview; f != nil {
+		f()
+	}
 }
 
 // Viewers are who watch the stream.

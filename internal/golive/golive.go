@@ -90,6 +90,9 @@ type Params struct {
 	CodecDir string
 	// OnEnd is called once the stream ended by itself, with why.
 	OnEnd func(err error)
+	// OnPreview, if set, is called when a new preview is made (Preview), so
+	// that whoever shows it draws it again then and not on a timer.
+	OnPreview func()
 }
 
 // ErrSourceGone is why a stream ends when the window shared is closed.
