@@ -42,9 +42,20 @@ type voiceRecording struct {
 // records, waits to be sent, or is being sent.
 func (r *voiceRecording) active() bool { return r.rec != nil || r.review != nil || r.sending }
 
+// canVoiceMessage reports whether voice messages may be sent in the open
+// channel: in a server they need Send Voice Messages.
+func (c *chatView) canVoiceMessage() bool {
+	ch := c.selChannel
+	return ch == nil || !ch.GuildID.IsValid() || c.can(ch.ID, discord.PermissionSendVoiceMessages)
+}
+
 func (c *chatView) startVoiceRecording() {
 	r := &c.comp.voice
 	if r.rec != nil || r.sending {
+		return
+	}
+	if !c.canVoiceMessage() {
+		c.sendErr = tr("You do not have permission to send voice messages in this channel.")
 		return
 	}
 	s := c.u.voiceSettings()
@@ -117,6 +128,10 @@ func (c *chatView) stopVoicePreview() {
 func (c *chatView) sendVoiceRecording() {
 	r := &c.comp.voice
 	if r.review == nil || c.selChannel == nil {
+		return
+	}
+	if !c.canVoiceMessage() {
+		c.sendErr = tr("You do not have permission to send voice messages in this channel.")
 		return
 	}
 	c.stopVoicePreview()

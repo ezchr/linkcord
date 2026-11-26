@@ -202,7 +202,7 @@ func (c *chatView) emojiBody(gtx layout.Context, p *emojiPicker) (layout.Widget,
 					p.hoverPic = twemojiURL(cl.text, 48)
 				}
 				if cl.locked {
-					p.hovered = cl.name + " · Nitro is needed to use this here"
+					p.hovered = cl.name + " · " + tr(cl.lockNote)
 				}
 			}
 		}

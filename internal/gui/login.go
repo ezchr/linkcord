@@ -49,6 +49,10 @@ type loginView struct {
 	email, password, code widget.Editor
 	mfa                   *auth.MFARequired
 	submit                widget.Clickable
+	// sendSMS texts the code instead, when the account allows it; smsPhone
+	// is where it went.
+	sendSMS  widget.Clickable
+	smsPhone string
 
 	// Token login.
 	token     widget.Editor
@@ -152,7 +156,7 @@ func (l *loginView) run(f func() (string, error)) {
 			var mfa *auth.MFARequired
 			switch {
 			case errors.As(err, &mfa):
-				l.mfa = mfa
+				l.mfa, l.smsPhone = mfa, ""
 				l.code.SetText("")
 			case errors.Is(err, auth.ErrCaptcha):
 				l.err = "Discord requested a captcha (\"I'm not a robot\"), which Linkcord cannot display. Use a QR code or your token."
@@ -177,6 +181,28 @@ func (l *loginView) submitPassword() {
 		return
 	}
 	l.run(func() (string, error) { return auth.Password(email, password) })
+}
+
+// textCode asks Discord to send the login code by SMS; the code typed after
+// is then checked as one.
+func (l *loginView) textCode() {
+	mfa, u := l.mfa, l.u
+	l.busy, l.err = true, ""
+	go func() {
+		phone, err := auth.SendSMS(mfa)
+		u.post(func() {
+			if u.login != l || l.mfa != mfa {
+				return
+			}
+			l.busy = false
+			if err != nil {
+				l.err = err.Error()
+				return
+			}
+			mfa.ViaSMS, l.smsPhone = true, phone
+			l.code.SetText("")
+		})
+	}()
 }
 
 func (l *loginView) submitToken() {
@@ -216,6 +242,9 @@ func (l *loginView) update(gtx layout.Context) {
 		s = submitted(&l.code) || s
 		if s || l.submit.Clicked(gtx) {
 			l.submitPassword()
+		}
+		if l.sendSMS.Clicked(gtx) && l.mfa != nil && l.mfa.SMS && !l.busy {
+			l.textCode()
 		}
 	case tabToken:
 		if submitted(&l.token) || l.submit.Clicked(gtx) {
@@ -363,12 +392,30 @@ func (l *loginView) layoutQR(gtx layout.Context) layout.Dimensions {
 func (l *loginView) layoutPassword(gtx layout.Context) layout.Dimensions {
 	th := l.u.th
 	if l.mfa != nil {
+		prompt := "Enter the 6-digit code from your authenticator app."
+		switch {
+		case l.mfa.ViaSMS:
+			prompt = "Enter the code sent by SMS to " + l.smsPhone + "."
+		case !l.mfa.TOTP:
+			prompt = "This account verifies logins by SMS. Send the code to your phone."
+		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(label(th, 14, colorText, "Enter the 6-digit code from your authenticator app.").Layout),
+			layout.Rigid(label(th, 14, colorText, prompt).Layout),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return textField(gtx, th, &l.code, "123456") }),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return l.submitButton(gtx, "Verify") }),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if !l.mfa.SMS || l.mfa.ViaSMS {
+					return layout.Dimensions{}
+				}
+				return layout.Inset{Top: unit.Dp(10)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return l.sendSMS.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						pointer.CursorPointer.Add(gtx.Ops)
+						return label(th, 14, colorLink, "Send code by SMS").Layout(gtx)
+					})
+				})
+			}),
 		)
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,

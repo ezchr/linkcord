@@ -7,10 +7,14 @@ import (
 	"github.com/ayn2op/arikawa/v3/api"
 )
 
-// MFARequired is returned by Password when the account needs a code from an
-// authenticator app to finish logging in; pass it to TOTP with the code.
+// MFARequired is returned by Password when the account needs a second code
+// to finish logging in; pass it to TOTP with the code.
 type MFARequired struct {
 	ticket, loginInstanceID string
+	// TOTP and SMS are the methods the account offers. ViaSMS is set once
+	// SendSMS sent a code, which TOTP then checks as an SMS code.
+	TOTP, SMS bool
+	ViaSMS    bool
 	// client is the one that logged in, whose cookies the code must go with.
 	client *api.Client
 }
@@ -31,18 +35,33 @@ func Password(login, password string) (string, error) {
 		return resp.Token, nil
 	}
 	if resp.MFA {
-		if !resp.TOTP {
-			return "", errors.New("this account only supports SMS verification; use a QR code or token instead")
+		if !resp.TOTP && !resp.SMS {
+			return "", errors.New("this account verifies logins with a security key, which Linkcord cannot use; use a QR code instead")
 		}
-		return "", &MFARequired{ticket: resp.Ticket, loginInstanceID: resp.LoginInstanceID, client: client}
+		return "", &MFARequired{ticket: resp.Ticket, loginInstanceID: resp.LoginInstanceID, TOTP: resp.TOTP, SMS: resp.SMS, client: client}
 	}
 	return "", errors.New("Discord did not return a token")
 }
 
-// TOTP finishes a login that needs a code from an authenticator app.
+// SendSMS asks Discord to text a login code to the account's phone, and
+// returns the phone number as Discord shows it, partly hidden.
+func SendSMS(mfa *MFARequired) (string, error) {
+	phone, err := mfa.client.SendMFASMS(mfa.ticket)
+	if err != nil {
+		return "", friendly(err)
+	}
+	return phone, nil
+}
+
+// TOTP finishes a login that needs a code from an authenticator app, or the
+// code texted after SendSMS.
 func TOTP(mfa *MFARequired, code string) (string, error) {
 	code = strings.ReplaceAll(strings.TrimSpace(code), " ", "")
-	resp, err := mfa.client.TOTP(code, mfa.ticket, mfa.loginInstanceID)
+	verify := mfa.client.TOTP
+	if mfa.ViaSMS {
+		verify = mfa.client.SMS
+	}
+	resp, err := verify(code, mfa.ticket, mfa.loginInstanceID)
 	if err != nil {
 		return "", friendly(err)
 	}

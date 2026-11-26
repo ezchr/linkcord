@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -570,7 +571,33 @@ func (c *chatView) withMarkup(text string) string {
 	for _, name := range names {
 		text = strings.ReplaceAll(text, name, c.comp.mentions[name])
 	}
-	return text
+	return c.withoutExternalEmoji(text)
+}
+
+// customEmojiRe matches the markup of a custom emoji.
+var customEmojiRe = regexp.MustCompile(`<(a?):(\w+):(\d+)>`)
+
+// withoutExternalEmoji turns the custom emoji of other servers into their
+// :name: when the user lacks Use External Emojis in the server channel, as
+// Discord's client leaves them unconverted then.
+func (c *chatView) withoutExternalEmoji(text string) string {
+	ch := c.selChannel
+	if ch == nil || !ch.GuildID.IsValid() || c.can(ch.ID, discord.PermissionUseExternalEmojis) {
+		return text
+	}
+	here := map[discord.EmojiID]bool{}
+	if emojis, err := c.st.Cabinet.Emojis(ch.GuildID); err == nil {
+		for _, e := range emojis {
+			here[e.ID] = true
+		}
+	}
+	return customEmojiRe.ReplaceAllStringFunc(text, func(m string) string {
+		sub := customEmojiRe.FindStringSubmatch(m)
+		if id, err := discord.ParseSnowflake(sub[3]); err == nil && here[discord.EmojiID(id)] {
+			return m
+		}
+		return ":" + sub[2] + ":"
+	})
 }
 
 func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
@@ -644,7 +671,7 @@ func (c *chatView) layoutComposer(gtx layout.Context) layout.Dimensions {
 									// With nothing written, a voice message can be
 									// recorded, as on Discord's phones.
 									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										if cs.voice.active() || c.composer.Len() > 0 || len(cs.files) > 0 {
+										if cs.voice.active() || c.composer.Len() > 0 || len(cs.files) > 0 || !c.canVoiceMessage() {
 											return layout.Dimensions{}
 										}
 										return iconButton(gtx, &cs.voice.mic, iconMic, colorMuted, colorHeader)

@@ -122,12 +122,14 @@ var emojiCategories = []emojiCategory{
 }
 
 type emojiCell struct {
-	text  string // the emoji, or the markup of a custom emoji
-	name  string
-	url   string // of a custom emoji
-	// locked is an emoji the user cannot send without Nitro.
-	locked bool
-	click widget.Clickable
+	text string // the emoji, or the markup of a custom emoji
+	name string
+	url  string // of a custom emoji
+	// locked is an emoji the user cannot send here: without Nitro, or
+	// without Use External Emojis in this channel. lockNote says which.
+	locked   bool
+	lockNote string
+	click    widget.Clickable
 }
 
 // emojiPicker is the popup to put emoji in the message.
@@ -213,6 +215,9 @@ func (c *chatView) emojiSections(p *emojiPicker) []emojiSection {
 		emojis, _ := c.st.Cabinet.Emojis(gid)
 		// Without Nitro, only this server's still emoji can be used.
 		locked := c.me.Nitro == discord.NoUserNitro && gid != here
+		// Another server's emoji need Use External Emojis in a server channel,
+		// Nitro or not, as Discord's picker greys them out.
+		noPerm := gid != here && here.IsValid() && !c.can(c.selChannel.ID, discord.PermissionUseExternalEmojis)
 		var cells []*emojiCell
 		for _, e := range emojis {
 			if q != "" && !strings.Contains(strings.ToLower(e.Name), q) {
@@ -225,6 +230,10 @@ func (c *chatView) emojiSections(p *emojiPicker) []emojiSection {
 			url := "https://cdn.discordapp.com/emojis/" + e.ID.String() + ".png?size=48"
 			cl := p.cell(markup, markup+" ", ":"+e.Name+":", url)
 			cl.locked = locked || (e.Animated && c.me.Nitro == discord.NoUserNitro)
+			cl.lockNote = "Nitro is needed to use this here"
+			if noPerm {
+				cl.locked, cl.lockNote = true, "You cannot use emoji from other servers in this channel"
+			}
 			cells = append(cells, cl)
 		}
 		if len(cells) > 0 {
