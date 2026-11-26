@@ -179,7 +179,7 @@ func (c *chatView) layoutIncomingCall(gtx layout.Context) {
 					px := gtx.Dp(80)
 					phase := float64(gtx.Now.UnixMilli()%1200) / 1200
 					ringW := gtx.Dp(3) + int(float64(gtx.Dp(5))*(0.5-0.5*cosTurn(phase)))
-					gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(33 * time.Millisecond)})
+					gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(50 * time.Millisecond)}) // 20 fps is plenty for a slow pulse.
 					full := px + 2*gtx.Dp(8)
 					paint.FillShape(gtx.Ops, withAlpha(colorGreen, 0x60), clip.Ellipse(image.Rect(gtx.Dp(8)-ringW, gtx.Dp(8)-ringW, gtx.Dp(8)+px+ringW, gtx.Dp(8)+px+ringW)).Op(gtx.Ops))
 					t := op.Offset(image.Pt(gtx.Dp(8), gtx.Dp(8))).Push(gtx.Ops)

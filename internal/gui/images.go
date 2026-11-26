@@ -56,6 +56,9 @@ type imageEntry struct {
 	frames []paint.ImageOp
 	delays []time.Duration
 	cycle  time.Duration
+	// shownAt is when an animation was last laid out: one off screen for
+	// animIdleDrop lets its frames go, and is decoded again if it returns.
+	shownAt time.Time
 }
 
 // animEpoch is when animations start, so that the same GIF shown twice
@@ -65,6 +68,13 @@ var animEpoch = time.Now()
 // animBudget limits retained frames per animation. Source canvas limits are
 // separate so that reducing retained frames does not reject normal APNGs.
 const animBudget = 16 << 20
+
+// animFrameMin caps animations at 30 frames a second: a GIF asking for 10 ms
+// frames would otherwise redraw the whole window at every vsync.
+const animFrameMin = 33 * time.Millisecond
+
+// animIdleDrop is how long an animation not laid out keeps its frames.
+const animIdleDrop = 30 * time.Second
 
 const (
 	imageCacheBudget      = 32 << 20
@@ -114,6 +124,8 @@ type images struct {
 	// shown is the clock when the frame before the current one started:
 	// what was used since is on the window, and is not released.
 	shown, frameStart uint64
+	// animSwept is when newFrame last looked for animations off screen.
+	animSwept time.Time
 
 	// sem limits the downloads at once, for slow connections.
 	sem chan struct{}
@@ -203,20 +215,23 @@ func (im *images) frame(gtx layout.Context, url string, size int) *paint.ImageOp
 	if e == nil || len(e.frames) < 2 || e.cycle <= 0 {
 		return img
 	}
+	now := gtx.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	e.shownAt = now
 	// Low-power mode, and a window minimized or in the background, pause
 	// playback, as Discord plays GIFs only while it is in front: each
 	// frame of an animation redraws the whole window.
 	if im.lowPower || (im.u != nil && (im.u.minimized || !im.u.focused)) {
 		return img
 	}
-	now := gtx.Now
-	if now.IsZero() {
-		now = time.Now()
-	}
 	pos := now.Sub(animEpoch) % e.cycle
 	for i, d := range e.delays {
 		if pos < d {
-			gtx.Execute(op.InvalidateCmd{At: now.Add(d - pos)})
+			// Only the animations laid out this frame ask for the next,
+			// at the time their frame changes, no sooner than animFrameMin.
+			gtx.Execute(op.InvalidateCmd{At: now.Add(max(d-pos, animFrameMin))})
 			f := e.frames[i]
 			return &f
 		}
@@ -633,6 +648,19 @@ func (im *images) newFrame() {
 	im.mu.Lock()
 	defer im.mu.Unlock()
 	im.shown, im.frameStart = im.frameStart, im.clock+1
+	// Every few seconds, the animations off screen for animIdleDrop let
+	// their decoded frames go; they stay on disk.
+	now := time.Now()
+	if now.Sub(im.animSwept) < 5*time.Second {
+		return
+	}
+	im.animSwept = now
+	for key, e := range im.entries {
+		if e.state == imageReady && len(e.frames) > 1 && !e.shownAt.IsZero() && now.Sub(e.shownAt) > animIdleDrop {
+			im.cacheBytes -= e.bytes
+			delete(im.entries, key)
+		}
+	}
 }
 
 // The pictures kept on disk were never let go: 867 MB in 14,000 files after a

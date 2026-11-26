@@ -228,13 +228,6 @@ func withAlpha(c color.NRGBA, a uint8) color.NRGBA {
 	return c
 }
 
-// loader is a spinner in the accent color.
-func loader(th *material.Theme) material.LoaderStyle {
-	l := material.Loader(th)
-	l.Color = colorAccent
-	return l
-}
-
 // dot is a small filled circle, used for unread and status indicators.
 func dot(gtx layout.Context, c color.NRGBA, size unit.Dp) layout.Dimensions {
 	px := gtx.Dp(size)
