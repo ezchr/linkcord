@@ -486,6 +486,9 @@ func (u *ui) voiceSession(st *ningen.State) *voice.Session {
 	}
 	settings := u.voiceSettings()
 	v.session, v.st = voice.New(st.State, settings.sensitivity()), st
+	// The cameras of the call are shown as streams are, each new picture
+	// redrawing the window.
+	v.session.SetVideoBackend(golive.Cameras{OnFrame: u.win.Invalidate})
 	v.talker.Store(v.session)
 	u.applyVoiceSettings()
 	u.applyLinkcordVoice()

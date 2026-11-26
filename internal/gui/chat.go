@@ -100,6 +100,8 @@ type chatView struct {
 	askedMembers map[discord.UserID]bool
 	// watch is the stream of someone else being watched.
 	watch watchSet
+	// cams are the cameras of the call as last drawn, by user.
+	cams map[discord.UserID]*cameraView
 	// mediaBytes is the file size of the attachments drawn, by URL, which
 	// the fullscreen viewer tells.
 	mediaBytes map[string]uint64

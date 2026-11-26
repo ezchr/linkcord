@@ -112,3 +112,9 @@ func VoiceMessage([]int16) ([]byte, float64, []byte, error) { return nil, 0, nil
 
 // Reconnect does nothing without voice.
 func (s *Session) Reconnect() {}
+
+// SetVideoBackend shows no camera.
+func (*Session) SetVideoBackend(VideoBackend) {}
+
+// Camera is nil: no camera is shown.
+func (*Session) Camera(discord.UserID) VideoReceiver { return nil }

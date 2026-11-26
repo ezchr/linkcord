@@ -1,0 +1,687 @@
+diff --git a/voice/session.go b/voice/session.go
+index d78b0e9..5430566 100644
+--- a/voice/session.go
++++ b/voice/session.go
+@@ -1,6 +1,7 @@
+ package voice
+ 
+ import (
++	"crypto/rand"
+ 	"context"
+ 	"errors"
+ 	"fmt"
+@@ -100,6 +101,10 @@ type Session struct {
+ 	// is any implementation of godave, and nil by default, which does not
+ 	// encrypt.
+ 	DAVE godave.SessionCreateFunc
++	// Codecs, when set, are told the voice server in SelectProtocolCommand,
++	// as Discord's clients do, for it to send the video of those it can
++	// decode; nil leaves audio only.
++	Codecs []voicegateway.CodecInfo
+ 	// sendBuf and recvBuf are what frames are encrypted and decrypted into.
+ 	sendBuf, recvBuf []byte
+ 
+@@ -514,14 +519,19 @@ func (s *Session) spinGateway(ctx context.Context, gwch <-chan ws.Op) error {
+ 					return fmt.Errorf("failed to open voice UDP connection: %w", err)
+ 				}
+ 
+-				if err := s.gateway.Send(ctx, &voicegateway.SelectProtocolCommand{
++				sp := &voicegateway.SelectProtocolCommand{
+ 					Protocol: "udp",
+ 					Data: voicegateway.SelectProtocolData{
+ 						Address: conn.GatewayIP,
+ 						Port:    conn.GatewayPort,
+ 						Mode:    modes[mode],
+ 					},
+-				}); err != nil {
++				}
++				if len(s.Codecs) > 0 {
++					sp.Codecs = s.Codecs
++					sp.RTCConnectionID = newUUID()
++				}
++				if err := s.gateway.Send(ctx, sp); err != nil {
+ 					return fmt.Errorf("failed to send SelectProtocolCommand: %w", err)
+ 				}
+ 
+@@ -642,6 +652,95 @@ func (s *Session) ReadPacket() (*udp.Packet, error) {
+ 	return p, nil
+ }
+ 
++// SetMediaHandler sets what is given the RTP packets that ReadPacket reads,
++// such as video; see udp.MediaHandler. Only call it before joining.
++func (s *Session) SetMediaHandler(h udp.MediaHandler) {
++	s.udpManager.SetMediaHandler(h)
++}
++
++// WriteRTCP sends an RTCP packet, such as feedback on the video received,
++// on the UDP connection. It is thread safe, and fails rather than wait
++// while the connection is being established.
++func (s *Session) WriteRTCP(pkt []byte) error {
++	return s.udpManager.WriteRTCP(pkt)
++}
++
++// Send sends a command on the voice gateway, such as media sink wants.
++func (s *Session) Send(ctx context.Context, ev ws.Event) error {
++	s.mut.RLock()
++	gateway := s.gateway
++	s.mut.RUnlock()
++
++	if gateway == nil {
++		return ErrCannotSend
++	}
++	return gateway.Send(ctx, ev)
++}
++
++// SSRC returns the SSRC of this end on the voice server, 0 before it is
++// ready.
++func (s *Session) SSRC() uint32 {
++	s.mut.RLock()
++	gateway := s.gateway
++	s.mut.RUnlock()
++
++	if gateway == nil {
++		return 0
++	}
++	if r := gateway.Ready(); r != nil {
++		return r.SSRC
++	}
++	return 0
++}
++
++// DecryptFrame removes the end-to-end encryption of a frame that user sent,
++// such as a video picture, into out, which must hold
++// MaxDecryptedFrameSize; frames for Linkcord only are flipped back. It is
++// thread safe.
++func (s *Session) DecryptFrame(user discord.UserID, frame, out []byte) (int, error) {
++	s.mut.RLock()
++	gateway := s.gateway
++	s.mut.RUnlock()
++
++	if gateway == nil {
++		return 0, ErrCannotSend
++	}
++	dave := gateway.DAVE()
++	id := godave.UserID(user.String())
++	n, err := dave.Decrypt(id, frame, out)
++	if err != nil {
++		if copy := slices.Clone(frame); flipTag(copy) {
++			if n2, err2 := dave.Decrypt(id, copy, out); err2 == nil {
++				return n2, nil
++			}
++		}
++		return 0, err
++	}
++	return n, nil
++}
++
++// MaxDecryptedFrameSize returns how big a frame of the given size may be
++// once decrypted.
++func (s *Session) MaxDecryptedFrameSize(user discord.UserID, size int) int {
++	s.mut.RLock()
++	gateway := s.gateway
++	s.mut.RUnlock()
++
++	if gateway == nil {
++		return size
++	}
++	return gateway.DAVE().MaxDecryptedFrameSize(godave.UserID(user.String()), size)
++}
++
++// newUUID returns a random version 4 UUID.
++func newUUID() string {
++	var b [16]byte
++	rand.Read(b[:])
++	b[6] = b[6]&0x0F | 0x40
++	b[8] = b[8]&0x3F | 0x80
++	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
++}
++
+ // Latency returns how long the voice server took to answer the last ping that
+ // ReadPacket read the answer to, or 0 if it has read none.
+ func (s *Session) Latency() time.Duration {
+diff --git a/voice/udp/connection.go b/voice/udp/connection.go
+index 0554e57..9135267 100644
+--- a/voice/udp/connection.go
++++ b/voice/udp/connection.go
+@@ -64,6 +64,14 @@ type Connection struct {
+ 	// nonce is a counter in its first 4 bytes, which are sent after the packet.
+ 	// It is as long as the longest that a mode needs.
+ 	nonce [24]byte
++	// nonceCount is the counter in the nonce's first 4 bytes, shared by
++	// Write and WriteRTCP: one key must never seal two packets with the
++	// same nonce.
++	nonceCount atomic.Uint32
++
++	// media, when set, is given every RTP packet that is not Opus once
++	// decrypted, such as video, and sees the others too: see MediaHandler.
++	media MediaHandler
+ 
+ 	// recv fields
+ 	recvNonce  [24]byte
+@@ -164,8 +172,8 @@ func DialConnectionCustom(
+ 		packet:      packet,
+ 		ssrc:        ssrc,
+ 		conn:        conn,
+-		recvBuf:     make([]byte, 1400),
+-		recvOpus:    make([]byte, 1400),
++		recvBuf:     make([]byte, recvSize),
++		recvOpus:    make([]byte, recvSize),
+ 		recvPacket:  &Packet{},
+ 		written:     time.Now(),
+ 	}
+@@ -291,7 +299,7 @@ func (c *Connection) Write(b []byte) (int, error) {
+ 	binary.BigEndian.PutUint32(c.packet[4:8], c.timestamp)
+ 	c.timestamp += c.timeIncr
+ 
+-	binary.BigEndian.PutUint32(c.nonce[:4], binary.BigEndian.Uint32(c.nonce[:4])+1)
++	binary.BigEndian.PutUint32(c.nonce[:4], c.nonceCount.Add(1))
+ 
+ 	// Seal the message after the packet's header, which is authenticated but
+ 	// not encrypted, and send the nonce's counter after it.
+@@ -342,6 +350,76 @@ func (p *Packet) Copy(dst *Packet) {
+ 
+ const packetHeaderSize = 12
+ 
++// recvSize is the most read of one datagram: video packets are bigger than
++// voice ones.
++const recvSize = 2048
++
++// MediaPacket is an RTP packet decrypted, which a MediaHandler is given. Its
++// slices are only valid during the call.
++type MediaPacket struct {
++	// Header is the RTP header with its CSRCs and, if any, the first 4
++	// bytes of its extension, which hold the extension's profile and length.
++	Header []byte
++	// Extension is the body of the header extension, empty without one.
++	Extension []byte
++	// Payload is what the packet carries, without its padding.
++	Payload []byte
++}
++
++// PayloadType returns the packet's payload type.
++func (p *MediaPacket) PayloadType() byte { return p.Header[1] & 0x7F }
++
++// Marker returns the packet's marker bit.
++func (p *MediaPacket) Marker() bool { return p.Header[1]&0x80 != 0 }
++
++// Sequence returns the packet's sequence number.
++func (p *MediaPacket) Sequence() uint16 { return binary.BigEndian.Uint16(p.Header[2:4]) }
++
++// Timestamp returns the packet's timestamp.
++func (p *MediaPacket) Timestamp() uint32 { return binary.BigEndian.Uint32(p.Header[4:8]) }
++
++// SSRC returns the packet's SSRC.
++func (p *MediaPacket) SSRC() uint32 { return binary.BigEndian.Uint32(p.Header[8:12]) }
++
++// ExtensionProfile returns the profile of the header extension, 0 without
++// one.
++func (p *MediaPacket) ExtensionProfile() uint16 {
++	if p.Header[0]&0x10 == 0 || len(p.Header) < 16 {
++		return 0
++	}
++	return binary.BigEndian.Uint16(p.Header[len(p.Header)-4:])
++}
++
++// MediaHandler is given each RTP packet that ReadPacket reads, once
++// decrypted, on ReadPacket's goroutine; it reports whether it took the
++// packet, which ReadPacket then does not return. Packets of Opus that it
++// does not take are returned as before; any other that it does not take is
++// dropped.
++type MediaHandler func(p *MediaPacket) bool
++
++// SetMediaHandler sets what is given the packets read; see MediaHandler.
++// It must be set before the connection is read.
++func (c *Connection) SetMediaHandler(h MediaHandler) { c.media = h }
++
++// WriteRTCP seals the RTCP packet pkt, whose first 8 bytes are left in the
++// clear as the rtpsize modes have it, and sends it. It may be called
++// concurrently with Write.
++func (c *Connection) WriteRTCP(pkt []byte) error {
++	if len(pkt) < 8 {
++		return errors.New("short RTCP packet")
++	}
++	if c.aead == nil {
++		return errors.New("no secret yet")
++	}
++	var nonce [24]byte
++	binary.BigEndian.PutUint32(nonce[:4], c.nonceCount.Add(1))
++	header := pkt[:8]
++	sealed := c.aead.Seal(append(make([]byte, 0, len(pkt)+c.aead.Overhead()+4), header...), nonce[:c.aead.NonceSize()], pkt[8:], header)
++	sealed = append(sealed, nonce[:4]...)
++	_, err := c.conn.Write(sealed)
++	return err
++}
++
+ // ReadPacket reads the UDP connection and returns a packet if successful. The
+ // returned packet is invalidated once ReadPacket is called again. To avoid
+ // this, manually Copy the packet.
+@@ -363,8 +441,13 @@ func (c *Connection) ReadPacket() (*Packet, error) {
+ 			continue
+ 		}
+ 
+-		// Skip anything that is not RTP version 2 carrying Opus, such as RTCP.
+-		if i < packetHeaderSize || c.recvBuf[0]>>6 != 2 || c.recvBuf[1]&0x7F != 0x78 {
++		// Skip anything that is not RTP version 2, such as RTCP, and what is
++		// not Opus unless something takes it.
++		if i < packetHeaderSize || c.recvBuf[0]>>6 != 2 || c.recvBuf[1] >= 192 && c.recvBuf[1] <= 223 {
++			continue
++		}
++		opusType := c.recvBuf[1]&0x7F == 0x78
++		if !opusType && c.media == nil {
+ 			continue
+ 		}
+ 
+@@ -388,19 +471,27 @@ func (c *Connection) ReadPacket() (*Packet, error) {
+ 
+ 		opus, err := c.aead.Open(c.recvOpus[:0], c.recvNonce[:c.aead.NonceSize()], c.recvBuf[header:i-4], c.recvBuf[:header])
+ 		if err != nil {
++			// Only the voice tells of keys gone wrong.
++			if !opusType {
++				continue
++			}
+ 			return nil, ErrDecryptionFailed
+ 		}
+ 		if len(opus) < extension {
+ 			continue
+ 		}
++		extBody := opus[:extension]
+ 		opus = opus[extension:]
+ 
+ 		// The padding bit means the last byte is the number of bytes of padding.
+ 		if c.recvBuf[0]&0x20 != 0 && len(opus) > 0 && int(opus[len(opus)-1]) <= len(opus) {
+ 			opus = opus[:len(opus)-int(opus[len(opus)-1])]
+ 		}
++		if c.media != nil && c.media(&MediaPacket{Header: c.recvBuf[:header], Extension: extBody, Payload: opus}) {
++			continue
++		}
+ 		// A packet of only padding carries nothing.
+-		if len(opus) == 0 {
++		if len(opus) == 0 || !opusType {
+ 			continue
+ 		}
+ 		c.recvPacket.Opus = opus
+diff --git a/voice/udp/manager.go b/voice/udp/manager.go
+index 5fe43e9..db54985 100644
+--- a/voice/udp/manager.go
++++ b/voice/udp/manager.go
+@@ -34,6 +34,9 @@ type Manager struct {
+ 
+ 	frequency time.Duration
+ 	timeIncr  uint32
++
++	// media is given to each connection dialed; see MediaHandler.
++	media MediaHandler
+ }
+ 
+ // NewManager creates a new UDP connection manager with the default dial
+@@ -175,6 +178,7 @@ func (m *Manager) Dial(ctx context.Context, addr string, ssrc uint32) (*Connecti
+ 	if m.frequency > 0 && m.timeIncr > 0 {
+ 		conn.ResetFrequency(m.frequency, m.timeIncr)
+ 	}
++	conn.SetMediaHandler(m.media)
+ 
+ 	m.stopMu.Lock()
+ 	ws.WSDebug("setting UDP conn to one w/ gateway address", conn.GatewayIP)
+@@ -223,6 +227,40 @@ func (m *Manager) Write(b []byte) (n int, err error) {
+ 	return conn.Write(b)
+ }
+ 
++// SetMediaHandler sets what is given the packets that the connections dialed
++// from then on read; see MediaHandler. Only call it before dialing.
++func (m *Manager) SetMediaHandler(h MediaHandler) {
++	m.connLock <- struct{}{}
++	defer func() { <-m.connLock }()
++
++	m.media = h
++}
++
++// WriteRTCP sends the RTCP packet pkt on the current connection; see
++// Connection.WriteRTCP. It does not wait for a connection being
++// established: it fails instead.
++func (m *Manager) WriteRTCP(pkt []byte) error {
++	select {
++	case m.connLock <- struct{}{}:
++	default:
++		return errors.New("UDP connection is being established")
++	}
++	m.stopMu.Lock()
++	conn := m.conn
++	select {
++	case <-m.stopConn:
++		conn = nil
++	default:
++	}
++	m.stopMu.Unlock()
++	<-m.connLock
++
++	if conn == nil {
++		return ErrManagerClosed
++	}
++	return conn.WriteRTCP(pkt)
++}
++
+ // acquireConn acquires the current connection and releases the lock, returning
+ // the connection at that point in time. Nil is returned if Manager is closed.
+ func (m *Manager) acquireConn() *Connection {
+diff --git a/voice/voicegateway/event_methods.go b/voice/voicegateway/event_methods.go
+index 69f3df6..4c79ebb 100644
+--- a/voice/voicegateway/event_methods.go
++++ b/voice/voicegateway/event_methods.go
+@@ -17,7 +17,11 @@ func init() {
+ 		func() ws.Event { return new(HelloEvent) },
+ 		func() ws.Event { return new(ResumedEvent) },
+ 		func() ws.Event { return new(ClientsConnectEvent) },
++		func() ws.Event { return new(VideoEvent) },
+ 		func() ws.Event { return new(ClientDisconnectEvent) },
++		func() ws.Event { return new(MediaSinkWantsCommand) },
++		func() ws.Event { return new(FlagsEvent) },
++		func() ws.Event { return new(PlatformEvent) },
+ 		func() ws.Event { return new(DAVEPrepareTransitionEvent) },
+ 		func() ws.Event { return new(DAVEExecuteTransitionEvent) },
+ 		func() ws.Event { return new(DAVETransitionReadyCommand) },
+@@ -169,3 +173,27 @@ func (*MLSInvalidCommitWelcomeCommand) Op() ws.OpCode { return 31 }
+ 
+ // EventType implements Event.
+ func (*MLSInvalidCommitWelcomeCommand) EventType() ws.EventType { return "" }
++
++// Op implements Event. It always returns Op 12.
++func (*VideoEvent) Op() ws.OpCode { return 12 }
++
++// EventType implements Event.
++func (*VideoEvent) EventType() ws.EventType { return "" }
++
++// Op implements Event. It always returns Op 15.
++func (*MediaSinkWantsCommand) Op() ws.OpCode { return 15 }
++
++// EventType implements Event.
++func (*MediaSinkWantsCommand) EventType() ws.EventType { return "" }
++
++// Op implements Event. It always returns Op 18.
++func (*FlagsEvent) Op() ws.OpCode { return 18 }
++
++// EventType implements Event.
++func (*FlagsEvent) EventType() ws.EventType { return "" }
++
++// Op implements Event. It always returns Op 20.
++func (*PlatformEvent) Op() ws.OpCode { return 20 }
++
++// EventType implements Event.
++func (*PlatformEvent) EventType() ws.EventType { return "" }
+diff --git a/voice/voicegateway/events.go b/voice/voicegateway/events.go
+index fb39856..b0efffb 100644
+--- a/voice/voicegateway/events.go
++++ b/voice/voicegateway/events.go
+@@ -34,6 +34,23 @@ type IdentifyCommand struct {
+ type SelectProtocolCommand struct {
+ 	Protocol string             `json:"protocol"`
+ 	Data     SelectProtocolData `json:"data"`
++	// Codecs are the codecs the client can send and receive, as Discord's
++	// clients give them; none leaves the server's choice of audio only.
++	Codecs []CodecInfo `json:"codecs,omitempty"`
++	// RTCConnectionID is a UUID of the connection, as Discord's clients send.
++	RTCConnectionID string `json:"rtc_connection_id,omitempty"`
++}
++
++// CodecInfo is a codec that a client can send or receive, in
++// SelectProtocolCommand. Priority is Discord's order times 1000.
++type CodecInfo struct {
++	Name           string `json:"name"`
++	Type           string `json:"type"`
++	Priority       int    `json:"priority"`
++	PayloadType    int    `json:"payload_type"`
++	RTXPayloadType int    `json:"rtx_payload_type,omitempty"`
++	Encode         bool   `json:"encode,omitempty"`
++	Decode         bool   `json:"decode,omitempty"`
+ }
+ 
+ // SelectProtocolData is the data inside a SelectProtocolCommand.
+@@ -84,6 +101,10 @@ type SessionDescriptionEvent struct {
+ 	SecretKey [32]byte `json:"secret_key"`
+ 	// DAVEProtocolVersion is the DAVE protocol version to use, 0 being none.
+ 	DAVEProtocolVersion uint16 `json:"dave_protocol_version"`
++	// AudioCodec and VideoCodec are the codecs the server chose of those
++	// given in SelectProtocolCommand.
++	AudioCodec string `json:"audio_codec,omitempty"`
++	VideoCodec string `json:"video_codec,omitempty"`
+ }
+ 
+ // https://discord.com/developers/docs/topics/voice-connections#speaking
+@@ -144,6 +165,74 @@ type ClientsConnectEvent struct {
+ 	UserIDs []discord.UserID `json:"user_ids"`
+ }
+ 
++// VideoEvent is Op 12, an event and a command. From the server, it tells the
++// SSRCs a user sends video with, a camera, and VideoSSRC 0 or no active
++// stream once they stop. Sent, it tells what the client sends.
++type VideoEvent struct {
++	UserID    discord.UserID `json:"user_id,omitempty"`
++	AudioSSRC uint32         `json:"audio_ssrc"`
++	VideoSSRC uint32         `json:"video_ssrc"`
++	RTXSSRC   uint32         `json:"rtx_ssrc"`
++	Streams   []VideoStream  `json:"streams"`
++}
++
++// VideoStream is one video stream of a VideoEvent, a simulcast layer told
++// by its RID and quality.
++type VideoStream struct {
++	Type          string              `json:"type"`
++	RID           string              `json:"rid"`
++	SSRC          uint32              `json:"ssrc"`
++	Active        bool                `json:"active"`
++	Quality       int                 `json:"quality"`
++	RTXSSRC       uint32              `json:"rtx_ssrc"`
++	MaxBitrate    int                 `json:"max_bitrate,omitempty"`
++	MaxFramerate  int                 `json:"max_framerate,omitempty"`
++	MaxResolution *VideoMaxResolution `json:"max_resolution,omitempty"`
++}
++
++// VideoMaxResolution is the biggest a VideoStream is sent at.
++type VideoMaxResolution struct {
++	Type   string `json:"type"`
++	Width  int    `json:"width"`
++	Height int    `json:"height"`
++}
++
++// ActiveVideo returns the SSRC and the resend SSRC of the video the user
++// sends, of its best active stream, or the event's own when it gives no
++// streams; 0 if the user sends none.
++func (e *VideoEvent) ActiveVideo() (ssrc, rtx uint32) {
++	if len(e.Streams) == 0 {
++		return e.VideoSSRC, e.RTXSSRC
++	}
++	best := -1
++	for _, s := range e.Streams {
++		if s.Active && s.SSRC != 0 && s.Quality > best {
++			ssrc, rtx, best = s.SSRC, s.RTXSSRC, s.Quality
++		}
++	}
++	if best < 0 {
++		return 0, 0
++	}
++	return ssrc, rtx
++}
++
++// MediaSinkWantsCommand is Op 15: what quality, from 0 to 100, of the media
++// of each SSRC the client wants, keyed by the SSRC in decimal, "any" for the
++// rest; with "pixelCounts", a map of SSRC to the pixels it is shown in.
++type MediaSinkWantsCommand map[string]any
++
++// FlagsEvent is Op 18, the voice flags of a user.
++type FlagsEvent struct {
++	UserID discord.UserID `json:"user_id"`
++	Flags  uint64         `json:"flags"`
++}
++
++// PlatformEvent is Op 20, the platform a user is on.
++type PlatformEvent struct {
++	UserID   discord.UserID `json:"user_id"`
++	Platform int            `json:"platform"`
++}
++
+ // ClientDisconnectEvent is an event for Op 13.
+ type ClientDisconnectEvent struct {
+ 	UserID discord.UserID `json:"user_id"`
+diff --git a/voice/voicegateway/gateway.go b/voice/voicegateway/gateway.go
+index 84697f0..f566ccb 100644
+--- a/voice/voicegateway/gateway.go
++++ b/voice/voicegateway/gateway.go
+@@ -257,6 +257,26 @@ func (g *gatewayImpl) OnOp(ctx context.Context, op ws.Op) bool {
+ 		g.mutex.Lock()
+ 		g.ssrcs[data.SSRC] = data.UserID
+ 		g.mutex.Unlock()
++	case *VideoEvent:
++		// Whose video an SSRC is, for its frames to be decrypted with the
++		// sender's keys.
++		if data.UserID.IsValid() {
++			g.mutex.Lock()
++			for _, ssrc := range []uint32{data.AudioSSRC, data.VideoSSRC, data.RTXSSRC} {
++				if ssrc != 0 {
++					g.ssrcs[ssrc] = data.UserID
++				}
++			}
++			for _, st := range data.Streams {
++				if st.SSRC != 0 {
++					g.ssrcs[st.SSRC] = data.UserID
++				}
++				if st.RTXSSRC != 0 {
++					g.ssrcs[st.RTXSSRC] = data.UserID
++				}
++			}
++			g.mutex.Unlock()
++		}
+ 
+ 	case *SessionDescriptionEvent:
+ 		g.dave.OnSelectProtocolAck(data.DAVEProtocolVersion)
+diff --git a/voice/udp/media_test.go b/voice/udp/media_test.go
+new file mode 100644
+index 0000000..e1b7f7e
+--- /dev/null
++++ b/voice/udp/media_test.go
+@@ -0,0 +1,127 @@
++package udp
++
++import (
++	"crypto/aes"
++	"crypto/cipher"
++	"encoding/binary"
++	"net"
++	"testing"
++	"time"
++)
++
++// seal builds an rtpsize packet as a voice server sends it: the header (and
++// the first 4 bytes of an extension) in the clear, the rest sealed, the
++// nonce's counter last.
++func seal(t *testing.T, aead cipher.AEAD, pt byte, ssrc uint32, seq uint16, ext, payload []byte, n uint32) []byte {
++	t.Helper()
++	h := make([]byte, 12)
++	h[0], h[1] = 0x80, pt
++	binary.BigEndian.PutUint16(h[2:], seq)
++	binary.BigEndian.PutUint32(h[8:], ssrc)
++	plain := payload
++	if ext != nil {
++		h[0] |= 0x10
++		h = append(h, 0xBE, 0xDE, 0, byte(len(ext)/4))
++		plain = append(append([]byte(nil), ext...), payload...)
++	}
++	var nonce [12]byte
++	binary.BigEndian.PutUint32(nonce[:4], n)
++	out := aead.Seal(append([]byte(nil), h...), nonce[:], plain, h)
++	return append(out, nonce[:4]...)
++}
++
++func TestMediaHandler(t *testing.T) {
++	a, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
++	if err != nil {
++		t.Skip(err)
++	}
++	defer a.Close()
++	b, err := net.DialUDP("udp", nil, a.LocalAddr().(*net.UDPAddr))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer b.Close()
++
++	var key [32]byte
++	block, _ := aes.NewCipher(key[:])
++	aead, _ := cipher.NewGCM(block)
++	c := &Connection{conn: a, recvBuf: make([]byte, recvSize), recvOpus: make([]byte, recvSize), recvPacket: &Packet{}, aead: aead}
++
++	var got []MediaPacket
++	c.SetMediaHandler(func(p *MediaPacket) bool {
++		got = append(got, MediaPacket{
++			Header:    append([]byte(nil), p.Header...),
++			Extension: append([]byte(nil), p.Extension...),
++			Payload:   append([]byte(nil), p.Payload...),
++		})
++		return p.PayloadType() != 0x78
++	})
++
++	big := make([]byte, 1300)
++	for i := range big {
++		big[i] = byte(i)
++	}
++	ext := []byte{0x12, 0x00, 0x05, 0x00}
++	b.Write(seal(t, aead, 103|0x80, 7, 9, ext, big, 1))
++	b.Write([]byte{0x80, 201, 0, 1, 1, 2, 3, 4}) // RTCP: skipped
++	b.Write([]byte("garbage"))
++	b.Write(seal(t, aead, 0x78, 5, 1, nil, []byte("opus"), 2))
++
++	a.SetReadDeadline(time.Now().Add(5 * time.Second))
++	p, err := c.ReadPacket()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if string(p.Opus) != "opus" || p.SSRC() != 5 {
++		t.Fatalf("opus packet: %q ssrc %d", p.Opus, p.SSRC())
++	}
++	if len(got) != 2 {
++		t.Fatalf("handler saw %d packets, want 2", len(got))
++	}
++	v := got[0]
++	if v.PayloadType() != 103 || !v.Marker() || v.SSRC() != 7 || v.Sequence() != 9 {
++		t.Fatalf("video header: pt %d marker %v ssrc %d seq %d", v.PayloadType(), v.Marker(), v.SSRC(), v.Sequence())
++	}
++	if v.ExtensionProfile() != 0xBEDE || string(v.Extension) != string(ext) || string(v.Payload) != string(big) {
++		t.Fatalf("video body: profile %x ext %x payload %d bytes", v.ExtensionProfile(), v.Extension, len(v.Payload))
++	}
++}
++
++func TestWriteRTCPSharesNonce(t *testing.T) {
++	a, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
++	if err != nil {
++		t.Skip(err)
++	}
++	defer a.Close()
++	b, err := net.DialUDP("udp", nil, a.LocalAddr().(*net.UDPAddr))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer b.Close()
++	var key [32]byte
++	block, _ := aes.NewCipher(key[:])
++	aead, _ := cipher.NewGCM(block)
++	c := &Connection{conn: b, aead: aead}
++	if err := c.WriteRTCP([]byte{0x81, 206, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2}); err != nil {
++		t.Fatal(err)
++	}
++	if err := c.WriteRTCP([]byte{1, 2}); err == nil {
++		t.Fatal("a short packet was sent")
++	}
++	buf := make([]byte, 100)
++	a.SetReadDeadline(time.Now().Add(5 * time.Second))
++	n, err := a.Read(buf)
++	if err != nil {
++		t.Fatal(err)
++	}
++	pkt := buf[:n]
++	var nonce [12]byte
++	copy(nonce[:4], pkt[n-4:])
++	plain, err := aead.Open(nil, nonce[:], pkt[8:n-4], pkt[:8])
++	if err != nil || binary.BigEndian.Uint32(plain) != 2 {
++		t.Fatalf("RTCP did not open: %v", err)
++	}
++	if c.nonceCount.Load() != 1 {
++		t.Fatalf("nonce counter %d", c.nonceCount.Load())
++	}
++}

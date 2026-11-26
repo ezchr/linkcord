@@ -34,6 +34,23 @@ type IdentifyCommand struct {
 type SelectProtocolCommand struct {
 	Protocol string             `json:"protocol"`
 	Data     SelectProtocolData `json:"data"`
+	// Codecs are the codecs the client can send and receive, as Discord's
+	// clients give them; none leaves the server's choice of audio only.
+	Codecs []CodecInfo `json:"codecs,omitempty"`
+	// RTCConnectionID is a UUID of the connection, as Discord's clients send.
+	RTCConnectionID string `json:"rtc_connection_id,omitempty"`
+}
+
+// CodecInfo is a codec that a client can send or receive, in
+// SelectProtocolCommand. Priority is Discord's order times 1000.
+type CodecInfo struct {
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	Priority       int    `json:"priority"`
+	PayloadType    int    `json:"payload_type"`
+	RTXPayloadType int    `json:"rtx_payload_type,omitempty"`
+	Encode         bool   `json:"encode,omitempty"`
+	Decode         bool   `json:"decode,omitempty"`
 }
 
 // SelectProtocolData is the data inside a SelectProtocolCommand.
@@ -84,6 +101,10 @@ type SessionDescriptionEvent struct {
 	SecretKey [32]byte `json:"secret_key"`
 	// DAVEProtocolVersion is the DAVE protocol version to use, 0 being none.
 	DAVEProtocolVersion uint16 `json:"dave_protocol_version"`
+	// AudioCodec and VideoCodec are the codecs the server chose of those
+	// given in SelectProtocolCommand.
+	AudioCodec string `json:"audio_codec,omitempty"`
+	VideoCodec string `json:"video_codec,omitempty"`
 }
 
 // https://discord.com/developers/docs/topics/voice-connections#speaking
@@ -142,6 +163,74 @@ type ResumedEvent struct{}
 // the users already in the channel and whenever users connect.
 type ClientsConnectEvent struct {
 	UserIDs []discord.UserID `json:"user_ids"`
+}
+
+// VideoEvent is Op 12, an event and a command. From the server, it tells the
+// SSRCs a user sends video with, a camera, and VideoSSRC 0 or no active
+// stream once they stop. Sent, it tells what the client sends.
+type VideoEvent struct {
+	UserID    discord.UserID `json:"user_id,omitempty"`
+	AudioSSRC uint32         `json:"audio_ssrc"`
+	VideoSSRC uint32         `json:"video_ssrc"`
+	RTXSSRC   uint32         `json:"rtx_ssrc"`
+	Streams   []VideoStream  `json:"streams"`
+}
+
+// VideoStream is one video stream of a VideoEvent, a simulcast layer told
+// by its RID and quality.
+type VideoStream struct {
+	Type          string              `json:"type"`
+	RID           string              `json:"rid"`
+	SSRC          uint32              `json:"ssrc"`
+	Active        bool                `json:"active"`
+	Quality       int                 `json:"quality"`
+	RTXSSRC       uint32              `json:"rtx_ssrc"`
+	MaxBitrate    int                 `json:"max_bitrate,omitempty"`
+	MaxFramerate  int                 `json:"max_framerate,omitempty"`
+	MaxResolution *VideoMaxResolution `json:"max_resolution,omitempty"`
+}
+
+// VideoMaxResolution is the biggest a VideoStream is sent at.
+type VideoMaxResolution struct {
+	Type   string `json:"type"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+// ActiveVideo returns the SSRC and the resend SSRC of the video the user
+// sends, of its best active stream, or the event's own when it gives no
+// streams; 0 if the user sends none.
+func (e *VideoEvent) ActiveVideo() (ssrc, rtx uint32) {
+	if len(e.Streams) == 0 {
+		return e.VideoSSRC, e.RTXSSRC
+	}
+	best := -1
+	for _, s := range e.Streams {
+		if s.Active && s.SSRC != 0 && s.Quality > best {
+			ssrc, rtx, best = s.SSRC, s.RTXSSRC, s.Quality
+		}
+	}
+	if best < 0 {
+		return 0, 0
+	}
+	return ssrc, rtx
+}
+
+// MediaSinkWantsCommand is Op 15: what quality, from 0 to 100, of the media
+// of each SSRC the client wants, keyed by the SSRC in decimal, "any" for the
+// rest; with "pixelCounts", a map of SSRC to the pixels it is shown in.
+type MediaSinkWantsCommand map[string]any
+
+// FlagsEvent is Op 18, the voice flags of a user.
+type FlagsEvent struct {
+	UserID discord.UserID `json:"user_id"`
+	Flags  uint64         `json:"flags"`
+}
+
+// PlatformEvent is Op 20, the platform a user is on.
+type PlatformEvent struct {
+	UserID   discord.UserID `json:"user_id"`
+	Platform int            `json:"platform"`
 }
 
 // ClientDisconnectEvent is an event for Op 13.

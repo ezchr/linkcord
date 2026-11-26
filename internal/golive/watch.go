@@ -866,92 +866,18 @@ func (w *Watch) open(pkt []byte) (header []byte, payload []byte, err error) {
 func (w *Watch) receive() {
 	buf := make([]byte, 65536)
 	var (
-		au                      []byte
-		auTS, source            uint32
-		lastSeq                 uint16
-		haveSeq, lost, fuActive bool
-		order                   packetOrder
+		asm    h264Assembler
+		source uint32
+		order  packetOrder
 	)
-	startCode := []byte{0, 0, 0, 1}
 	// readFailed is since when reading the socket fails.
 	var readFailed time.Time
-	consume := func(p receivedPacket) {
-		gap := haveSeq && p.seq != lastSeq+1
-		lastSeq, haveSeq = p.seq, true
-		if p.ts != auTS {
-			if len(au) > 0 || lost {
-				w.lost.Add(1)
-				w.requireKeyframe()
-				w.requestKeyframe()
-			}
-			au, auTS, lost, fuActive = au[:0], p.ts, false, false
-		}
-		if gap {
-			lost = true
-		}
-		payload := p.payload
-		switch typ := payload[0] & 0x1F; {
-		case typ >= 1 && typ <= 23:
-			if fuActive {
-				lost = true
-			}
-			au = append(au, startCode...)
-			au = append(au, payload...)
-		case typ == 24:
-			if fuActive {
-				lost = true
-			}
-			for rest := payload[1:]; len(rest) > 0; {
-				if len(rest) < 2 {
-					lost = true
-					break
-				}
-				size := int(binary.BigEndian.Uint16(rest))
-				if size == 0 || len(rest) < 2+size {
-					lost = true
-					break
-				}
-				au = append(au, startCode...)
-				au = append(au, rest[2:2+size]...)
-				rest = rest[2+size:]
-			}
-		case typ == 28 && len(payload) >= 3:
-			start, end := payload[1]&0x80 != 0, payload[1]&0x40 != 0
-			if start {
-				if fuActive || end {
-					lost = true
-				}
-				au = append(au, startCode...)
-				au = append(au, payload[0]&0xE0|payload[1]&0x1F)
-				fuActive = true
-			}
-			if !fuActive {
-				lost = true
-			} else {
-				au = append(au, payload[2:]...)
-			}
-			if end {
-				fuActive = false
-			}
-		default:
-			lost = true
-		}
-		if len(au) > 16<<20 {
-			au, lost = nil, true
-		}
-		if !p.marker {
-			return
-		}
-		lost = lost || fuActive
-		if !lost && len(au) > 0 {
-			w.submitPicture(au)
-		} else if lost {
-			w.lost.Add(1)
-			w.requireKeyframe()
-			w.requestKeyframe()
-		}
-		au, lost, fuActive = au[:0], false, false
+	lostPicture := func() {
+		w.lost.Add(1)
+		w.requireKeyframe()
+		w.requestKeyframe()
 	}
+	consume := func(p receivedPacket) { asm.push(p, w.submitPicture, lostPicture) }
 	drain := func(now time.Time) {
 		for {
 			p, ok := order.pop(now)
@@ -1054,8 +980,8 @@ func (w *Watch) receive() {
 			if source != 0 {
 				w.requireKeyframe()
 			}
-			source, order, haveSeq = ssrc, packetOrder{}, false
-			au, lost, fuActive = au[:0], false, false
+			source, order = ssrc, packetOrder{}
+			asm.reset()
 		}
 		now := time.Now()
 		if !order.push(receivedPacket{seq: seq, ts: ts, marker: hdr[1]&0x80 != 0, payload: payload, at: now}) {
@@ -1201,12 +1127,16 @@ func decodeAccel() string {
 // converting the whole picture and shrinking it here, and the pictures
 // copied and drawn are smaller.
 func (w *Watch) decodeSize(sw, sh int) (int, int) {
+	return decodeSizeFor(sw, sh, w.view.Load())
+}
+
+// decodeSizeFor is decodeSize for a view of width<<32|height, 0 unknown.
+func decodeSizeFor(sw, sh int, v uint64) (int, int) {
 	ow, oh := sw, sh
 	if ow > maxWatchW || oh > maxWatchH {
 		k := min(float64(maxWatchW)/float64(ow), float64(maxWatchH)/float64(oh))
 		ow, oh = int(float64(ow)*k)&^1, int(float64(oh)*k)&^1
 	}
-	v := w.view.Load()
 	vw, vh := int(v>>32), int(v&0xFFFFFFFF)
 	if vw <= 0 || vh <= 0 {
 		return ow, oh
@@ -1622,22 +1552,7 @@ func (w *Watch) sendReport() {
 		return
 	}
 	rr := w.reception.report(w.ours(), w.videoSSRC, time.Now())
-	// REMB (206, format 15): "REMB", one SSRC, the bitrate as exponent and
-	// 18-bit mantissa.
-	exp, mant := 0, maxBitrate
-	for mant >= 1<<18 {
-		mant >>= 1
-		exp++
-	}
-	remb := make([]byte, 8+16)
-	remb[0], remb[1] = 0x8F, 206
-	binary.BigEndian.PutUint16(remb[2:], 5)
-	binary.BigEndian.PutUint32(remb[4:], w.ours())
-	copy(remb[12:], "REMB")
-	remb[16] = 1
-	remb[17] = byte(exp<<2) | byte(mant>>16)
-	binary.BigEndian.PutUint16(remb[18:], uint16(mant))
-	binary.BigEndian.PutUint32(remb[20:], w.videoSSRC)
+	remb := rembPacket(w.ours(), w.videoSSRC, maxBitrate)
 	for _, pkt := range [][]byte{rr, remb} {
 		header := pkt[:8]
 		binary.BigEndian.PutUint32(w.nonce[:4], binary.BigEndian.Uint32(w.nonce[:4])+1)
@@ -1655,7 +1570,11 @@ func (w *Watch) SetView(width, height int) {
 // viewSize is the size to give pictures of ow×oh: shrunk to fit the view if
 // it is under three quarters of them, otherwise as decoded.
 func (w *Watch) viewSize(ow, oh int) (int, int) {
-	v := w.view.Load()
+	return viewSizeFor(ow, oh, w.view.Load())
+}
+
+// viewSizeFor is viewSize for a view of width<<32|height, 0 unknown.
+func viewSizeFor(ow, oh int, v uint64) (int, int) {
 	vw, vh := int(v>>32), int(v&0xFFFFFFFF)
 	if vw <= 0 || vh <= 0 {
 		return ow, oh
@@ -1683,14 +1602,10 @@ func (w *Watch) sendPLI() bool {
 	if w.videoSSRC == 0 || w.ae() == nil {
 		return false
 	}
-	header := make([]byte, 8)
-	header[0], header[1] = 0x81, 206
-	binary.BigEndian.PutUint16(header[2:], 2)
-	binary.BigEndian.PutUint32(header[4:], w.ours())
-	media := make([]byte, 4)
-	binary.BigEndian.PutUint32(media, w.videoSSRC)
+	pli := pliPacket(w.ours(), w.videoSSRC)
+	header := pli[:8]
 	binary.BigEndian.PutUint32(w.nonce[:4], binary.BigEndian.Uint32(w.nonce[:4])+1)
-	pkt := w.ae().Seal(append([]byte(nil), header...), w.nonce[:w.ae().NonceSize()], media, header)
+	pkt := w.ae().Seal(append([]byte(nil), header...), w.nonce[:w.ae().NonceSize()], pli[8:], header)
 	pkt = append(pkt, w.nonce[:4]...)
 	_, err := w.u().Write(pkt)
 	return err == nil

@@ -209,6 +209,32 @@ type Session struct {
 	// stayed broken, in Unix nanoseconds.
 	healedDAVE atomic.Int64
 	failedAt   time.Time
+
+	// videoBackend shows the cameras of the voice channel, if set before
+	// the first join; cams routes their video once joined.
+	videoBackend VideoBackend
+	cams         atomic.Pointer[cameras]
+}
+
+// SetVideoBackend has the cameras of the voice channels joined shown by b.
+// It must be called before the first join.
+func (s *Session) SetVideoBackend(b VideoBackend) { s.videoBackend = b }
+
+// Camera is the receiver of the camera of user in the voice channel joined,
+// nil while it is off or cameras are not shown.
+func (s *Session) Camera(user discord.UserID) VideoReceiver {
+	if c := s.cams.Load(); c != nil {
+		return c.receiver(user)
+	}
+	return nil
+}
+
+// notify tells Updates that something changed.
+func (s *Session) notify() {
+	select {
+	case s.updates <- struct{}{}:
+	default:
+	}
 }
 
 // New returns a Session that sends what the microphone captures louder than sensitivity, in dB.
@@ -436,6 +462,9 @@ func (s *Session) setDevices(mute, deafen bool) error {
 
 // left stops the devices, in no voice channel.
 func (s *Session) left() {
+	if c := s.cams.Load(); c != nil {
+		c.reset()
+	}
 	s.setDevices(true, true)
 	s.echo.reset()
 	s.setStatus(Status{})
@@ -480,6 +509,25 @@ func (s *Session) Join(channelID discord.ChannelID) (err error) {
 		}
 		session.AddHandler(func(event *ws.BackgroundErrorEvent) { slog.Debug("voice gateway error", "err", event.Err) })
 		session.SetLinkcordOnly(s.linkcordOnly.Load())
+		if s.videoBackend != nil {
+			// Cameras: the voice server is told the video codecs, and the
+			// video of each camera on goes to its receiver.
+			cams := newCameras(s.videoBackend, session, s.notify)
+			session.Codecs = videoCodecs
+			session.SetMediaHandler(cams.handle)
+			session.AddHandler(func(ev *voicegateway.VideoEvent) {
+				// Not this end's own, which it does not send.
+				if ev.UserID == s.state.Ready().User.ID {
+					return
+				}
+				cams.video(ev)
+			})
+			session.AddHandler(func(ev *voicegateway.ClientDisconnectEvent) { cams.left(ev.UserID) })
+			// A new voice server tells the cameras on anew, with their SSRCs.
+			session.AddHandler(func(*voicegateway.ReadyEvent) { cams.reset() })
+			s.cams.Store(cams)
+			go cams.run(nil)
+		}
 		s.session.Store(session)
 
 		go s.receive(session)

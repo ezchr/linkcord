@@ -34,6 +34,9 @@ type Manager struct {
 
 	frequency time.Duration
 	timeIncr  uint32
+
+	// media is given to each connection dialed; see MediaHandler.
+	media MediaHandler
 }
 
 // NewManager creates a new UDP connection manager with the default dial
@@ -175,6 +178,7 @@ func (m *Manager) Dial(ctx context.Context, addr string, ssrc uint32) (*Connecti
 	if m.frequency > 0 && m.timeIncr > 0 {
 		conn.ResetFrequency(m.frequency, m.timeIncr)
 	}
+	conn.SetMediaHandler(m.media)
 
 	m.stopMu.Lock()
 	ws.WSDebug("setting UDP conn to one w/ gateway address", conn.GatewayIP)
@@ -221,6 +225,40 @@ func (m *Manager) Write(b []byte) (n int, err error) {
 	}
 
 	return conn.Write(b)
+}
+
+// SetMediaHandler sets what is given the packets that the connections dialed
+// from then on read; see MediaHandler. Only call it before dialing.
+func (m *Manager) SetMediaHandler(h MediaHandler) {
+	m.connLock <- struct{}{}
+	defer func() { <-m.connLock }()
+
+	m.media = h
+}
+
+// WriteRTCP sends the RTCP packet pkt on the current connection; see
+// Connection.WriteRTCP. It does not wait for a connection being
+// established: it fails instead.
+func (m *Manager) WriteRTCP(pkt []byte) error {
+	select {
+	case m.connLock <- struct{}{}:
+	default:
+		return errors.New("UDP connection is being established")
+	}
+	m.stopMu.Lock()
+	conn := m.conn
+	select {
+	case <-m.stopConn:
+		conn = nil
+	default:
+	}
+	m.stopMu.Unlock()
+	<-m.connLock
+
+	if conn == nil {
+		return ErrManagerClosed
+	}
+	return conn.WriteRTCP(pkt)
 }
 
 // acquireConn acquires the current connection and releases the lock, returning

@@ -1,6 +1,7 @@
 package voice
 
 import (
+	"crypto/rand"
 	"context"
 	"errors"
 	"fmt"
@@ -100,6 +101,10 @@ type Session struct {
 	// is any implementation of godave, and nil by default, which does not
 	// encrypt.
 	DAVE godave.SessionCreateFunc
+	// Codecs, when set, are told the voice server in SelectProtocolCommand,
+	// as Discord's clients do, for it to send the video of those it can
+	// decode; nil leaves audio only.
+	Codecs []voicegateway.CodecInfo
 	// sendBuf and recvBuf are what frames are encrypted and decrypted into.
 	sendBuf, recvBuf []byte
 
@@ -514,14 +519,19 @@ func (s *Session) spinGateway(ctx context.Context, gwch <-chan ws.Op) error {
 					return fmt.Errorf("failed to open voice UDP connection: %w", err)
 				}
 
-				if err := s.gateway.Send(ctx, &voicegateway.SelectProtocolCommand{
+				sp := &voicegateway.SelectProtocolCommand{
 					Protocol: "udp",
 					Data: voicegateway.SelectProtocolData{
 						Address: conn.GatewayIP,
 						Port:    conn.GatewayPort,
 						Mode:    modes[mode],
 					},
-				}); err != nil {
+				}
+				if len(s.Codecs) > 0 {
+					sp.Codecs = s.Codecs
+					sp.RTCConnectionID = newUUID()
+				}
+				if err := s.gateway.Send(ctx, sp); err != nil {
 					return fmt.Errorf("failed to send SelectProtocolCommand: %w", err)
 				}
 
@@ -640,6 +650,95 @@ func (s *Session) ReadPacket() (*udp.Packet, error) {
 	}
 	p.Opus = s.recvBuf[:n]
 	return p, nil
+}
+
+// SetMediaHandler sets what is given the RTP packets that ReadPacket reads,
+// such as video; see udp.MediaHandler. Only call it before joining.
+func (s *Session) SetMediaHandler(h udp.MediaHandler) {
+	s.udpManager.SetMediaHandler(h)
+}
+
+// WriteRTCP sends an RTCP packet, such as feedback on the video received,
+// on the UDP connection. It is thread safe, and fails rather than wait
+// while the connection is being established.
+func (s *Session) WriteRTCP(pkt []byte) error {
+	return s.udpManager.WriteRTCP(pkt)
+}
+
+// Send sends a command on the voice gateway, such as media sink wants.
+func (s *Session) Send(ctx context.Context, ev ws.Event) error {
+	s.mut.RLock()
+	gateway := s.gateway
+	s.mut.RUnlock()
+
+	if gateway == nil {
+		return ErrCannotSend
+	}
+	return gateway.Send(ctx, ev)
+}
+
+// SSRC returns the SSRC of this end on the voice server, 0 before it is
+// ready.
+func (s *Session) SSRC() uint32 {
+	s.mut.RLock()
+	gateway := s.gateway
+	s.mut.RUnlock()
+
+	if gateway == nil {
+		return 0
+	}
+	if r := gateway.Ready(); r != nil {
+		return r.SSRC
+	}
+	return 0
+}
+
+// DecryptFrame removes the end-to-end encryption of a frame that user sent,
+// such as a video picture, into out, which must hold
+// MaxDecryptedFrameSize; frames for Linkcord only are flipped back. It is
+// thread safe.
+func (s *Session) DecryptFrame(user discord.UserID, frame, out []byte) (int, error) {
+	s.mut.RLock()
+	gateway := s.gateway
+	s.mut.RUnlock()
+
+	if gateway == nil {
+		return 0, ErrCannotSend
+	}
+	dave := gateway.DAVE()
+	id := godave.UserID(user.String())
+	n, err := dave.Decrypt(id, frame, out)
+	if err != nil {
+		if copy := slices.Clone(frame); flipTag(copy) {
+			if n2, err2 := dave.Decrypt(id, copy, out); err2 == nil {
+				return n2, nil
+			}
+		}
+		return 0, err
+	}
+	return n, nil
+}
+
+// MaxDecryptedFrameSize returns how big a frame of the given size may be
+// once decrypted.
+func (s *Session) MaxDecryptedFrameSize(user discord.UserID, size int) int {
+	s.mut.RLock()
+	gateway := s.gateway
+	s.mut.RUnlock()
+
+	if gateway == nil {
+		return size
+	}
+	return gateway.DAVE().MaxDecryptedFrameSize(godave.UserID(user.String()), size)
+}
+
+// newUUID returns a random version 4 UUID.
+func newUUID() string {
+	var b [16]byte
+	rand.Read(b[:])
+	b[6] = b[6]&0x0F | 0x40
+	b[8] = b[8]&0x3F | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // Latency returns how long the voice server took to answer the last ping that

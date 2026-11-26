@@ -17,7 +17,11 @@ func init() {
 		func() ws.Event { return new(HelloEvent) },
 		func() ws.Event { return new(ResumedEvent) },
 		func() ws.Event { return new(ClientsConnectEvent) },
+		func() ws.Event { return new(VideoEvent) },
 		func() ws.Event { return new(ClientDisconnectEvent) },
+		func() ws.Event { return new(MediaSinkWantsCommand) },
+		func() ws.Event { return new(FlagsEvent) },
+		func() ws.Event { return new(PlatformEvent) },
 		func() ws.Event { return new(DAVEPrepareTransitionEvent) },
 		func() ws.Event { return new(DAVEExecuteTransitionEvent) },
 		func() ws.Event { return new(DAVETransitionReadyCommand) },
@@ -169,3 +173,27 @@ func (*MLSInvalidCommitWelcomeCommand) Op() ws.OpCode { return 31 }
 
 // EventType implements Event.
 func (*MLSInvalidCommitWelcomeCommand) EventType() ws.EventType { return "" }
+
+// Op implements Event. It always returns Op 12.
+func (*VideoEvent) Op() ws.OpCode { return 12 }
+
+// EventType implements Event.
+func (*VideoEvent) EventType() ws.EventType { return "" }
+
+// Op implements Event. It always returns Op 15.
+func (*MediaSinkWantsCommand) Op() ws.OpCode { return 15 }
+
+// EventType implements Event.
+func (*MediaSinkWantsCommand) EventType() ws.EventType { return "" }
+
+// Op implements Event. It always returns Op 18.
+func (*FlagsEvent) Op() ws.OpCode { return 18 }
+
+// EventType implements Event.
+func (*FlagsEvent) EventType() ws.EventType { return "" }
+
+// Op implements Event. It always returns Op 20.
+func (*PlatformEvent) Op() ws.OpCode { return 20 }
+
+// EventType implements Event.
+func (*PlatformEvent) EventType() ws.EventType { return "" }

@@ -64,6 +64,14 @@ type Connection struct {
 	// nonce is a counter in its first 4 bytes, which are sent after the packet.
 	// It is as long as the longest that a mode needs.
 	nonce [24]byte
+	// nonceCount is the counter in the nonce's first 4 bytes, shared by
+	// Write and WriteRTCP: one key must never seal two packets with the
+	// same nonce.
+	nonceCount atomic.Uint32
+
+	// media, when set, is given every RTP packet that is not Opus once
+	// decrypted, such as video, and sees the others too: see MediaHandler.
+	media MediaHandler
 
 	// recv fields
 	recvNonce  [24]byte
@@ -164,8 +172,8 @@ func DialConnectionCustom(
 		packet:      packet,
 		ssrc:        ssrc,
 		conn:        conn,
-		recvBuf:     make([]byte, 1400),
-		recvOpus:    make([]byte, 1400),
+		recvBuf:     make([]byte, recvSize),
+		recvOpus:    make([]byte, recvSize),
 		recvPacket:  &Packet{},
 		written:     time.Now(),
 	}
@@ -291,7 +299,7 @@ func (c *Connection) Write(b []byte) (int, error) {
 	binary.BigEndian.PutUint32(c.packet[4:8], c.timestamp)
 	c.timestamp += c.timeIncr
 
-	binary.BigEndian.PutUint32(c.nonce[:4], binary.BigEndian.Uint32(c.nonce[:4])+1)
+	binary.BigEndian.PutUint32(c.nonce[:4], c.nonceCount.Add(1))
 
 	// Seal the message after the packet's header, which is authenticated but
 	// not encrypted, and send the nonce's counter after it.
@@ -342,6 +350,76 @@ func (p *Packet) Copy(dst *Packet) {
 
 const packetHeaderSize = 12
 
+// recvSize is the most read of one datagram: video packets are bigger than
+// voice ones.
+const recvSize = 2048
+
+// MediaPacket is an RTP packet decrypted, which a MediaHandler is given. Its
+// slices are only valid during the call.
+type MediaPacket struct {
+	// Header is the RTP header with its CSRCs and, if any, the first 4
+	// bytes of its extension, which hold the extension's profile and length.
+	Header []byte
+	// Extension is the body of the header extension, empty without one.
+	Extension []byte
+	// Payload is what the packet carries, without its padding.
+	Payload []byte
+}
+
+// PayloadType returns the packet's payload type.
+func (p *MediaPacket) PayloadType() byte { return p.Header[1] & 0x7F }
+
+// Marker returns the packet's marker bit.
+func (p *MediaPacket) Marker() bool { return p.Header[1]&0x80 != 0 }
+
+// Sequence returns the packet's sequence number.
+func (p *MediaPacket) Sequence() uint16 { return binary.BigEndian.Uint16(p.Header[2:4]) }
+
+// Timestamp returns the packet's timestamp.
+func (p *MediaPacket) Timestamp() uint32 { return binary.BigEndian.Uint32(p.Header[4:8]) }
+
+// SSRC returns the packet's SSRC.
+func (p *MediaPacket) SSRC() uint32 { return binary.BigEndian.Uint32(p.Header[8:12]) }
+
+// ExtensionProfile returns the profile of the header extension, 0 without
+// one.
+func (p *MediaPacket) ExtensionProfile() uint16 {
+	if p.Header[0]&0x10 == 0 || len(p.Header) < 16 {
+		return 0
+	}
+	return binary.BigEndian.Uint16(p.Header[len(p.Header)-4:])
+}
+
+// MediaHandler is given each RTP packet that ReadPacket reads, once
+// decrypted, on ReadPacket's goroutine; it reports whether it took the
+// packet, which ReadPacket then does not return. Packets of Opus that it
+// does not take are returned as before; any other that it does not take is
+// dropped.
+type MediaHandler func(p *MediaPacket) bool
+
+// SetMediaHandler sets what is given the packets read; see MediaHandler.
+// It must be set before the connection is read.
+func (c *Connection) SetMediaHandler(h MediaHandler) { c.media = h }
+
+// WriteRTCP seals the RTCP packet pkt, whose first 8 bytes are left in the
+// clear as the rtpsize modes have it, and sends it. It may be called
+// concurrently with Write.
+func (c *Connection) WriteRTCP(pkt []byte) error {
+	if len(pkt) < 8 {
+		return errors.New("short RTCP packet")
+	}
+	if c.aead == nil {
+		return errors.New("no secret yet")
+	}
+	var nonce [24]byte
+	binary.BigEndian.PutUint32(nonce[:4], c.nonceCount.Add(1))
+	header := pkt[:8]
+	sealed := c.aead.Seal(append(make([]byte, 0, len(pkt)+c.aead.Overhead()+4), header...), nonce[:c.aead.NonceSize()], pkt[8:], header)
+	sealed = append(sealed, nonce[:4]...)
+	_, err := c.conn.Write(sealed)
+	return err
+}
+
 // ReadPacket reads the UDP connection and returns a packet if successful. The
 // returned packet is invalidated once ReadPacket is called again. To avoid
 // this, manually Copy the packet.
@@ -363,8 +441,13 @@ func (c *Connection) ReadPacket() (*Packet, error) {
 			continue
 		}
 
-		// Skip anything that is not RTP version 2 carrying Opus, such as RTCP.
-		if i < packetHeaderSize || c.recvBuf[0]>>6 != 2 || c.recvBuf[1]&0x7F != 0x78 {
+		// Skip anything that is not RTP version 2, such as RTCP, and what is
+		// not Opus unless something takes it.
+		if i < packetHeaderSize || c.recvBuf[0]>>6 != 2 || c.recvBuf[1] >= 192 && c.recvBuf[1] <= 223 {
+			continue
+		}
+		opusType := c.recvBuf[1]&0x7F == 0x78
+		if !opusType && c.media == nil {
 			continue
 		}
 
@@ -388,19 +471,27 @@ func (c *Connection) ReadPacket() (*Packet, error) {
 
 		opus, err := c.aead.Open(c.recvOpus[:0], c.recvNonce[:c.aead.NonceSize()], c.recvBuf[header:i-4], c.recvBuf[:header])
 		if err != nil {
+			// Only the voice tells of keys gone wrong.
+			if !opusType {
+				continue
+			}
 			return nil, ErrDecryptionFailed
 		}
 		if len(opus) < extension {
 			continue
 		}
+		extBody := opus[:extension]
 		opus = opus[extension:]
 
 		// The padding bit means the last byte is the number of bytes of padding.
 		if c.recvBuf[0]&0x20 != 0 && len(opus) > 0 && int(opus[len(opus)-1]) <= len(opus) {
 			opus = opus[:len(opus)-int(opus[len(opus)-1])]
 		}
+		if c.media != nil && c.media(&MediaPacket{Header: c.recvBuf[:header], Extension: extBody, Payload: opus}) {
+			continue
+		}
 		// A packet of only padding carries nothing.
-		if len(opus) == 0 {
+		if len(opus) == 0 || !opusType {
 			continue
 		}
 		c.recvPacket.Opus = opus

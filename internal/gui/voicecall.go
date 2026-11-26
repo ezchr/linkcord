@@ -231,6 +231,7 @@ func (c *chatView) updateCall(gtx layout.Context) {
 // everyone in it, and the buttons of the call.
 func (c *chatView) layoutCall(gtx layout.Context) layout.Dimensions {
 	c.updateCall(gtx)
+	c.forgetCameras()
 	cv := &c.call
 	if !cv.open {
 		return layout.Dimensions{Size: gtx.Constraints.Max}
@@ -454,6 +455,28 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 	} else if c.watched(vs.UserID) != nil && !vs.SelfStream {
 		// They stopped sharing.
 		c.stopWatchingOne(vs.UserID)
+	}
+	// Their camera, when it is on, as Discord shows it in the card.
+	if vs.UserID != c.me.ID {
+		shown, note := c.layoutCameraCard(gtx, vs, size, radius, (size.Y+px)/2+gtx.Dp(12))
+		if shown {
+			gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(time.Second)})
+			if watchBtn != nil {
+				watchBtn()
+			}
+			c.layoutCardName(gtx, vs, name, size, vs.SelfStream)
+			if speaking {
+				w := gtx.Dp(2)
+				paint.FillShape(gtx.Ops, ringCol, clip.Stroke{Path: clip.UniformRRect(image.Rectangle{Max: size}.Inset(w/2), radius).Path(gtx.Ops), Width: float32(w)}.Op())
+			}
+			if rightClicked(gtx, c.rightTag("card"+vs.UserID.String()), size) {
+				c.openUserMenu(vs.UserID, guildID, vs.ChannelID)
+			}
+			return layout.Dimensions{Size: size}
+		}
+		if watchBtn == nil {
+			watchBtn = note
+		}
 	}
 	dp := unit.Dp(float32(px) / gtx.Metric.PxPerDp)
 	center := op.Offset(image.Pt((size.X-px)/2, (size.Y-px)/2)).Push(gtx.Ops)

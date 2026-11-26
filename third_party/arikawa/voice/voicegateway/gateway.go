@@ -257,6 +257,26 @@ func (g *gatewayImpl) OnOp(ctx context.Context, op ws.Op) bool {
 		g.mutex.Lock()
 		g.ssrcs[data.SSRC] = data.UserID
 		g.mutex.Unlock()
+	case *VideoEvent:
+		// Whose video an SSRC is, for its frames to be decrypted with the
+		// sender's keys.
+		if data.UserID.IsValid() {
+			g.mutex.Lock()
+			for _, ssrc := range []uint32{data.AudioSSRC, data.VideoSSRC, data.RTXSSRC} {
+				if ssrc != 0 {
+					g.ssrcs[ssrc] = data.UserID
+				}
+			}
+			for _, st := range data.Streams {
+				if st.SSRC != 0 {
+					g.ssrcs[st.SSRC] = data.UserID
+				}
+				if st.RTXSSRC != 0 {
+					g.ssrcs[st.RTXSSRC] = data.UserID
+				}
+			}
+			g.mutex.Unlock()
+		}
 
 	case *SessionDescriptionEvent:
 		g.dave.OnSelectProtocolAck(data.DAVEProtocolVersion)
