@@ -27,9 +27,9 @@ import (
 
 // Stream is a screen or a window being shared.
 type Stream struct {
-	p    Params
-	key  string
-	log  *slog.Logger
+	p   Params
+	key string
+	log *slog.Logger
 	// connP and medP are the connections to the stream server, swapped
 	// for new ones when the stream reconnects.
 	connP atomic.Pointer[conn]

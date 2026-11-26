@@ -132,8 +132,8 @@ func (a *streamAudio) run() {
 				return
 			}
 			user := godave.UserID(a.w.p.StreamerID.String())
-			plain := make([]byte, a.w.conn.dave.MaxDecryptedFrameSize(user, len(p.payload)))
-			n, err := a.w.conn.dave.Decrypt(user, p.payload, plain)
+			plain := make([]byte, a.w.c().dave.MaxDecryptedFrameSize(user, len(p.payload)))
+			n, err := a.w.c().dave.Decrypt(user, p.payload, plain)
 			if err != nil {
 				continue
 			}

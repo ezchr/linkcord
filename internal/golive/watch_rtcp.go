@@ -88,12 +88,12 @@ func (r *watchReception) report(ours, video uint32, now time.Time) []byte {
 // receiveReport opens rtpsize RTCP (eight authenticated header bytes),
 // then finds sender reports, including those within a compound packet.
 func (w *Watch) receiveReport(pkt []byte, now time.Time) {
-	if w.aead == nil || len(pkt) < 8+4+w.aead.Overhead() {
+	if w.ae() == nil || len(pkt) < 8+4+w.ae().Overhead() {
 		return
 	}
 	var nonce [24]byte
 	copy(nonce[:4], pkt[len(pkt)-4:])
-	body, err := w.aead.Open(nil, nonce[:w.aead.NonceSize()], pkt[8:len(pkt)-4], pkt[:8])
+	body, err := w.ae().Open(nil, nonce[:w.ae().NonceSize()], pkt[8:len(pkt)-4], pkt[:8])
 	if err != nil {
 		return
 	}

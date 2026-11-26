@@ -40,7 +40,8 @@ func TestLinkcordOnlyNoExtension(t *testing.T) {
 		t.Fatalf("bad header % x", buf[:12])
 	}
 	w := &Watch{}
-	w.useSecret(modes[0], secret)
+	aead, _ := newAEAD(modes[0], secret)
+	w.link.Store(&watchLink{aead: aead})
 	_, payload, err := w.open(buf[:n])
 	if err != nil {
 		t.Fatal(err)

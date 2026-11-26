@@ -40,11 +40,12 @@ func TestWatchNACKRTXRecovery(t *testing.T) {
 			defer dave.Close()
 			dec := &lockedBuffer{}
 			w := &Watch{
-				p:   WatchParams{StreamerID: discord.UserID(77)},
-				log: slog.Default(), udp: recv, aead: m.aead,
-				videoSSRC: m.ssrc, rtxSSRC: m.rtxSSRC, ourSSRC: 99,
-				decIn: dec, done: make(chan struct{}), conn: &conn{dave: dave},
+				p:         WatchParams{StreamerID: discord.UserID(77)},
+				log:       slog.Default(),
+				videoSSRC: m.ssrc, rtxSSRC: m.rtxSSRC,
+				decIn: dec, done: make(chan struct{}),
 			}
+			w.link.Store(&watchLink{udp: recv, aead: m.aead, ssrc: 99, conn: &conn{dave: dave}})
 			finished := make(chan struct{})
 			go func() { defer close(finished); w.receive() }()
 			defer func() { recv.Close(); <-finished }()

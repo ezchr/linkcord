@@ -39,8 +39,8 @@ func TestWatchAudioReorderingAndPlayback(t *testing.T) {
 	w := &Watch{
 		p:   WatchParams{StreamerID: discord.UserID(77)},
 		log: slog.Default(), audioSSRC: 123, done: make(chan struct{}),
-		conn: &conn{dave: dave},
 	}
+	w.link.Store(&watchLink{conn: &conn{dave: dave}})
 	a := &streamAudio{w: w, input: make(chan audioPacket, 32), done: make(chan struct{})}
 	w.audio = a
 	finished := make(chan struct{})

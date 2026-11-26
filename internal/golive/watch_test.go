@@ -44,7 +44,8 @@ func TestWatchOpen(t *testing.T) {
 			if err := m.useSecret(mode, [32]byte{}); err != nil {
 				t.Fatal(err)
 			}
-			w := &Watch{aead: m.aead}
+			w := &Watch{}
+			w.link.Store(&watchLink{aead: m.aead})
 			want := []byte{0x65, 0x88, 0x80, 0x11, 0xfa, 0xfa}
 			for _, tc := range []struct {
 				name    string
@@ -119,14 +120,13 @@ func TestWatchReceive(t *testing.T) {
 	w := &Watch{
 		p:         WatchParams{StreamerID: streamer},
 		log:       slog.Default(),
-		udp:       recv,
 		videoSSRC: 4242,
 		decIn:     dec,
 		done:      make(chan struct{}),
-		conn:      &conn{dave: session.New(godave.UserID("1"), nil)},
 	}
 	block, _ := aes.NewCipher(secret[:])
-	w.aead, _ = cipher.NewGCM(block)
+	aead, _ := cipher.NewGCM(block)
+	w.link.Store(&watchLink{udp: recv, aead: aead, conn: &conn{dave: session.New(godave.UserID("1"), nil)}})
 	go w.receive()
 	defer recv.Close()
 

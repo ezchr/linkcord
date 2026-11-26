@@ -74,7 +74,8 @@ func TestWatchReceiveSenderReport(t *testing.T) {
 			if err := m.useSecret(mode, [32]byte{}); err != nil {
 				t.Fatal(err)
 			}
-			w := &Watch{aead: m.aead, videoSSRC: 155}
+			w := &Watch{videoSSRC: 155}
+			w.link.Store(&watchLink{aead: m.aead})
 			now := time.Unix(100, 0)
 			w.reception.record(155, 100, 1000, now)
 			sr := make([]byte, 28)

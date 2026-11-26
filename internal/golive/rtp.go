@@ -1,7 +1,6 @@
 package golive
 
 import (
-	"sync/atomic"
 	"bytes"
 	"context"
 	"crypto/aes"
@@ -14,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/chacha20poly1305"
@@ -41,19 +41,19 @@ type media struct {
 	audioSSRC uint32
 	audioSeq  uint16
 	// The RTP state of the video.
-	ssrc     uint32
-	seq      uint16
-	rtxSSRC  uint32
+	ssrc    uint32
+	seq     uint16
+	rtxSSRC uint32
 	// resent and resendMissed count the packets resent for NACKs, and
 	// those asked for that could not be.
 	resent, resendMissed int
-	rtxSeq   uint16
-	history  [1024]sentPacket
-	packets  uint32
-	octets   uint32
-	lastTS   uint32
-	lastSent time.Time
-	buf      []byte
+	rtxSeq               uint16
+	history              [1024]sentPacket
+	packets              uint32
+	octets               uint32
+	lastTS               uint32
+	lastSent             time.Time
+	buf                  []byte
 	// linkcordOnly leaves the header extension out, as for a stream that
 	// only Linkcord shows: its pictures are veiled (see veil).
 	linkcordOnly bool

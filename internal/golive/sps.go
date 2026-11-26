@@ -16,9 +16,9 @@ func spsSize(sps []byte) (w, h int, err error) {
 		if chroma == 3 {
 			r.bits(1) // separate_colour_plane_flag
 		}
-		r.ue()    // bit_depth_luma
-		r.ue()    // bit_depth_chroma
-		r.bits(1) // qpprime_y_zero_transform_bypass
+		r.ue()              // bit_depth_luma
+		r.ue()              // bit_depth_chroma
+		r.bits(1)           // qpprime_y_zero_transform_bypass
 		if r.bits(1) == 1 { // seq_scaling_matrix_present
 			lists := 8
 			if chroma == 3 {
@@ -43,7 +43,7 @@ func spsSize(sps []byte) (w, h int, err error) {
 			}
 		}
 	}
-	r.ue() // log2_max_frame_num
+	r.ue()          // log2_max_frame_num
 	switch r.ue() { // pic_order_cnt_type
 	case 0:
 		r.ue()

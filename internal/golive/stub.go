@@ -42,9 +42,14 @@ type WatchParams struct {
 	UserID     discord.UserID
 	SessionID  string
 	FFmpeg     string
+	NeedFFmpeg func() (string, error)
 	OnFrame    func()
 	OnEnd      func(err error)
 }
+
+// InProcessDecoding reports whether streams decode without FFmpeg: never
+// here.
+func InProcessDecoding() bool { return false }
 
 // Watch is someone's stream being watched. There is none here.
 type Watch struct{}

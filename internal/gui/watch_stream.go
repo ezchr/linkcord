@@ -115,6 +115,12 @@ func (c *chatView) startWatching(vs discord.VoiceState) {
 	// Only their stream starts over; the others keep playing.
 	c.stopWatchingOne(vs.UserID)
 	ffmpeg, err := mediaExecutable("ffmpeg")
+	// Where the graphics card decodes inside Linkcord, FFmpeg is fetched
+	// only if that fails mid-stream.
+	inproc := err != nil && golive.InProcessDecoding()
+	if inproc {
+		err = nil
+	}
 	if err != nil && runtime.GOOS == "windows" {
 		// Downloaded once, then the stream opens.
 		done := fetchMedia()
@@ -156,7 +162,12 @@ func (c *chatView) startWatching(vs discord.VoiceState) {
 		UserID:     c.me.ID,
 		SessionID:  c.inter.sessionID,
 		FFmpeg:     ffmpeg,
-		OnFrame:    u.win.Invalidate,
+		NeedFFmpeg: func() (string, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			return needMedia(ctx, "ffmpeg")
+		},
+		OnFrame: u.win.Invalidate,
 		OnEnd: func(err error) {
 			u.post(func() {
 				if c.watched(vs.UserID) == s && s.w != nil && s.w == w {

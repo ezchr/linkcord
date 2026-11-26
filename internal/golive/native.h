@@ -206,4 +206,22 @@ void lc_ploop_close(lc_ploop *c);
 // speakers, and returns how many.
 int lc_audio_pids(uint32_t *out, int max);
 
+// lc_hwdec decodes a watched stream with Media Foundation's H264 decoder
+// on the graphics card through Direct3D 11: mfdec_windows.c.
+typedef struct lc_hwdec lc_hwdec;
+
+// lc_hwdec_open makes a decoder of a w by h stream, or returns NULL where
+// the graphics card cannot decode this way, as on Windows 7.
+lc_hwdec *lc_hwdec_open(int w, int h);
+
+// lc_hwdec_decode decodes the access unit au, in Annex B, and writes the
+// picture it gives, if any, scaled to ow by oh RGBA, into rgba, setting
+// *got. It returns 0, or -1 when the decoder failed.
+int lc_hwdec_decode(lc_hwdec *d, const uint8_t *au, int len, uint8_t *rgba, int ow, int oh, int *got);
+
+// lc_hwdec_size reports the size of the pictures shown, 0 before known.
+void lc_hwdec_size(lc_hwdec *d, int *w, int *h);
+
+void lc_hwdec_close(lc_hwdec *d);
+
 #endif

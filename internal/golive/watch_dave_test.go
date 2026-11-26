@@ -67,13 +67,11 @@ func TestWatchReceiveDAVE(t *testing.T) {
 			w := &Watch{
 				p:         WatchParams{StreamerID: discord.UserID(77)},
 				log:       slog.Default(),
-				udp:       recv,
-				aead:      m.aead,
 				videoSSRC: m.ssrc,
 				decIn:     dec,
 				done:      make(chan struct{}),
-				conn:      &conn{dave: dave},
 			}
+			w.link.Store(&watchLink{udp: recv, aead: m.aead, conn: &conn{dave: dave}})
 			finished := make(chan struct{})
 			go func() {
 				defer close(finished)

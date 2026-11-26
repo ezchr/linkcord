@@ -14,7 +14,6 @@ import (
 	"image"
 	"io"
 	"log/slog"
-	"math/big"
 	"net"
 	"os"
 	"os/exec"
@@ -46,8 +45,11 @@ type WatchParams struct {
 	StreamerID discord.UserID
 	UserID     discord.UserID
 	SessionID  string
-	// FFmpeg decodes the video.
-	FFmpeg string
+	// FFmpeg decodes the video where the graphics card cannot inside
+	// Linkcord (see InProcessDecoding); NeedFFmpeg, if FFmpeg is "", finds
+	// or downloads it then. It may take a while.
+	FFmpeg     string
+	NeedFFmpeg func() (string, error)
 	// OnFrame is called, from another goroutine, when a picture is ready.
 	OnFrame func()
 	// OnEnd is called once the stream ended, with why.
@@ -56,20 +58,28 @@ type WatchParams struct {
 
 // Watch is someone's stream being watched.
 type Watch struct {
-	p      WatchParams
-	key    string
-	log    *slog.Logger
-	cancel context.CancelFunc
-	rm     []func()
-	conn   *conn
-	ops    <-chan ws.Op
-	udp    net.Conn
-	aead   cipher.AEAD
+	p   WatchParams
+	key string
+	log *slog.Logger
+	rm  []func()
+	// link is the connection to the stream server, replaced whole when the
+	// server is dialed again.
+	link atomic.Pointer[watchLink]
+	// variant is how the viewer joined, which a reconnect joins with again.
+	variant joinVariant
+	// servers and creates take the stream's server and stream as Discord
+	// gives them; create is the last stream given. reconnects are when the
+	// server was dialed again (follow's goroutine only).
+	servers    chan *StreamServerUpdateEvent
+	creates    chan *StreamCreateEvent
+	create     atomic.Pointer[StreamCreateEvent]
+	reconnects []time.Time
+	// reconnecting is set while the server is dialed again.
+	reconnecting atomic.Bool
 
-	mu    sync.Mutex
-	nonce [24]byte // our counter, for the RTCP we send
-	ourSSRC,
-	videoSSRC uint32
+	mu                 sync.Mutex
+	nonce              [24]byte // our counter, for the RTCP we send
+	videoSSRC          uint32
 	rtxSSRC, audioSSRC uint32
 	frame              *image.RGBA
 	frames             atomic.Int64
@@ -100,12 +110,12 @@ type Watch struct {
 	waiting time.Time
 	// view is the size the picture is shown at, width<<32|height, set by
 	// SetView; 0 is unknown.
-	view            atomic.Uint64
+	view atomic.Uint64
 	// viewAt is when the GUI last set the view, in Unix nanoseconds.
 	viewAt atomic.Int64
 	// shownAgain is when the video was last asked for again after it was
 	// not shown, in Unix nanoseconds.
-	shownAgain atomic.Int64
+	shownAgain      atomic.Int64
 	videoBytes      atomic.Int64
 	reception       watchReception // guarded by mu
 	needIDR         atomic.Bool
@@ -113,9 +123,17 @@ type Watch struct {
 	srcW, srcH, fps int
 	// decW and decH are the size the running decoder gives pictures at.
 	decW, decH int
-	created         bool
-	once            sync.Once
-	decoder         *exec.Cmd
+	created    bool
+	once       sync.Once
+	// decoder is FFmpeg when it decodes; nil when the decoder is in
+	// process (decIn is an *inprocDecoder).
+	decoder *exec.Cmd
+	// inprocOff is set once the in-process decoder failed: FFmpeg decodes
+	// from then on. ffmpeg is FFmpeg's path once known, guarded by mu;
+	// fetching is set while NeedFFmpeg runs.
+	inprocOff       atomic.Bool
+	ffmpeg          string
+	fetching        atomic.Bool
 	decIn           io.WriteCloser
 	decodeQueue     chan pictureJob
 	videoGeneration atomic.Uint64
@@ -237,8 +255,9 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 		}
 	}()
 
-	created := make(chan *StreamCreateEvent, 1)
-	server := make(chan *StreamServerUpdateEvent, 1)
+	w.variant = v
+	w.creates = make(chan *StreamCreateEvent, 1)
+	w.servers = make(chan *StreamServerUpdateEvent, 1)
 	notFound := make(chan string, 1)
 	w.rm = append(w.rm,
 		p.Subscribe(func(ev *StreamCreateEvent) {
@@ -248,8 +267,9 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 				w.mu.Lock()
 				w.created = true
 				w.mu.Unlock()
+				w.create.Store(ev)
 				select {
-				case created <- ev:
+				case w.creates <- ev:
 				default:
 				}
 			}
@@ -262,7 +282,7 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 		p.Subscribe(func(ev *StreamServerUpdateEvent) {
 			if ev.StreamKey == w.key {
 				select {
-				case server <- ev:
+				case w.servers <- ev:
 				default:
 				}
 			}
@@ -300,10 +320,11 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 	var ce *StreamCreateEvent
 	var se *StreamServerUpdateEvent
 	var reason string
+	pinged := false
 	for ce == nil || se == nil {
 		select {
-		case ce = <-created:
-		case se = <-server:
+		case ce = <-w.creates:
+		case se = <-w.servers:
 		case reason = <-notFound:
 			// Perhaps an earlier try's answer: wait on, but keep it for the
 			// error if nothing better comes.
@@ -311,80 +332,36 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 			if reason != "" {
 				return nil, fmt.Errorf("golive: Discord says %s", reason)
 			}
-			return nil, errors.New("golive: Discord did not give the stream's server")
+			// Discord gives no server again to a watch of a stream it holds
+			// watched, as after the connection to it was lost: a stream ping
+			// asks for it, as Discord's client does on reconnecting.
+			if pinged || ctx.Err() != nil {
+				return nil, errors.New("golive: Discord did not give the stream's server")
+			}
+			pinged = true
+			w.log.Info("no stream server given; pinging the stream")
+			if err := p.Main.SendGateway(ctx, &streamPingCommand{StreamKey: w.key}); err != nil {
+				return nil, fmt.Errorf("golive: could not ping the stream: %w", err)
+			}
+			wait, cancel = context.WithTimeout(ctx, reconnectWait)
+			defer cancel()
 		}
 	}
-	daveChannel := new(big.Int)
-	if _, ok := daveChannel.SetString(ce.RTCChannelID, 10); !ok {
-		daveChannel.SetString(ce.RTCServerID, 10)
-		daveChannel.Sub(daveChannel, big.NewInt(1))
-	}
 
-	loopCtx, loopCancel := context.WithCancel(context.Background())
-	w.cancel = loopCancel
-	w.conn, w.ops = dial(loopCtx, se.Endpoint, identifyCommand{
-		ServerID:  ce.RTCServerID,
-		ChannelID: daveChannel.String(),
-		UserID:    p.UserID,
-		SessionID: p.SessionID,
-		Token:     se.Token,
-		Video:     v.video,
-		Streams:   v.streams,
-	}, daveChannel.Uint64(), w.log)
 	// The streamer's SSRCs come in an Op 12, perhaps before the ready.
 	early := make(chan ws.Op, 64)
-	ready, err := waitOp(wait, w.log, w.ops, early, func(ev ws.Event) bool { _, ok := ev.(*readyEvent); return ok })
-	if err != nil {
-		return nil, fmt.Errorf("golive: the stream server did not answer: %w", err)
-	}
-	r := ready.(*readyEvent)
-	mode := slices.IndexFunc(modes, func(m string) bool { return slices.Contains(r.Modes, m) })
-	if mode < 0 {
-		return nil, fmt.Errorf("golive: no encryption mode in common with the stream server (%v)", r.Modes)
-	}
-	w.ourSSRC = r.SSRC
-	ip, port, err := w.dialUDP(wait, fmt.Sprintf("%s:%d", r.IP, r.Port), r.SSRC)
+	l, err := w.join(wait, ce, se, early)
 	if err != nil {
 		return nil, err
 	}
-	w.conn.send(wait, &versionCommand{})
-	// A client must send a Speaking and a Video before it receives media,
-	// or the server ends its session; a viewer's say it sends nothing: no
-	// speaking, and a video with no SSRC and no streams.
-	w.sendViewerState(wait, r.SSRC)
-	if err := w.conn.send(wait, &selectProtocolCommand{
-		Protocol: "udp",
-		Codecs: []codecInfo{
-			{Name: "opus", Type: "audio", Priority: 1000, PayloadType: payloadOpus},
-			{Name: "H264", Type: "video", Priority: 2000, PayloadType: payloadH264, RTXPayloadType: payloadH264RTX, Encode: true, Decode: true},
-		},
-		Data:            voicegateway.SelectProtocolData{Address: ip, Port: port, Mode: modes[mode]},
-		Address:         ip,
-		Port:            port,
-		Mode:            modes[mode],
-		RTCConnectionID: newUUID(),
-		// The same as a stream's own: a server ends the session (4006) on
-		// what it does not take, and experiments left out went as null.
-		Experiments: []string{"fixed_keyframe_interval"},
-	}); err != nil {
-		return nil, err
-	}
-	desc, err := waitOp(wait, w.log, w.ops, early, func(ev ws.Event) bool { _, ok := ev.(*sessionDescriptionEvent); return ok })
-	if err != nil {
-		return nil, fmt.Errorf("golive: the stream server did not give a key: %w", err)
-	}
-	d := desc.(*sessionDescriptionEvent)
-	if err := w.useSecret(d.Mode, d.SecretKey); err != nil {
-		return nil, err
-	}
-	w.sendViewerState(wait, r.SSRC)
+	w.link.Store(l)
 	w.mu.Lock()
 	video := w.videoSSRC
 	w.mu.Unlock()
 	w.sendWants(wait, video)
-	w.log.Info("watching", "mode", d.Mode, "video_codec", d.VideoCodec, "dave", d.DAVEProtocolVersion)
 
-	if w.p.FFmpeg == "" {
+	w.ffmpeg = w.p.FFmpeg
+	if w.p.FFmpeg == "" && w.p.NeedFFmpeg == nil && !InProcessDecoding() {
 		return nil, errors.New("golive: FFmpeg is needed to watch streams")
 	}
 	// Half a second of pictures: a short stall of the decoder must not cost
@@ -406,10 +383,132 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 	return w, nil
 }
 
+// watchLink is the connection to a stream server: its gateway, its UDP
+// socket and key, and the SSRC it gave the viewer. A reconnect replaces it
+// whole, which is why it is reached through the Watch's accessors.
+type watchLink struct {
+	conn   *conn
+	ops    <-chan ws.Op
+	udp    net.Conn
+	aead   cipher.AEAD
+	ssrc   uint32
+	cancel context.CancelFunc
+}
+
+func (l *watchLink) close() {
+	if l.cancel != nil {
+		l.cancel()
+	}
+	if l.udp != nil {
+		l.udp.Close()
+	}
+}
+
+func (w *Watch) c() *conn {
+	if l := w.link.Load(); l != nil {
+		return l.conn
+	}
+	return nil
+}
+
+func (w *Watch) u() net.Conn {
+	if l := w.link.Load(); l != nil {
+		return l.udp
+	}
+	return nil
+}
+
+func (w *Watch) ae() cipher.AEAD {
+	if l := w.link.Load(); l != nil && l.aead != nil {
+		return l.aead
+	}
+	return nil
+}
+
+func (w *Watch) ours() uint32 {
+	if l := w.link.Load(); l != nil {
+		return l.ssrc
+	}
+	return 0
+}
+
+// join connects to the stream server se gives for the stream ce, as a
+// viewer: identify, address discovery, protocol, key. The ops that come
+// meanwhile and are not waited for go to early.
+func (w *Watch) join(wait context.Context, ce *StreamCreateEvent, se *StreamServerUpdateEvent, early chan ws.Op) (*watchLink, error) {
+	daveChannel := daveChannelOf(ce)
+	loopCtx, loopCancel := context.WithCancel(context.Background())
+	l := &watchLink{cancel: loopCancel}
+	ok := false
+	defer func() {
+		if !ok {
+			l.close()
+		}
+	}()
+	l.conn, l.ops = dial(loopCtx, se.Endpoint, identifyCommand{
+		ServerID:  ce.RTCServerID,
+		ChannelID: daveChannel.String(),
+		UserID:    w.p.UserID,
+		SessionID: w.p.SessionID,
+		Token:     se.Token,
+		Video:     w.variant.video,
+		Streams:   w.variant.streams,
+	}, daveChannel.Uint64(), w.log)
+	ready, err := waitOp(wait, w.log, l.ops, early, func(ev ws.Event) bool { _, ok := ev.(*readyEvent); return ok })
+	if err != nil {
+		return nil, fmt.Errorf("golive: the stream server did not answer: %w", err)
+	}
+	r := ready.(*readyEvent)
+	mode := slices.IndexFunc(modes, func(m string) bool { return slices.Contains(r.Modes, m) })
+	if mode < 0 {
+		return nil, fmt.Errorf("golive: no encryption mode in common with the stream server (%v)", r.Modes)
+	}
+	l.ssrc = r.SSRC
+	ip, port, udp, err := dialUDP(wait, fmt.Sprintf("%s:%d", r.IP, r.Port), r.SSRC)
+	l.udp = udp
+	if err != nil {
+		return nil, err
+	}
+	l.conn.send(wait, &versionCommand{})
+	// A client must send a Speaking and a Video before it receives media,
+	// or the server ends its session; a viewer's say it sends nothing: no
+	// speaking, and a video with no SSRC and no streams.
+	sendViewerState(wait, l.conn, r.SSRC)
+	if err := l.conn.send(wait, &selectProtocolCommand{
+		Protocol: "udp",
+		Codecs: []codecInfo{
+			{Name: "opus", Type: "audio", Priority: 1000, PayloadType: payloadOpus},
+			{Name: "H264", Type: "video", Priority: 2000, PayloadType: payloadH264, RTXPayloadType: payloadH264RTX, Encode: true, Decode: true},
+		},
+		Data:            voicegateway.SelectProtocolData{Address: ip, Port: port, Mode: modes[mode]},
+		Address:         ip,
+		Port:            port,
+		Mode:            modes[mode],
+		RTCConnectionID: newUUID(),
+		// The same as a stream's own: a server ends the session (4006) on
+		// what it does not take, and experiments left out went as null.
+		Experiments: []string{"fixed_keyframe_interval"},
+	}); err != nil {
+		return nil, err
+	}
+	desc, err := waitOp(wait, w.log, l.ops, early, func(ev ws.Event) bool { _, ok := ev.(*sessionDescriptionEvent); return ok })
+	if err != nil {
+		return nil, fmt.Errorf("golive: the stream server did not give a key: %w", err)
+	}
+	d := desc.(*sessionDescriptionEvent)
+	if l.aead, err = newAEAD(d.Mode, d.SecretKey); err != nil {
+		return nil, err
+	}
+	sendViewerState(wait, l.conn, r.SSRC)
+	w.log.Info("watching", "endpoint", se.Endpoint, "mode", d.Mode, "video_codec", d.VideoCodec, "dave", d.DAVEProtocolVersion)
+	ok = true
+	return l, nil
+}
+
 // sendViewerState tells the server the viewer sends nothing.
-func (w *Watch) sendViewerState(ctx context.Context, ssrc uint32) {
-	w.conn.send(ctx, &voicegateway.SpeakingEvent{Speaking: 0, SSRC: ssrc})
-	w.conn.send(ctx, &videoCommand{AudioSSRC: ssrc, Streams: []videoStream{}})
+func sendViewerState(ctx context.Context, c *conn, ssrc uint32) {
+	c.send(ctx, &voicegateway.SpeakingEvent{Speaking: 0, SSRC: ssrc})
+	c.send(ctx, &videoCommand{AudioSSRC: ssrc, Streams: []videoStream{}})
 }
 
 // sendWants asks for the streamer's video, by its SSRC when known, as
@@ -429,7 +528,7 @@ func (w *Watch) sendWants(ctx context.Context, video uint32) {
 		}
 	}
 	cmd := wants
-	w.conn.send(ctx, &cmd)
+	w.c().send(ctx, &cmd)
 }
 
 // viewHidden is how long without SetView before the video counts as not
@@ -522,14 +621,32 @@ func (w *Watch) follow(early chan ws.Op) {
 			}
 		}
 	}
+	ops := w.link.Load().ops
 	for {
 		select {
 		case op := <-early:
 			handle(op)
-		case op, ok := <-w.ops:
+		case op, ok := <-ops:
 			if !ok {
-				w.end(errors.New("the stream server closed the connection"))
-				return
+				if w.Ended() {
+					return
+				}
+				// Lost, not left: dialed again in place, as Discord's
+				// client does, the picture going on from a keyframe.
+				l, e := w.reconnect()
+				if l == nil {
+					w.end(errors.New("the stream server closed the connection"))
+					return
+				}
+				ops, early = l.ops, e
+				continue
+			}
+			switch e := op.Data.(type) {
+			case *ws.CloseEvent:
+				// Which the gateway resumes from, unless its code is fatal.
+				w.log.Info("stream server connection closed", "code", e.Code, "err", e.Err)
+			case *ws.BackgroundErrorEvent:
+				w.log.Info("stream server connection error", "err", e.Err)
 			}
 			handle(op)
 		case <-w.done:
@@ -538,52 +655,145 @@ func (w *Watch) follow(early chan ws.Op) {
 	}
 }
 
-// dialUDP connects to the stream server and discovers our address.
-func (w *Watch) dialUDP(ctx context.Context, addr string, ssrc uint32) (string, uint16, error) {
+// reconnect dials the stream server again after its connection was lost,
+// keeping the decoder and the pictures: it asks Discord for the server with
+// a stream ping, joins the one given and asks for a keyframe. It tries at
+// most reconnectTries times in reconnectWithin, and returns the new link
+// and where its early ops go, or nil once it gave up.
+func (w *Watch) reconnect() (*watchLink, chan ws.Op) {
+	w.reconnecting.Store(true)
+	defer w.reconnecting.Store(false)
+	for !w.Ended() {
+		var ok bool
+		if w.reconnects, ok = allowReconnect(w.reconnects, time.Now()); !ok {
+			w.log.Warn("stream server lost too often, not reconnecting")
+			return nil, nil
+		}
+		w.log.Info("stream server lost, reconnecting", "try", len(w.reconnects))
+		if l, early := w.reconnectOnce(); l != nil {
+			return l, early
+		}
+	}
+	return nil, nil
+}
+
+func (w *Watch) reconnectOnce() (*watchLink, chan ws.Op) {
+	ctx, cancel := context.WithTimeout(context.Background(), reconnectWait)
+	defer cancel()
+	go func() {
+		select {
+		case <-w.done:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	// Only what Discord gives after the ping.
+	select {
+	case <-w.servers:
+	default:
+	}
+	if err := w.p.Main.SendGateway(ctx, &streamPingCommand{StreamKey: w.key}); err != nil {
+		w.log.Warn("could not ping the stream", "err", err)
+		return nil, nil
+	}
+	var se *StreamServerUpdateEvent
+	select {
+	case se = <-w.servers:
+	case <-ctx.Done():
+		w.log.Warn("Discord did not give a stream server again")
+		return nil, nil
+	}
+	// A fresh stream, if one came, has the server's IDs now.
+	select {
+	case <-w.creates:
+	default:
+	}
+	ce := w.create.Load()
+	if ce == nil {
+		return nil, nil
+	}
+	wait, cancelWait := context.WithTimeout(context.Background(), reconnectWait)
+	defer cancelWait()
+	go func() {
+		select {
+		case <-w.done:
+			cancelWait()
+		case <-wait.Done():
+		}
+	}()
+	early := make(chan ws.Op, 64)
+	l, err := w.join(wait, ce, se, early)
+	if err != nil {
+		w.log.Warn("could not reconnect to the stream server", "err", err)
+		return nil, nil
+	}
+	old := w.link.Swap(l)
+	if w.Ended() {
+		// Stopped meanwhile: teardown closed what it saw.
+		l.close()
+		return nil, nil
+	}
+	if old != nil {
+		old.close()
+	}
+	w.mu.Lock()
+	video := w.videoSSRC
+	w.mu.Unlock()
+	w.sendWants(wait, video)
+	w.requireKeyframe()
+	w.lastPLI.Store(0)
+	w.requestKeyframe()
+	w.log.Info("stream server reconnected", "endpoint", se.Endpoint)
+	return l, early
+}
+
+// dialUDP connects to the stream server and discovers our address. The
+// socket, once there, is returned even on failure.
+func dialUDP(ctx context.Context, addr string, ssrc uint32) (string, uint16, net.Conn, error) {
 	var d net.Dialer
 	c, err := d.DialContext(ctx, "udp", addr)
 	if err != nil {
-		return "", 0, fmt.Errorf("golive: could not reach the stream server: %w", err)
+		return "", 0, nil, fmt.Errorf("golive: could not reach the stream server: %w", err)
 	}
 	if uc, ok := c.(*net.UDPConn); ok {
 		// A keyframe arrives as a burst.
 		uc.SetReadBuffer(8 << 20)
 	}
-	w.udp = c
 	var discovery [74]byte
 	binary.BigEndian.PutUint16(discovery[0:], 1)
 	binary.BigEndian.PutUint16(discovery[2:], 70)
 	binary.BigEndian.PutUint32(discovery[4:], ssrc)
 	if _, err := c.Write(discovery[:]); err != nil {
-		return "", 0, err
+		return "", 0, c, err
 	}
 	c.SetReadDeadline(time.Now().Add(10 * time.Second))
 	var reply [74]byte
 	if _, err := io.ReadFull(c, reply[:]); err != nil {
-		return "", 0, fmt.Errorf("golive: no answer to the address discovery: %w", err)
+		return "", 0, c, fmt.Errorf("golive: no answer to the address discovery: %w", err)
 	}
 	c.SetReadDeadline(time.Time{})
 	body := reply[8:72]
 	end := bytes.IndexByte(body, 0)
 	if end < 0 {
-		return "", 0, errors.New("golive: bad address discovery answer")
+		return "", 0, c, errors.New("golive: bad address discovery answer")
 	}
-	return string(body[:end]), binary.BigEndian.Uint16(reply[72:]), nil
+	return string(body[:end]), binary.BigEndian.Uint16(reply[72:]), c, nil
 }
 
-func (w *Watch) useSecret(mode string, secret [32]byte) (err error) {
+// newAEAD is the cipher of mode with secret.
+func newAEAD(mode string, secret [32]byte) (aead cipher.AEAD, err error) {
 	switch mode {
 	case modes[0]:
 		var block cipher.Block
 		if block, err = aes.NewCipher(secret[:]); err == nil {
-			w.aead, err = cipher.NewGCM(block)
+			aead, err = cipher.NewGCM(block)
 		}
 	case modes[1]:
-		w.aead, err = chacha20poly1305.NewX(secret[:])
+		aead, err = chacha20poly1305.NewX(secret[:])
 	default:
 		err = fmt.Errorf("golive: unknown encryption mode %q", mode)
 	}
-	return err
+	return aead, err
 }
 
 // open decrypts an RTP packet of the rtpsize modes: the header, with the
@@ -606,12 +816,12 @@ func (w *Watch) open(pkt []byte) (header []byte, payload []byte, err error) {
 		extWords = int(binary.BigEndian.Uint16(pkt[n+2:]))
 		n += 4
 	}
-	if len(pkt) < n+4+w.aead.Overhead() {
+	if len(pkt) < n+4+w.ae().Overhead() {
 		return nil, nil, errors.New("short packet")
 	}
 	var nonce [24]byte
 	copy(nonce[:4], pkt[len(pkt)-4:])
-	plain, err := w.aead.Open(nil, nonce[:w.aead.NonceSize()], pkt[n:len(pkt)-4], pkt[:n])
+	plain, err := w.ae().Open(nil, nonce[:w.ae().NonceSize()], pkt[n:len(pkt)-4], pkt[:n])
 	if err != nil {
 		return nil, nil, err
 	}
@@ -663,6 +873,8 @@ func (w *Watch) receive() {
 		order                   packetOrder
 	)
 	startCode := []byte{0, 0, 0, 1}
+	// readFailed is since when reading the socket fails.
+	var readFailed time.Time
 	consume := func(p receivedPacket) {
 		gap := haveSeq && p.seq != lastSeq+1
 		lastSeq, haveSeq = p.seq, true
@@ -754,15 +966,35 @@ func (w *Watch) receive() {
 	}
 	for {
 		drain(time.Now())
-		w.udp.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
-		n, err := w.udp.Read(buf)
+		u := w.u()
+		u.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
+		n, err := u.Read(buf)
 		if err != nil {
 			if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
+				continue
+			}
+			// Closed with the watch, or by its owner as tests do.
+			if w.Ended() || errors.Is(err, net.ErrClosed) && u == w.u() {
+				return
+			}
+			// Replaced by a reconnect, or about to be: the new socket is
+			// read once there. Windows also fails a read on a lost server's
+			// port unreachable, which its gateway's loss soon follows.
+			if u != w.u() || w.reconnecting.Load() || time.Since(readFailed) < reconnectWait {
+				if readFailed.IsZero() {
+					readFailed = time.Now()
+				}
+				time.Sleep(20 * time.Millisecond)
+				continue
+			}
+			if readFailed.IsZero() {
+				readFailed = time.Now()
 				continue
 			}
 			w.end(err)
 			return
 		}
+		readFailed = time.Time{}
 		pkt := buf[:n]
 		if n < 8 || pkt[0]>>6 != 2 {
 			continue
@@ -793,7 +1025,7 @@ func (w *Watch) receive() {
 		}
 		w.mu.Lock()
 		want, rtx := w.videoSSRC, w.rtxSSRC
-		if want == 0 && pt == payloadH264 && ssrc != w.ourSSRC {
+		if want == 0 && pt == payloadH264 && ssrc != w.ours() {
 			w.videoSSRC, want = ssrc, ssrc
 		}
 		w.mu.Unlock()
@@ -801,7 +1033,7 @@ func (w *Watch) receive() {
 			w.rtxSeen.Add(1)
 			// Resends before their SSRC was told: only the streamer resends
 			// video here, so the first resend stream is theirs.
-			if rtx == 0 && want != 0 && ssrc != w.ourSSRC && ssrc != want {
+			if rtx == 0 && want != 0 && ssrc != w.ours() && ssrc != want {
 				w.mu.Lock()
 				if w.rtxSSRC == 0 {
 					w.rtxSSRC = ssrc
@@ -846,7 +1078,7 @@ func (w *Watch) receive() {
 // decoder, started, or started again, at the size its SPS gives.
 func (w *Watch) decode(au []byte) {
 	w.assembled.Add(1)
-	out := make([]byte, w.conn.dave.MaxDecryptedFrameSize(godave.UserID(w.p.StreamerID.String()), len(au)))
+	out := make([]byte, w.c().dave.MaxDecryptedFrameSize(godave.UserID(w.p.StreamerID.String()), len(au)))
 	n, err := w.decrypt(au, out)
 	if err != nil {
 		if n := w.daveFailed.Add(1); n <= 5 || n%100 == 0 {
@@ -864,7 +1096,7 @@ func (w *Watch) decode(au []byte) {
 				"err", err, "bytes", len(au), "failures", n,
 				"dave_frame", frame.LooksLikeDAVEFrame(au), "footer_err", footerErr,
 				"nals", strings.Join(layout, ","),
-				"replay_rejected", w.conn.dave.Stats().RejectedReplayFrames,
+				"replay_rejected", w.c().dave.Stats().RejectedReplayFrames,
 			}
 			if parsed != nil {
 				attrs = append(attrs, "dave_nonce", parsed.TruncatedNonce,
@@ -896,7 +1128,7 @@ func (w *Watch) decode(au []byte) {
 				changed := sw != w.srcW || sh != w.srcH || w.decIn == nil
 				w.srcW, w.srcH = sw, sh
 				w.mu.Unlock()
-				if changed && w.p.FFmpeg != "" {
+				if changed {
 					w.log.Info("stream size", "width", sw, "height", sh)
 					if err := w.startDecoder(sw, sh); err != nil {
 						w.log.Warn("could not start the decoder", "err", err)
@@ -936,9 +1168,6 @@ func (w *Watch) decode(au []byte) {
 // scaled down to them.
 const maxWatchW, maxWatchH = 1920, 1080
 
-// startDecoder runs FFmpeg, which takes the pictures as H264 and gives them
-// as RGBA as fast as they come, at the stream's size up to the bound. One
-// already running is stopped.
 // oldFFmpeg is set once FFmpeg turned out to be older than 5.1.
 var oldFFmpeg atomic.Bool
 
@@ -1026,7 +1255,7 @@ func (w *Watch) fitDecoder() {
 		w.mu.Lock()
 		sw, sh, dw, dh, running := w.srcW, w.srcH, w.decW, w.decH, w.decoder != nil
 		w.mu.Unlock()
-		if !running || sw == 0 || w.p.FFmpeg == "" {
+		if !running || sw == 0 {
 			continue
 		}
 		nw, nh := w.decodeSize(sw, sh)
@@ -1053,7 +1282,54 @@ func (w *Watch) fitDecoder() {
 	}
 }
 
+// startDecoder starts decoding a sw×sh stream: inside Linkcord on the
+// graphics card where it can (see mfdec_windows.c), else with FFmpeg.
 func (w *Watch) startDecoder(sw, sh int) error {
+	if !w.inprocOff.Load() && InProcessDecoding() {
+		err := w.startInproc(sw, sh)
+		if err == nil {
+			return nil
+		}
+		if !w.inprocOff.Swap(true) {
+			w.log.Warn("could not decode inside Linkcord; decoding with FFmpeg", "err", err)
+		}
+	}
+	w.mu.Lock()
+	ffmpeg := w.ffmpeg
+	w.mu.Unlock()
+	if ffmpeg == "" {
+		w.fetchFFmpeg()
+		return errors.New("golive: FFmpeg is not there yet")
+	}
+	return w.startFFmpeg(ffmpeg, sw, sh)
+}
+
+// fetchFFmpeg finds FFmpeg with NeedFFmpeg, once at a time, without holding
+// up the pictures: the next keyframe starts it once it is there.
+func (w *Watch) fetchFFmpeg() {
+	if w.p.NeedFFmpeg == nil || w.fetching.Swap(true) {
+		return
+	}
+	go func() {
+		defer w.fetching.Store(false)
+		path, err := w.p.NeedFFmpeg()
+		if err != nil {
+			w.log.Warn("FFmpeg is needed to decode the stream", "err", err)
+			return
+		}
+		w.mu.Lock()
+		w.ffmpeg = path
+		w.mu.Unlock()
+		w.requireKeyframe()
+		w.lastPLI.Store(0)
+		w.requestKeyframe()
+	}()
+}
+
+// startFFmpeg runs FFmpeg, ffmpeg, which takes the pictures as H264 and
+// gives them as RGBA as fast as they come, at the stream's size up to the
+// bound. One already running is stopped.
+func (w *Watch) startFFmpeg(ffmpeg string, sw, sh int) error {
 	ow, oh := w.decodeSize(sw, sh)
 	w.mu.Lock()
 	w.decW, w.decH = ow, oh
@@ -1083,7 +1359,7 @@ func (w *Watch) startDecoder(sw, sh int) error {
 		mode = "-vsync"
 	}
 	args = append(args, mode, "passthrough", "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1")
-	cmd := exec.Command(w.p.FFmpeg, args...)
+	cmd := exec.Command(ffmpeg, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -1319,15 +1595,15 @@ func (w *Watch) transportFeedback() {
 			}
 			w.log.Warn("no transport-wide sequence number found", "two_byte_extensions", ids)
 		}
-		if w.videoSSRC == 0 || w.aead == nil {
+		if w.videoSSRC == 0 || w.ae() == nil {
 			w.mu.Unlock()
 			continue
 		}
-		if pkt := w.tw.feedback(w.ourSSRC, w.videoSSRC); pkt != nil {
+		if pkt := w.tw.feedback(w.ours(), w.videoSSRC); pkt != nil {
 			header := pkt[:8]
 			binary.BigEndian.PutUint32(w.nonce[:4], binary.BigEndian.Uint32(w.nonce[:4])+1)
-			sealed := w.aead.Seal(append([]byte(nil), header...), w.nonce[:w.aead.NonceSize()], pkt[8:], header)
-			w.udp.Write(append(sealed, w.nonce[:4]...))
+			sealed := w.ae().Seal(append([]byte(nil), header...), w.nonce[:w.ae().NonceSize()], pkt[8:], header)
+			w.u().Write(append(sealed, w.nonce[:4]...))
 		}
 		w.mu.Unlock()
 	}
@@ -1342,10 +1618,10 @@ const maxBitrate = 8_000_000
 func (w *Watch) sendReport() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.videoSSRC == 0 || w.aead == nil {
+	if w.videoSSRC == 0 || w.ae() == nil {
 		return
 	}
-	rr := w.reception.report(w.ourSSRC, w.videoSSRC, time.Now())
+	rr := w.reception.report(w.ours(), w.videoSSRC, time.Now())
 	// REMB (206, format 15): "REMB", one SSRC, the bitrate as exponent and
 	// 18-bit mantissa.
 	exp, mant := 0, maxBitrate
@@ -1356,7 +1632,7 @@ func (w *Watch) sendReport() {
 	remb := make([]byte, 8+16)
 	remb[0], remb[1] = 0x8F, 206
 	binary.BigEndian.PutUint16(remb[2:], 5)
-	binary.BigEndian.PutUint32(remb[4:], w.ourSSRC)
+	binary.BigEndian.PutUint32(remb[4:], w.ours())
 	copy(remb[12:], "REMB")
 	remb[16] = 1
 	remb[17] = byte(exp<<2) | byte(mant>>16)
@@ -1365,8 +1641,8 @@ func (w *Watch) sendReport() {
 	for _, pkt := range [][]byte{rr, remb} {
 		header := pkt[:8]
 		binary.BigEndian.PutUint32(w.nonce[:4], binary.BigEndian.Uint32(w.nonce[:4])+1)
-		sealed := w.aead.Seal(append([]byte(nil), header...), w.nonce[:w.aead.NonceSize()], pkt[8:], header)
-		w.udp.Write(append(sealed, w.nonce[:4]...))
+		sealed := w.ae().Seal(append([]byte(nil), header...), w.nonce[:w.ae().NonceSize()], pkt[8:], header)
+		w.u().Write(append(sealed, w.nonce[:4]...))
 	}
 }
 
@@ -1404,19 +1680,19 @@ func (w *Watch) Info() (width, height, fps int) {
 func (w *Watch) sendPLI() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.videoSSRC == 0 || w.aead == nil {
+	if w.videoSSRC == 0 || w.ae() == nil {
 		return false
 	}
 	header := make([]byte, 8)
 	header[0], header[1] = 0x81, 206
 	binary.BigEndian.PutUint16(header[2:], 2)
-	binary.BigEndian.PutUint32(header[4:], w.ourSSRC)
+	binary.BigEndian.PutUint32(header[4:], w.ours())
 	media := make([]byte, 4)
 	binary.BigEndian.PutUint32(media, w.videoSSRC)
 	binary.BigEndian.PutUint32(w.nonce[:4], binary.BigEndian.Uint32(w.nonce[:4])+1)
-	pkt := w.aead.Seal(append([]byte(nil), header...), w.nonce[:w.aead.NonceSize()], media, header)
+	pkt := w.ae().Seal(append([]byte(nil), header...), w.nonce[:w.ae().NonceSize()], media, header)
 	pkt = append(pkt, w.nonce[:4]...)
-	_, err := w.udp.Write(pkt)
+	_, err := w.u().Write(pkt)
 	return err == nil
 }
 
@@ -1468,11 +1744,8 @@ func (w *Watch) teardown() {
 		rm()
 	}
 	w.rm = nil
-	if w.cancel != nil {
-		w.cancel()
-	}
-	if w.udp != nil {
-		w.udp.Close()
+	if l := w.link.Load(); l != nil {
+		l.close()
 	}
 	w.mu.Lock()
 	decoder, in, audio := w.decoder, w.decIn, w.audio
@@ -1518,9 +1791,9 @@ func (w *Watch) decrypt(au, out []byte) (int, error) {
 	user := godave.UserID(w.p.StreamerID.String())
 	try := func(veiled bool) (int, error) {
 		if veiled {
-			return w.conn.dave.Decrypt(user, unveiled(au), out)
+			return w.c().dave.Decrypt(user, unveiled(au), out)
 		}
-		return w.conn.dave.Decrypt(user, au, out)
+		return w.c().dave.Decrypt(user, au, out)
 	}
 	was := w.veiled.Load()
 	n, err := try(was)
