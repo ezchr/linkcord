@@ -696,6 +696,8 @@ func (s *Stream) encodeLoop(jobs <-chan streamFrame, free chan<- []byte, st *enc
 		}
 	}()
 	idrEvery := fps * int(keyframeEvery/time.Second)
+	var rateAt time.Time
+	rateNow := 0
 	for job := range jobs {
 		if s.stopped.Load() {
 			done(job)
@@ -742,9 +744,24 @@ func (s *Stream) encodeLoop(jobs <-chan streamFrame, free chan<- []byte, st *enc
 				s.conn.send(context.Background(), s.video(job.w, job.h))
 			}
 			wantNV12.Store(enc.nv12())
+			rateNow, rateAt = 0, time.Time{}
 			name := enc.name
 			st.name.Store(&name)
 			s.log.Info("stream encoder", "encoder", enc.name, "hardware", enc.hardware(), "size", fmt.Sprintf("%dx%d", job.w, job.h), "fps", fps)
+		}
+		// The bitrate follows what gets through to the viewers, checked
+		// once a second.
+		if s.med != nil && time.Since(rateAt) > time.Second {
+			rateAt = time.Now()
+			if want := s.med.targetBitrate(s.p.Quality.bitrate(job.w, job.h)); want != rateNow {
+				if rateNow == 0 || abs(want-rateNow)*20 > rateNow {
+					enc.setBitrate(want)
+					if rateNow != 0 {
+						s.log.Info("stream bitrate", "bps", want)
+					}
+					rateNow = want
+				}
+			}
 		}
 		if job.idr {
 			enc.forceIDR()

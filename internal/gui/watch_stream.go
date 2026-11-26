@@ -42,6 +42,29 @@ type watchSet struct {
 	list map[discord.UserID]*streamWatch
 	// buttons are the "Watch Stream" buttons, by streamer.
 	buttons map[discord.UserID]*widget.Clickable
+	// rejoins are when each stream was reconnected to after it dropped.
+	rejoins map[discord.UserID][]time.Time
+}
+
+// rejoinWatch reports whether a stream that dropped may be watched again at
+// once, as Discord's client reconnects to it, and counts it: at most three
+// times in two minutes, for a stream that is gone not to loop.
+func (c *chatView) rejoinWatch(id discord.UserID) bool {
+	if c.watch.rejoins == nil {
+		c.watch.rejoins = make(map[discord.UserID][]time.Time)
+	}
+	recent := c.watch.rejoins[id][:0]
+	for _, t := range c.watch.rejoins[id] {
+		if time.Since(t) < 2*time.Minute {
+			recent = append(recent, t)
+		}
+	}
+	if len(recent) >= 3 {
+		c.watch.rejoins[id] = recent
+		return false
+	}
+	c.watch.rejoins[id] = append(recent, time.Now())
+	return true
 }
 
 // watched is the stream of id watched or starting, or nil.
@@ -139,6 +162,13 @@ func (c *chatView) startWatching(vs discord.VoiceState) {
 				if c.watched(vs.UserID) == s && s.w != nil && s.w == w {
 					delete(c.watch.list, vs.UserID)
 					c.watchesChanged()
+					// A dropped connection is reconnected to, as Discord's
+					// client does, while still in the channel.
+					if err != nil && !c.closed && u.voiceChannel() == vs.ChannelID && c.rejoinWatch(vs.UserID) {
+						slog.Info("the stream dropped; watching it again", "err", err)
+						c.startWatching(vs)
+						return
+					}
 					if err != nil {
 						u.voiceInfo("The stream ended: " + err.Error())
 					}

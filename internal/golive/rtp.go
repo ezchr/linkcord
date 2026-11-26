@@ -1,6 +1,7 @@
 package golive
 
 import (
+	"sync/atomic"
 	"bytes"
 	"context"
 	"crypto/aes"
@@ -25,6 +26,12 @@ var modes = []string{"aead_aes256_gcm_rtpsize", "aead_xchacha20_poly1305_rtpsize
 type media struct {
 	conn net.Conn
 	aead cipher.AEAD
+
+	// rate is the share of the stream's bitrate sent, in thousandths, which
+	// the loss viewers report lowers and its absence raises again (0 is all
+	// of it); remb is the bitrate the server estimates gets through, 0 if
+	// it says nothing.
+	rate, remb atomic.Int64
 
 	mu sync.Mutex
 	// nonce is the counter in the first 4 bytes of the nonce of the
