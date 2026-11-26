@@ -727,6 +727,9 @@ type ReadyEvent struct {
 	SessionID string       `json:"session_id"`
 	// ResumeGatewayURL is where to resume the session. (Added by Linkcord.)
 	ResumeGatewayURL string `json:"resume_gateway_url,omitempty"`
+	// AnalyticsToken is the token the client sends with each /science
+	// analytics batch. (Added by Linkcord.)
+	AnalyticsToken string `json:"analytics_token,omitempty"`
 
 	PrivateChannels []discord.Channel  `json:"private_channels"`
 	Guilds          []GuildCreateEvent `json:"guilds"`

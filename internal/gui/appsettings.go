@@ -68,6 +68,9 @@ type appSettings struct {
 	GhostRead bool `json:"ghost_read,omitempty"`
 	// GhostTyping writes without others seeing that the user is typing.
 	GhostTyping bool `json:"ghost_typing,omitempty"`
+	// NoTelemetry stops sending the account-health analytics events that
+	// Discord's own client sends to /science.
+	NoTelemetry bool `json:"no_telemetry,omitempty"`
 	// SplitLong sends text too long for a message as several messages,
 	// rather than as message.txt.
 	SplitLong bool `json:"split_long,omitempty"`
@@ -229,6 +232,7 @@ type generalView struct {
 	splitBtn                                 widget.Clickable
 	editHistoryBtn                           widget.Clickable
 	whoReactedBtn                            widget.Clickable
+	telemetryBtn                             widget.Clickable
 	modInfoBtn                               widget.Clickable
 	platformIconsBtn, staffTagsBtn           widget.Clickable
 	rejoinBtn, narratorBtn, statsBtn         widget.Clickable
@@ -400,6 +404,10 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 		u.app.SplitLong = !u.app.SplitLong
 		u.saveAppSettings()
 	}
+	if g.telemetryBtn.Clicked(gtx) {
+		u.app.NoTelemetry = !u.app.NoTelemetry
+		u.saveAppSettings()
+	}
 	if g.fakeMuteBtn.Clicked(gtx) {
 		u.voice.fakeMute = !u.voice.fakeMute
 		u.applyFake()
@@ -551,6 +559,11 @@ func (c *chatView) featureRows() []layout.Widget {
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.editHistoryBtn, "Show Edit History",
 				"What messages said before they were edited is kept while Linkcord is open: their \"(edited)\" shows it. Only you see it.", !c.u.app.NoEditHistory)
+		},
+		layout.Spacer{Height: unit.Dp(16)}.Layout,
+		func(gtx layout.Context) layout.Dimensions {
+			return switchRow(gtx, th, &g.telemetryBtn, "Send Minimal Analytics",
+				"Sends the few everyday events Discord's own client sends to it (the app opening, a channel or server opened), so the account is not flagged for sending none. No typing, message text or device details. Turn off to send nothing.", !c.u.app.NoTelemetry)
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {

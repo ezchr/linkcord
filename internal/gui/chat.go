@@ -200,6 +200,8 @@ type chatView struct {
 	// unreadFrom is the last message read when the channel was opened; the
 	// messages after it are marked new.
 	unreadFrom discord.MessageID
+	// sci sends the account-health analytics events; nil in demo.
+	sci *science
 	// echoes are the messages shown while being sent, by nonce.
 	echoes map[string]discord.MessageID
 	// heldUnread is the channel marked unread by hand, not marked read
@@ -719,6 +721,9 @@ func (c *chatView) close() {
 	c.u.voice.demoChannel = 0
 	c.stopEvents()
 	c.stopAcks()
+	if c.sci != nil {
+		c.sci.stop()
+	}
 	close(c.done)
 	stopNarrator()
 	if c.stats != nil {
@@ -738,6 +743,13 @@ func (c *chatView) close() {
 func (c *chatView) load(ready *gateway.ReadyEvent) {
 	c.me = ready.User
 	c.inter.sessionID = ready.SessionID
+	if !c.demo {
+		if c.sci == nil {
+			c.sci = newScience(c.st.Client.Client, func() bool { return c.u.app.NoTelemetry })
+		}
+		c.sci.setToken(ready.AnalyticsToken)
+		c.sci.track("app_opened", map[string]any{}, "app_opened", 5*time.Minute)
+	}
 	// Games and programs show what the user does in them through the RPC,
 	// as Discord's app has them.
 	if !c.demo {
@@ -1166,6 +1178,17 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 		defer c.rebuildRows()
 	}
 	c.selChannel = &ch
+	if c.sci != nil {
+		props := map[string]any{"channel_id": ch.ID.String(), "channel_type": int(ch.Type)}
+		if ch.GuildID.IsValid() {
+			props["guild_id"] = ch.GuildID.String()
+		}
+		c.sci.track("channel_opened", props, "channel_opened:"+ch.ID.String(), 15*time.Minute)
+		if ch.GuildID.IsValid() {
+			c.sci.track("guild_viewed", map[string]any{"guild_id": ch.GuildID.String()},
+				"guild_viewed:"+ch.GuildID.String(), 15*time.Minute)
+		}
+	}
 	c.notePage()
 	c.lastChannel[c.selGuild] = ch.ID
 	c.saveLastPlace()
