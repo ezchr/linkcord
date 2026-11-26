@@ -31,6 +31,7 @@ import (
 	"github.com/ayn2op/arikawa/v3/utils/ws"
 	"github.com/ayn2op/ningen/v3"
 	"github.com/ezchr/linkcord/internal/auth"
+	lchttp "github.com/ezchr/linkcord/internal/http"
 	"github.com/ezchr/linkcord/internal/logger"
 	"github.com/ezchr/linkcord/internal/tray"
 	"github.com/ezchr/linkcord/internal/version"
@@ -73,6 +74,18 @@ func Run() error {
 			app.MinSize(unit.Dp(720), unit.Dp(460)),
 		)
 		u := newUI(w)
+		// A panic on the window's goroutine is sent as app_crashed, as the
+		// web client's crash screen sends it, then crashes as before, so
+		// crash.txt still has it.
+		defer func() {
+			if r := recover(); r != nil {
+				if c := u.chat; c != nil && c.sci != nil {
+					c.sci.crashed(strings.TrimPrefix(currentPage(), "https://discord.com"), fmt.Sprint(r), string(debug.Stack()))
+					waitScienceSends(2 * time.Second)
+				}
+				panic(r)
+			}
+		}()
 		// Files dropped on the window are attached, as Discord does.
 		app.FilesDropped = func(paths []string) {
 			u.post(func() {
@@ -331,6 +344,9 @@ func (u *ui) loop() error {
 			if u.chat != nil {
 				u.chat.close()
 			}
+			// What analytics were still queued are sent before quitting,
+			// as the web client sends them on page hide.
+			waitScienceSends(2 * time.Second)
 			// Closed as it should: no voice channel was lost.
 			forgetVoiceChannel()
 			u.frameMu.Unlock()
@@ -342,6 +358,11 @@ func (u *ui) loop() error {
 			gainedFocus := !u.focused && e.Config.Focused
 			u.minimized = e.Config.Mode == app.Minimized
 			u.focused = e.Config.Focused
+			// Focus is use of the heartbeat session, as on the web; a new
+			// one after it lapsed is told to the gateway.
+			if gainedFocus && lchttp.TouchHeartbeatSession() && u.chat != nil && !u.chat.closed {
+				u.chat.sendTimeSpentSession()
+			}
 			if restored || gainedFocus {
 				u.win.Invalidate()
 				if u.chat != nil {
@@ -399,6 +420,8 @@ func (u *ui) showLogin(errMsg string) {
 
 // loggedIn saves token and connects with it.
 func (u *ui) loggedIn(token string) {
+	// A new token starts a new heartbeat session, as on the web.
+	lchttp.ResetHeartbeatSession()
 	if err := auth.SaveToken(token); err != nil {
 		slog.Error("failed to save token", "err", err)
 	}
@@ -416,6 +439,7 @@ func (u *ui) connect(token string) {
 	u.screen = screenConnecting
 
 	st := newState(token)
+	hookScienceHTTP(st.Client.Client)
 	u.chat = newChatView(u, st)
 	go func() {
 		err := st.Open(context.Background())
@@ -493,6 +517,7 @@ func (u *ui) tokenRefreshed(st *ningen.State, token string) {
 	}
 	slog.Info("Discord refreshed the token")
 	st.Client.Session.Token = token
+	lchttp.ResetHeartbeatSession()
 	if os.Getenv(tokenEnvVar) == "" {
 		if err := auth.SaveToken(token); err != nil {
 			slog.Error("failed to save refreshed token", "err", err)
@@ -504,6 +529,7 @@ func (u *ui) tokenRefreshed(st *ningen.State, token string) {
 // logout closes the session, forgets the token, and shows the login with
 // errMsg, if any.
 func (u *ui) logout(errMsg string) {
+	lchttp.ResetHeartbeatSession()
 	// Discord is told the session ends, as its client does on log out, so
 	// the token stops working there too. It is not waited for: a token that
 	// was already refused, or no connection, still logs out here.

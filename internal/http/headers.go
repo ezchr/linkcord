@@ -31,15 +31,27 @@ func Headers() stdHttp.Header {
 
 	headers.Set("X-Debug-Options", "bugReporterEnabled")
 	headers.Set("X-Discord-Locale", string(locale))
+	setSessionHeaders(headers)
+	return headers
+}
 
+// setSessionHeaders sets the headers whose values change during a run: the
+// super properties, which carry the current heartbeat session, the
+// installation id once Discord has given one, and the time zone. The web
+// client works them out again for every request.
+func setSessionHeaders(headers stdHttp.Header) {
+	if tz := TimeZone(); tz != "" {
+		headers.Set("X-Discord-Timezone", tz)
+	}
+	if id := InstallationID(); id != "" {
+		headers.Set("X-Installation-ID", id)
+	}
 	superProps, err := json.Marshal(xSuperProperties())
 	if err != nil {
 		slog.Error("failed to marshal super props", "err", err)
 	} else {
 		headers.Set("X-Super-Properties", base64.StdEncoding.EncodeToString(superProps))
 	}
-
-	return headers
 }
 
 // PageHeaders are Headers as a browser tab sends them with each request:
@@ -50,6 +62,7 @@ func PageHeaders(page func() string) httputil.RequestOption {
 	base := Headers()
 	return func(r httpdriver.Request) error {
 		h := base.Clone()
+		setSessionHeaders(h)
 		if p := page(); p != "" {
 			h.Set("Referer", p)
 		}

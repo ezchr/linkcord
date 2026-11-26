@@ -60,13 +60,32 @@ func commonProperties() gateway.IdentifyProperties {
 func IdentifyProperties() gateway.IdentifyProperties {
 	props := commonProperties()
 	props["is_fast_connect"] = true
+	// The web client adds the installation id to IDENTIFY when it knows it.
+	if id := InstallationID(); id != "" {
+		props["installation_id"] = id
+	}
+	return props
+}
+
+// ReidentifyProperties are those of an IDENTIFY after the first, as the web
+// client's handleIdentify sends them (its first comes from its fast connect,
+// IdentifyProperties): the full super properties, the app state, no fast
+// connect, and why it connects, "NO_REASONS" once the cold start is past.
+func ReidentifyProperties() gateway.IdentifyProperties {
+	props := xSuperProperties()
+	props["client_app_state"] = "focused"
+	props["is_fast_connect"] = false
+	props["gateway_connect_reasons"] = "NO_REASONS"
+	if id := InstallationID(); id != "" {
+		props["installation_id"] = id
+	}
 	return props
 }
 
 func xSuperProperties() gateway.IdentifyProperties {
 	props := commonProperties()
 	props["client_app_state"] = "focused"
-	props["client_heartbeat_session_id"] = heartbeatSessionID
+	props["client_heartbeat_session_id"] = HeartbeatSessionID()
 	props["launch_signature"] = launchSignature
 	return props
 }
@@ -78,15 +97,8 @@ func xSuperProperties() gateway.IdentifyProperties {
 // request, in every analytics event and in the hourly report.
 var launchSignature = uuid.NewV4().String()
 
-// heartbeatSessionID is this session's client_heartbeat_session_id, the same
-// in the super properties and in every analytics event, as on the web.
-var heartbeatSessionID = uuid.NewV4().String()
-
 // LaunchSignature is this launch's launch_signature.
 func LaunchSignature() string { return launchSignature }
-
-// HeartbeatSessionID is this session's client_heartbeat_session_id.
-func HeartbeatSessionID() string { return heartbeatSessionID }
 
 // Locale is the UI locale the client reports, as in X-Discord-Locale.
 func Locale() string { return string(locale) }

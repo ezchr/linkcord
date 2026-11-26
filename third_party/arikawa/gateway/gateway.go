@@ -332,6 +332,8 @@ func (g *Gateway) Connect(ctx context.Context) <-chan ws.Op {
 type gatewayImpl struct {
 	*Gateway
 	heartrate    time.Duration
+	// identified is set once an IDENTIFY was sent.
+	identified bool
 	lastSentBeat time.Time
 	// firstBeat is whether the first heartbeat of a connection, sent after
 	// a random part of the interval as Discord asks, is still to come.
@@ -374,7 +376,12 @@ func (g *gatewayImpl) sendIdentify(ctx context.Context) error {
 		return fmt.Errorf("can't wait for identify(): %w", err)
 	}
 
-	return g.gateway.Send(ctx, &g.state.Identifier.IdentifyCommand)
+	cmd := g.state.Identifier.IdentifyCommand
+	if f := g.state.Identifier.PropertiesFor; f != nil {
+		cmd.Properties = f(g.identified)
+	}
+	g.identified = true
+	return g.gateway.Send(ctx, &cmd)
 }
 
 func (g *gatewayImpl) sendResume(ctx context.Context) error {
@@ -547,4 +554,11 @@ func (g *gatewayImpl) Close() error {
 	g.retryTimer.Stop()
 	g.invalidate()
 	return nil
+}
+
+// Beat sends a heartbeat now, outside the regular ones, as the web client
+// does after UPDATE_TIME_SPENT_SESSION_ID. (Added by Linkcord.)
+func (g *Gateway) Beat(ctx context.Context) error {
+	seq := HeartbeatCommand(g.state.Sequence)
+	return g.gateway.Send(ctx, &seq)
 }

@@ -86,6 +86,7 @@ func (c *chatView) setRPCActivity(conn, clientID string, activity json.RawMessag
 			}
 		}
 		c.rpcActivities[conn] = rpcActivity{clientID, activity}
+		c.trackActivityUpdated(clientID, activity)
 	}
 	c.pushPresence()
 }

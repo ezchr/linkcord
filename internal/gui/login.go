@@ -133,6 +133,7 @@ func (l *loginView) startQR() {
 				}
 				return
 			}
+			noteLogin("remote_auth")
 			u.loggedIn(token)
 		})
 	}()

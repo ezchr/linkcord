@@ -558,6 +558,7 @@ func (c *chatView) pump() {
 			case *gateway.ResumedEvent:
 				c.u.post(func() {
 					if !c.closed && c.u.chat == c {
+						c.trackResumed()
 						c.refreshCurrentChat()
 					}
 				})
@@ -749,6 +750,8 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 			c.sci = newScience(c.st.Client.Client, func() bool { return c.u.app.NoTelemetry })
 		}
 		c.sci.setSession(ready.AnalyticsToken, ready.User.ID)
+		c.loadExperiments()
+		c.sendTimeSpentSession()
 		c.sci.track("app_opened", map[string]any{}, "app_opened", 5*time.Minute)
 		nch := 0
 		for _, g := range ready.Guilds {
@@ -767,6 +770,7 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 			c.applyCustomGames()
 			c.gamesOff.Store(c.u.app.NoGameDetection)
 			c.watchGames()
+			c.watchGameHeartbeats()
 			c.watchVoiceStats()
 			c.watchScheduled()
 			c.checkLostVoice()

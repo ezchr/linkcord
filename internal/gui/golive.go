@@ -565,6 +565,9 @@ func (u *ui) stopStream() {
 	v := &u.voice
 	if s := v.stream; s != nil {
 		v.stream = nil
+		if c := u.chat; c != nil {
+			c.trackStreamEnded()
+		}
 		u.playSound(dcsound.StreamEnded)
 		go s.Stop()
 	}

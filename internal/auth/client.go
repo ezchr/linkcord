@@ -28,14 +28,15 @@ func newLoginClient() *api.Client {
 	client := http.NewSessionClient("")
 	client.OnRequest = append(client.OnRequest, httputil.WithHeaders(headers))
 
-	type experiments struct {
-		Fingerprint string `json:"fingerprint"`
-	}
-	resp, err := client.RequestJSON[experiments]("GET", api.Endpoint+"experiments?with_guild_experiments=true")
+	resp, err := http.FetchExperiments(client)
 	if err != nil {
 		slog.Warn("failed to load experiments before login", "err", err)
 	} else if resp.Fingerprint != "" {
 		headers.Set("X-Fingerprint", resp.Fingerprint)
+	}
+	// The installation id it may have given goes with every request after.
+	if id := http.InstallationID(); id != "" {
+		headers.Set("X-Installation-ID", id)
 	}
 	return client
 }

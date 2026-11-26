@@ -193,8 +193,10 @@ func (c *chatView) patchGuildSetting(guildID discord.GuildID, change func(*gatew
 		gm.settings = map[discord.GuildID]gateway.UserGuildSetting{}
 	}
 	s := c.guildSetting(guildID)
+	old := s
 	change(&s)
 	gm.settings[guildID] = s
+	c.trackGuildNotify(guildID, old, s)
 	c.menu.stay = true
 	if c.demo {
 		return

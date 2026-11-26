@@ -150,6 +150,7 @@ func (c *chatView) openHome(p homePage) {
 	switch p {
 	case homeFriends:
 		c.setTitle("Friends - " + appName)
+		c.trackFriendsViewed()
 	case homeRequests:
 		c.setTitle("Message Requests - " + appName)
 		c.loadMessageRequests()

@@ -222,6 +222,7 @@ func (c *chatView) stopWatchingOne(id discord.UserID) {
 		return
 	}
 	if s.w != nil {
+		c.trackStreamEnded()
 		go s.w.Stop()
 	}
 	delete(c.watch.list, id)

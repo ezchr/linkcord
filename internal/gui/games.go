@@ -189,6 +189,7 @@ func (c *chatView) watchGames() {
 					}
 					old := c.games
 					c.games = games
+					c.trackGames(games)
 					c.noteSeenGames(old, games)
 					c.pushPresence()
 				})

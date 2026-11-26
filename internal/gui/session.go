@@ -81,6 +81,16 @@ func newState(token string) *ningen.State {
 			gateway.DebounceMessageReactions,
 	})
 
+	// Each IDENTIFY gets its properties when it is sent, so an installation
+	// id learned since is in it; those after the first are as the web
+	// client's later ones.
+	id.PropertiesFor = func(again bool) gateway.IdentifyProperties {
+		if again {
+			return withPlatform(http.ReidentifyProperties())
+		}
+		return withPlatform(http.IdentifyProperties())
+	}
+
 	sess := session.NewWithGateway(clientgateway.New(id), handler.New())
 	// Discord's and Cloudflare's cookies go with every request, and are
 	// kept between starts, as a browser does.

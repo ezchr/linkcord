@@ -80,6 +80,7 @@ type modalView struct {
 // openModal shows the form a bot answered with.
 func (c *chatView) openModal(ev modalCreateEvent) {
 	mv := &modalView{ev: ev}
+	c.trackOpenModal(map[string]any{"type": "interaction_modal", "application_id": ev.Application.ID.String()})
 	mv.list.Axis = layout.Vertical
 	if c.selChannel != nil {
 		mv.guildID = c.selChannel.GuildID

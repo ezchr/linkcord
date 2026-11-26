@@ -43,6 +43,9 @@ type science struct {
 	started time.Time
 	// sessionID is client_heartbeat_session_id, a UUID per session.
 	sessionID string
+	// initialSession is the session when the queue was made, to tell it from
+	// one set by hand.
+	initialSession string
 	// tested is set once the first batch carried x-science-test.
 	tested bool
 	uuid   clientUUID
@@ -53,8 +56,31 @@ type science struct {
 		periodStart                                    time.Time
 	}
 
+	// stopped is set once stop ran; events after it, as a call's
+	// network_action_* answered while closing, are sent at once.
+	stopped  bool
+	stopOnce sync.Once
+
 	wake chan struct{}
 	done chan struct{}
+}
+
+// scienceSends counts the /science requests in flight, so that quitting
+// can wait for the last ones, as the web client sends its queue on page
+// hide.
+var scienceSends sync.WaitGroup
+
+// waitScienceSends waits for the /science requests in flight, at most d.
+func waitScienceSends(d time.Duration) {
+	ch := make(chan struct{})
+	go func() {
+		scienceSends.Wait()
+		close(ch)
+	}()
+	select {
+	case <-ch:
+	case <-time.After(d):
+	}
 }
 
 type scienceEvent struct {
@@ -96,16 +122,18 @@ func newUUID() string {
 
 func newScience(client *httputil.Client, off func() bool) *science {
 	s := &science{
-		client:    client,
-		off:       off,
-		last:      make(map[string]time.Time),
-		started:   time.Now(),
-		sessionID: lchttp.HeartbeatSessionID(),
-		uuid:      clientUUID{prefix: mrand.Uint32(), created: uint64(time.Now().UnixMilli())},
-		wake:      make(chan struct{}, 1),
-		done:      make(chan struct{}),
+		client:         client,
+		off:            off,
+		last:           make(map[string]time.Time),
+		started:        time.Now(),
+		sessionID:      lchttp.HeartbeatSessionID(),
+		initialSession: lchttp.HeartbeatSessionID(),
+		uuid:           clientUUID{prefix: mrand.Uint32(), created: uint64(time.Now().UnixMilli())},
+		wake:           make(chan struct{}, 1),
+		done:           make(chan struct{}),
 	}
 	s.stats.periodStart = time.Now()
+	bindScienceHTTP(client, s)
 	go s.run()
 	go s.beaker()
 	return s
@@ -121,7 +149,17 @@ func (s *science) setSession(token string, user discord.UserID) {
 	s.poke()
 }
 
-func (s *science) stop() { close(s.done) }
+// stop ends the session's analytics and starts sending what is queued, with
+// a short timeout. It does not wait; quitting waits with waitScienceSends.
+func (s *science) stop() {
+	s.stopOnce.Do(func() {
+		s.mu.Lock()
+		s.stopped = true
+		s.mu.Unlock()
+		close(s.done)
+		s.flushWithin(2 * time.Second)
+	})
+}
 
 func (s *science) poke() {
 	select {
@@ -138,6 +176,7 @@ func (s *science) track(typ string, props map[string]any, key string, every time
 	}
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
+	features, cpu, cpuOK := currentDeviceProps()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if key != "" {
@@ -148,12 +187,16 @@ func (s *science) track(typ string, props map[string]any, key string, every time
 	}
 	p := map[string]any{
 		"client_track_timestamp":      time.Now().UnixMilli(),
-		"client_heartbeat_session_id": s.sessionID,
+		"client_heartbeat_session_id": s.heartbeatSession(),
 		"rendered_locale":             lchttp.Locale(),
 		"uptime_app":                  int(time.Since(s.started).Seconds()),
 		"cpu_core_count":              runtime.NumCPU(),
 		"client_performance_memory":   mem.Sys / 1024,
 		"launch_signature":            lchttp.LaunchSignature(),
+		"accessibility_features":      features,
+	}
+	if cpuOK {
+		p["client_performance_cpu"] = cpu
 	}
 	for k, v := range props {
 		p[k] = v
@@ -168,6 +211,10 @@ func (s *science) track(typ string, props map[string]any, key string, every time
 	if len(s.queue) > 1000 {
 		s.queue = s.queue[len(s.queue)-1000:]
 	}
+	if s.stopped {
+		go s.flushWithin(2 * time.Second)
+		return
+	}
 	go s.poke()
 }
 
@@ -177,13 +224,13 @@ func (s *science) run() {
 	for {
 		select {
 		case <-s.done:
-			s.flush() // as the web client flushes when the connection closes
+			// stop sent the queue, as the web client flushes when the
+			// connection closes.
 			return
 		case <-s.wake:
 		}
 		select {
 		case <-s.done:
-			s.flush()
 			return
 		case <-time.After(1500 * time.Millisecond):
 		}
@@ -191,7 +238,10 @@ func (s *science) run() {
 	}
 }
 
-func (s *science) flush() {
+func (s *science) flush() { s.flushWithin(20 * time.Second) }
+
+// flushWithin sends the queue, giving the request at most timeout.
+func (s *science) flushWithin(timeout time.Duration) {
 	s.mu.Lock()
 	if s.token == "" || len(s.queue) == 0 {
 		s.mu.Unlock()
@@ -213,8 +263,10 @@ func (s *science) flush() {
 	}
 	s.mu.Unlock()
 
+	scienceSends.Add(1)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer scienceSends.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		err := s.client.WithContext(ctx).FastRequest("POST", api.Endpoint+"science", opts...)
 		s.mu.Lock()
@@ -294,4 +346,28 @@ func (s *science) beaker() {
 			slog.Debug("could not send client telemetry", "err", err)
 		}
 	}
+}
+
+// crashed sends app_crashed for a panic Linkcord caught, as the web
+// client's crash screen does, and starts sending it at once. The report the
+// web client also sends to Sentry is not sent.
+func (s *science) crashed(path, msg, stack string) {
+	s.track("app_crashed", map[string]any{
+		"path":             path,
+		"error_message":    msg,
+		"error_stack":      stack,
+		"uses_client_mods": false,
+		"error_level":      "fatal",
+	}, "", 0)
+	s.flushWithin(2 * time.Second)
+}
+
+// heartbeatSession is the current client_heartbeat_session_id, read for
+// each event as the web client reads it, so one that expired or was reset
+// is not kept; a session set by hand (tests) wins.
+func (s *science) heartbeatSession() string {
+	if s.sessionID != "" && s.sessionID != s.initialSession {
+		return s.sessionID
+	}
+	return lchttp.HeartbeatSessionID()
 }

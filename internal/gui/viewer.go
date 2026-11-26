@@ -67,6 +67,7 @@ type imageViewer struct {
 // openViewer shows a picture of w×h pixels in the viewer.
 func (c *chatView) openViewer(proxy, original string, w, h int, openURL, thumb string, thumbSize int) {
 	c.closeVideo()
+	c.trackMediaViewer()
 	c.viewer = &imageViewer{
 		proxy: proxy, original: original, openURL: openURL,
 		thumb: thumb, thumbSize: thumbSize, w: w, h: h, zoom: 1,

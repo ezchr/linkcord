@@ -503,6 +503,11 @@ func (u *ui) voiceSession(st *ningen.State) *voice.Session {
 		// The status and who speaks are read while laying out.
 		for range updates {
 			u.win.Invalidate()
+			u.post(func() {
+				if c := u.chat; c != nil {
+					c.trackSpeaking()
+				}
+			})
 		}
 	}()
 	return v.session

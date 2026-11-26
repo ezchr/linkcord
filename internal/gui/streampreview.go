@@ -109,6 +109,9 @@ func (c *chatView) hoverLive(r channelRow, hovered bool) {
 		return
 	}
 	h := &c.live
+	if h.vs.UserID != vs.UserID || time.Now().After(h.until) {
+		c.trackStreamPreview(vs.UserID)
+	}
 	if h.vs.UserID != vs.UserID {
 		h.watch = widget.Clickable{}
 	}

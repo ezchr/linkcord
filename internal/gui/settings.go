@@ -342,6 +342,7 @@ func (c *chatView) updateSettings(gtx layout.Context) {
 	if s.soundsBtn.Clicked(gtx) {
 		settings.NoSounds = !settings.NoSounds
 		u.saveVoiceSettings()
+		c.trackDisabledSounds()
 		u.playSound(dcsound.Unmute)
 	}
 	c.updateSoundSettings(gtx)
@@ -1081,6 +1082,7 @@ func (c *chatView) updateSoundSettings(gtx layout.Context) {
 				settings.SoundOff[sc.name] = true
 			}
 			u.saveVoiceSettings()
+			c.trackDisabledSounds()
 		}
 		sl := s.soundVolume[sc.name]
 		if sl == nil {

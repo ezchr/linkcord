@@ -24,6 +24,12 @@ type Identifier struct {
 
 	IdentifyShortLimit  *rate.Limiter `json:"-"` // optional
 	IdentifyGlobalLimit *rate.Limiter `json:"-"` // optional
+
+	// PropertiesFor, if set, gives the properties of each IDENTIFY: again
+	// is false for the first one, true for those after an invalid session.
+	// (Added by Linkcord, as the web client identifies first from its fast
+	// connect and later with its full properties.)
+	PropertiesFor func(again bool) IdentifyProperties `json:"-"`
 }
 
 // DefaultIdentifier creates a new default Identifier

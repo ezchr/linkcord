@@ -62,6 +62,7 @@ func (c *chatView) layoutEmojiPicker(gtx layout.Context) layout.Dimensions {
 	if !p.focused {
 		gtx.Execute(key.FocusCmd{Tag: &p.search})
 		p.focused = true
+		c.trackPickerOpened(p, int(float32(gtx.Constraints.Max.X)/gtx.Metric.PxPerDp))
 	}
 	for {
 		if _, ok := p.search.Update(gtx); !ok {
