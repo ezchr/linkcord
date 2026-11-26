@@ -237,11 +237,27 @@ func (c *Client) request(
 			}
 		}
 
-		if onRespErr != nil || doErr != nil {
+		if onRespErr != nil {
 			continue
 		}
 
-		if status = r.GetStatus(); status == StatusTooManyRequests || status >= 500 {
+		if doErr != nil {
+			if method == "POST" || !retryWait(ctx, i) {
+				break
+			}
+			continue
+		}
+
+		status = r.GetStatus()
+		if status == StatusTooManyRequests {
+			continue
+		}
+		if (status == 502 || status == 503 || status == 504) && method != "POST" &&
+			(c.Retries < 1 || i+1 < c.Retries) {
+			r.GetBody().Close()
+			if !retryWait(ctx, i) {
+				break
+			}
 			continue
 		}
 
@@ -281,4 +297,18 @@ func (c *Client) request(
 	}
 
 	return
+}
+
+// retryWait sleeps with exponential backoff (500ms, 1s, 2s, ... capped at 8s)
+// before attempt i+1. It returns false if ctx ends first.
+func retryWait(ctx context.Context, i uint) bool {
+	d := 500 * time.Millisecond << min(i, 4)
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }

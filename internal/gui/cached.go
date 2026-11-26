@@ -92,9 +92,42 @@ func (c *chatView) permsNow(chID discord.ChannelID) (discord.Permissions, bool) 
 		if err != nil {
 			return 0, false
 		}
-		return threadPerms(discord.CalcOverrides(*g, *parent, *m, roles), threadLocked(*ch)), true
+		perms := restrictPerms(*g, *m, me, c.me.MFA, discord.CalcOverrides(*g, *parent, *m, roles), time.Now())
+		return threadPerms(perms, threadLocked(*ch)), true
 	}
-	return discord.CalcOverrides(*g, *ch, *m, roles), true
+	return restrictPerms(*g, *m, me, c.me.MFA, discord.CalcOverrides(*g, *ch, *m, roles), time.Now()), true
+}
+
+// readOnlyPerms are what a member who can only look keeps: seeing the channel
+// and its history.
+const readOnlyPerms = discord.PermissionViewChannel | discord.PermissionReadMessageHistory
+
+// mfaModPerms are the permissions a server that requires two-factor
+// authentication for moderation takes from a member whose account has none.
+const mfaModPerms = discord.PermissionKickMembers | discord.PermissionBanMembers |
+	discord.PermissionAdministrator | discord.PermissionManageChannels | discord.PermissionManageGuild |
+	discord.PermissionManageRoles | discord.PermissionManageMessages | discord.PermissionManageThreads |
+	discord.PermissionModerateMembers
+
+// restrictPerms applies what Discord's client takes away after roles and
+// overwrites: a member still pending the server's rules screening can only
+// look, even an administrator; a timed-out member who is not the owner or an
+// administrator can only look until the timeout ends; and in a server that
+// requires two-factor authentication for moderation, a member without it
+// loses the moderation permissions, unless they own the server.
+func restrictPerms(g discord.Guild, m discord.Member, me discord.UserID, meMFA bool, perms discord.Permissions, now time.Time) discord.Permissions {
+	owner := g.OwnerID == me
+	if m.IsPending {
+		return perms & readOnlyPerms
+	}
+	if !owner && !perms.Has(discord.PermissionAdministrator) &&
+		m.CommunicationDisabledUntil.IsValid() && m.CommunicationDisabledUntil.Time().After(now) {
+		return perms & readOnlyPerms
+	}
+	if !owner && g.MFA == discord.ElevatedMFA && !meMFA {
+		perms &^= mfaModPerms
+	}
+	return perms
 }
 
 // privateChannels are the direct messages, from the cache.

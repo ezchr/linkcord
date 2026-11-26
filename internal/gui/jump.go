@@ -96,6 +96,10 @@ func (c *chatView) jumpToPresent() {
 			clear(c.richStates)
 			c.messageList.Position = layout.Position{}
 			c.requestAuthors(c.messages)
+			// Back at the present, what arrived meanwhile is seen.
+			if c.u.focused {
+				c.seen(ch)
+			}
 		})
 	}()
 }
@@ -196,6 +200,9 @@ func (c *chatView) loadNewer() {
 			// The newest are reached: new ones arrive as usual again.
 			if len(msgs) < 50 {
 				c.detached = false
+				if c.u.focused && c.selChannel != nil {
+					c.seen(c.selChannel.ID)
+				}
 			}
 		})
 	}()

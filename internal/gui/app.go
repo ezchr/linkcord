@@ -22,8 +22,10 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"github.com/ayn2op/arikawa/v3/api"
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/gateway"
+	"github.com/ayn2op/arikawa/v3/utils/httputil"
 	"github.com/ayn2op/arikawa/v3/utils/ws"
 	"github.com/ayn2op/ningen/v3"
 	"github.com/ezchr/linkcord/internal/auth"
@@ -416,6 +418,11 @@ func (u *ui) connect(token string) {
 	go func() {
 		err := st.Open(context.Background())
 		if err == nil {
+			// Once connected, the gateway can still stop for good, as when
+			// the token is revoked by a password change or a log out
+			// elsewhere. Discord's client then signs out; Linkcord did not
+			// notice and stayed on a chat that no longer updates.
+			u.watchSession(st)
 			return
 		}
 		slog.Error("failed to open session", "err", err)
@@ -447,6 +454,25 @@ func (u *ui) connect(token string) {
 	}()
 }
 
+// watchSession waits for st's gateway to stop for good after it connected:
+// a refused token signs out, as at start; anything else connects again.
+// Closing the session here, to log out or to connect again, is not acted on.
+func (u *ui) watchSession(st *ningen.State) {
+	err := st.Wait(context.Background())
+	u.post(func() {
+		if u.chat == nil || u.chat.st != st || u.chat.closed {
+			return
+		}
+		slog.Warn("the gateway stopped", "err", err)
+		if event, ok := errors.AsType[*ws.CloseEvent](err); ok && event.Code == closeCodeAuthenticationFailed {
+			u.logout("Your session expired or the token is invalid. Sign in again.")
+			return
+		}
+		u.chat.close()
+		u.connect(u.token)
+	})
+}
+
 // onReady switches to the chat once the gateway sent the ready event.
 func (u *ui) onReady(st *ningen.State, ready *gateway.ReadyEvent) {
 	if u.chat == nil || u.chat.st != st {
@@ -476,6 +502,21 @@ func (u *ui) tokenRefreshed(st *ningen.State, token string) {
 // logout closes the session, forgets the token, and shows the login with
 // errMsg, if any.
 func (u *ui) logout(errMsg string) {
+	// Discord is told the session ends, as its client does on log out, so
+	// the token stops working there too. It is not waited for: a token that
+	// was already refused, or no connection, still logs out here.
+	if u.chat != nil && u.chat.st != nil && !u.chat.demo {
+		cl := u.chat.st.Client
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			err := cl.WithContext(ctx).FastRequest("POST", api.Endpoint+"auth/logout",
+				httputil.WithJSONBody(map[string]any{"provider": nil, "voip_provider": nil}))
+			if err != nil {
+				slog.Info("Discord was not told of the log out", "err", err)
+			}
+		}()
+	}
 	if err := auth.DeleteToken(); err != nil {
 		slog.Error("failed to delete token", "err", err)
 	}

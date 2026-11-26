@@ -1161,6 +1161,8 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	c.detached = false
 	c.messageList.Position = layout.Position{}
 	clear(c.typers)
+	// Typing was announced in the channel left; the new one is told anew.
+	c.typingUntil = time.Time{}
 	clear(c.selectables)
 	clear(c.msgClicks)
 	clear(c.richStates)
@@ -1307,7 +1309,7 @@ func (c *chatView) seen(chID discord.ChannelID) {
 
 func (c *chatView) windowFocused() {
 	c.refreshCurrentChat()
-	if c.u.focused && c.selChannel != nil {
+	if c.u.focused && c.selChannel != nil && !c.detached {
 		c.seen(c.selChannel.ID)
 	}
 }
@@ -1340,12 +1342,15 @@ func (c *chatView) apply(ev gateway.Event) {
 				c.trimOpenMessages()
 			}
 			delete(c.typers, ev.Author.ID)
-			if c.u.focused {
+			// Reading older history, a new message is not seen yet: it is
+			// marked read when the chat is back at the present, as Discord
+			// only acks a chat scrolled to its end.
+			if c.u.focused && !c.detached {
 				c.seen(sel.ID)
 			}
 		}
 		if ev.Author.ID != c.me.ID && (sel == nil || ev.ChannelID != sel.ID || !c.u.focused) {
-			if !ev.GuildID.IsValid() || c.st.MessageMentions(&ev.Message) != 0 {
+			if c.notifies(&ev.Message) {
 				c.u.notify()
 			}
 		}
@@ -2300,4 +2305,34 @@ func (c *chatView) trimOpenMessages() {
 	c.messages = slices.Clone(c.messages[n:])
 	c.noOlder = false
 	c.messageList.Position.First = max(c.messageList.Position.First-n, 0)
+}
+
+// notifies is whether a new message from someone else plays the sound and
+// flashes the window, in the order Discord's client decides it: never for a
+// message sent @silent, while the user is Do Not Disturb, from someone the
+// user blocked, or in a message request; a direct message notifies unless the
+// conversation is muted (a timed mute that ended no longer counts), and a
+// server message when it mentions the user.
+func (c *chatView) notifies(m *discord.Message) bool {
+	if m.Flags&discord.SuppressNotifications != 0 {
+		return false
+	}
+	if c.status(discord.NullGuildID, c.me.ID) == discord.DoNotDisturbStatus {
+		return false
+	}
+	if c.relationship(m.Author.ID) == discord.BlockedRelationship {
+		return false
+	}
+	if m.GuildID.IsValid() {
+		return c.st.MessageMentions(m) != 0
+	}
+	for _, r := range c.friends.requests {
+		if r.ID == m.ChannelID {
+			return false
+		}
+	}
+	if c.st.MutedState != nil && c.st.MutedState.Channel(m.ChannelID) {
+		return false
+	}
+	return true
 }

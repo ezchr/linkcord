@@ -4,6 +4,7 @@ import (
 	"image"
 	"slices"
 	"strings"
+	"time"
 
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -133,12 +134,16 @@ func (c *chatView) guildPerms(guildID discord.GuildID) discord.Permissions {
 	if r, err := c.st.Cabinet.Role(guildID, discord.RoleID(guildID)); err == nil {
 		p |= r.Permissions
 	}
-	if m, err := c.st.Cabinet.Member(guildID, c.me.ID); err == nil {
+	m, err := c.st.Cabinet.Member(guildID, c.me.ID)
+	if err == nil {
 		for _, id := range m.RoleIDs {
 			if r, err := c.st.Cabinet.Role(guildID, id); err == nil {
 				p |= r.Permissions
 			}
 		}
+		// A timeout, the rules screening and the server's two-factor rule
+		// take away what roles give, as for a channel.
+		p = restrictPerms(*g, *m, c.me.ID, c.me.MFA, p, time.Now())
 	}
 	if p.Has(discord.PermissionAdministrator) {
 		return allPermissions

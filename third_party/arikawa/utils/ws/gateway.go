@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"math/rand/v2"
 	"context"
 	"encoding"
 	"errors"
@@ -83,8 +84,11 @@ type GatewayOpts struct {
 // DefaultGatewayOpts is the default event loop options.
 var DefaultGatewayOpts = GatewayOpts{
 	ReconnectDelay: func(try int) time.Duration {
-		// minimum 4 seconds
-		return time.Duration(4+(2*try)) * time.Second
+		// 1s doubling up to a 60s cap, with up to 50% random jitter so many
+		// clients don't reconnect in lockstep.
+		d := time.Second << min(try, 6)
+		d = min(d, 60*time.Second)
+		return d/2 + rand.N(d/2+1)
 	},
 	DialTimeout:           0,
 	ReconnectAttempt:      0,
@@ -110,6 +114,9 @@ type Gateway struct {
 
 	reconnect chan struct{}
 	heart     lazytime.Ticker
+	// helloSeen is set once the connection's HELLO started the heartbeat.
+	// (Added by Linkcord.)
+	helloSeen bool
 	srcOp     <-chan Op // from WS
 	outer     outerState
 	lastError error
@@ -318,8 +325,16 @@ func (g *Gateway) SetAddr(addr string) { g.ws.SetAddr(addr) }
 
 // ResetHeartbeat resets the heartbeat to be the given duration.
 func (g *Gateway) ResetHeartbeat(d time.Duration) {
+	g.helloSeen = true
 	g.heart.Reset(d)
 }
+
+// helloTimeout is how long a new connection may go without HELLO before it is
+// dropped and dialed again, as Discord's client does: a socket can open and
+// then say nothing, as right after the network changed, and without this the
+// gateway waited on it until the system gave up on the TCP connection.
+// (Added by Linkcord.)
+const helloTimeout = 30 * time.Second
 
 // SendError sends the given error wrapped in a BackgroundErrorEvent into the
 // event channel.
@@ -345,6 +360,9 @@ func (g *Gateway) spin(ctx context.Context, h Handler) {
 
 	var retryTimer lazytime.Timer
 	defer retryTimer.Stop()
+
+	var helloTimer lazytime.Timer
+	defer helloTimer.Stop()
 
 	for {
 		select {
@@ -378,6 +396,12 @@ func (g *Gateway) spin(ctx context.Context, h Handler) {
 
 		case <-g.heart.C:
 			h.SendHeartbeat(ctx)
+
+		case <-helloTimer.C:
+			if !g.helloSeen {
+				g.SendError(ConnectionError{errors.New("no HELLO from the gateway in time")})
+				g.QueueReconnect()
+			}
 
 		case <-g.reconnect:
 			// No heartbeats until the new connection says hello.
@@ -426,6 +450,10 @@ func (g *Gateway) spin(ctx context.Context, h Handler) {
 				g.SendError(ConnectionError{err})
 				return
 			}
+
+			// The new connection has helloTimeout to say HELLO.
+			g.helloSeen = false
+			helloTimer.Reset(helloTimeout)
 		}
 	}
 }

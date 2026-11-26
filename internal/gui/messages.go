@@ -234,7 +234,7 @@ func (c *chatView) grouped(i int) bool {
 		return false
 	}
 	return m.Author.ID == prev.Author.ID &&
-		isRegular(m) && isRegular(prev) && m.ReferencedMessage == nil &&
+		isRegular(m) && isRegular(prev) && m.ReferencedMessage == nil && !isCommandReply(m) &&
 		m.Timestamp.Time().Sub(prev.Timestamp.Time()) < groupWindow
 }
 
@@ -266,7 +266,21 @@ func (c *chatView) layoutEphemeralNote(gtx layout.Context, m discord.Message) la
 }
 
 func isRegular(m discord.Message) bool {
-	return m.Type == discord.DefaultMessage || m.Type == discord.InlinedReplyMessage
+	switch m.Type {
+	case discord.DefaultMessage, discord.InlinedReplyMessage,
+		// A bot's reply to a slash command or a context-menu command is a
+		// message like any other, with its embeds and components, as in
+		// Discord; it only adds a line naming the command above it.
+		discord.ChatInputCommandMessage, discord.ContextMenuCommand:
+		return true
+	}
+	return false
+}
+
+// isCommandReply is a bot's reply to a command someone used: it shows who used
+// which command above the bot's message, and never joins the message before.
+func isCommandReply(m discord.Message) bool {
+	return (m.Type == discord.ChatInputCommandMessage || m.Type == discord.ContextMenuCommand) && m.Interaction != nil
 }
 
 func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
@@ -377,8 +391,9 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 						return c.u.picture(gtx, c.authorAvatarURL(guildID, m.Author), 40, colorFor(uint64(m.Author.ID)), name, -1)
 					})
 				}
-				// Replies show the replied message above the avatar's row.
-				if m.ReferencedMessage != nil {
+				// Replies show the replied message above the avatar's row, and
+				// command replies the command that was used.
+				if m.ReferencedMessage != nil || isCommandReply(m) {
 					return layout.Inset{Top: unit.Dp(22)}.Layout(gtx, pic)
 				}
 				return pic(gtx)
@@ -386,6 +401,18 @@ func (c *chatView) layoutMessageBody(gtx layout.Context, m discord.Message, grou
 			layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				var children []layout.FlexChild
+				if isCommandReply(m) && !grouped {
+					in := m.Interaction
+					who := c.knownName(guildID, in.User.ID, nil)
+					if who == "" {
+						who = in.User.DisplayOrUsername()
+					}
+					used := who + " used /" + in.Name
+					if m.Type == discord.ContextMenuCommand {
+						used = who + " used " + in.Name
+					}
+					children = append(children, layout.Rigid(label(th, 13, colorMuted, used).Layout))
+				}
 				if ref := m.ReferencedMessage; ref != nil && !grouped {
 					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						// A click on the quote goes to the message it quotes.
@@ -536,7 +563,10 @@ func (c *chatView) mediaChildren(m discord.Message) []layout.FlexChild {
 			}))
 			continue
 		}
-		if e.Title == "" && e.Description == "" && e.Image == nil {
+		// An embed is left out only when it has nothing to show: one with
+		// only fields, an author, a footer or a thumbnail is drawn, as in
+		// Discord.
+		if embedEmpty(e) {
 			continue
 		}
 		ei := len(children)
@@ -1179,4 +1209,11 @@ func listLayout(gtx layout.Context, th *material.Theme, l *widget.List, n int, w
 	ls.Indicator.HoverColor = colorServers
 	ls.Indicator.MinorWidth = unit.Dp(6)
 	return ls.Layout(gtx, n, w)
+}
+
+// embedEmpty is an embed with no part Linkcord can draw.
+func embedEmpty(e discord.Embed) bool {
+	return e.Title == "" && e.Description == "" && e.Image == nil && len(e.Fields) == 0 &&
+		(e.Author == nil || e.Author.Name == "") && (e.Footer == nil || e.Footer.Text == "") &&
+		e.Thumbnail == nil && !e.Timestamp.IsValid()
 }

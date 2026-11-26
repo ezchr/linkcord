@@ -39,6 +39,9 @@ type scheduledMsg struct {
 	ChannelName string            `json:"channel_name"`
 	Content     string            `json:"content"`
 	At          time.Time         `json:"at"`
+	// Owner is the account that scheduled it: a message is only ever sent,
+	// or shown, while that account is signed in.
+	Owner discord.UserID `json:"owner,omitzero"`
 }
 
 // scheduleView is the window to schedule the message being written.
@@ -52,8 +55,10 @@ type scheduleView struct {
 	at       widget.Editor
 	err      string
 	cancels  map[int64]*widget.Clickable
-	// msgs are the messages waiting, of every channel.
-	msgs []scheduledMsg
+	// msgs are the messages waiting, of every channel, of the account signed
+	// in; others are those of other accounts, kept in the file untouched.
+	msgs   []scheduledMsg
+	others []scheduledMsg
 	// waiting is len(msgs), for the timer's goroutine: with none, it
 	// does not wake the window.
 	waiting atomic.Int32
@@ -79,7 +84,7 @@ func (c *chatView) saveScheduled() {
 	if c.demo {
 		return
 	}
-	data, err := json.Marshal(c.sched.msgs)
+	data, err := json.Marshal(append(slices.Clone(c.sched.msgs), c.sched.others...))
 	if err != nil {
 		return
 	}
@@ -94,7 +99,9 @@ func (c *chatView) saveScheduled() {
 // comes, until done.
 func (c *chatView) watchScheduled() {
 	if data, err := os.ReadFile(scheduledPath()); err == nil {
-		json.Unmarshal(data, &c.sched.msgs)
+		var all []scheduledMsg
+		json.Unmarshal(data, &all)
+		c.sched.msgs, c.sched.others = splitScheduled(all, c.me.ID)
 	}
 	c.sched.waiting.Store(int32(len(c.sched.msgs)))
 	go func() {
@@ -167,7 +174,7 @@ func (c *chatView) schedule(at time.Time) {
 	ch := c.selChannel
 	s.msgs = append(s.msgs, scheduledMsg{
 		ID: time.Now().UnixNano(), ChannelID: ch.ID, ChannelName: cmp0(ch.Name, c.dmName(*ch)),
-		Content: c.withMarkup(text), At: at,
+		Content: c.withMarkup(text), At: at, Owner: c.me.ID,
 	})
 	c.saveScheduled()
 	c.composer.SetText("")
@@ -378,4 +385,21 @@ func (c *chatView) layoutSchedule(gtx layout.Context) {
 	defer op.Offset(image.Pt((size.X-dims.Size.X)/2, (size.Y-dims.Size.Y)/2)).Push(gtx.Ops).Pop()
 	solid(gtx, s, dims)
 	call.Add(gtx.Ops)
+}
+
+// splitScheduled divides the file's messages into the account's own and the
+// others'. A message from before messages had an owner is taken as the
+// account's: only it could have written it then.
+func splitScheduled(all []scheduledMsg, me discord.UserID) (mine, others []scheduledMsg) {
+	for _, m := range all {
+		if !m.Owner.IsValid() {
+			m.Owner = me
+		}
+		if m.Owner == me {
+			mine = append(mine, m)
+		} else {
+			others = append(others, m)
+		}
+	}
+	return mine, others
 }
