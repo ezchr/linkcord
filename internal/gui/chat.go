@@ -195,6 +195,9 @@ type chatView struct {
 	// myStatus is the status the user chose here, kept over what the
 	// sessions say.
 	myStatus discord.Status
+	// unreadFrom is the last message read when the channel was opened; the
+	// messages after it are marked new.
+	unreadFrom discord.MessageID
 	// idle is set while the user is away from the computer, since idleSince.
 	idle      bool
 	idleSince time.Time
@@ -1167,6 +1170,11 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	clear(c.typers)
 	// Typing was announced in the channel left; the new one is told anew.
 	c.typingUntil = time.Time{}
+	// What was read before opening it, for the "new" line above the rest.
+	c.unreadFrom = 0
+	if rs := c.st.ReadState.ReadState(ch.ID); rs != nil && ch.LastMessageID > rs.LastMessageID {
+		c.unreadFrom = rs.LastMessageID
+	}
 	clear(c.selectables)
 	clear(c.msgClicks)
 	clear(c.richStates)

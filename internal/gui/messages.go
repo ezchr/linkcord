@@ -284,6 +284,39 @@ func isCommandReply(m discord.Message) bool {
 }
 
 func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
+	if !c.firstUnread(i) {
+		return c.layoutMessageOnly(gtx, i)
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(c.layoutNewLine),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutMessageOnly(gtx, i) }))
+}
+
+// firstUnread reports whether message i is the first of those unread when
+// the channel was opened, which a red line marks, as in Discord.
+func (c *chatView) firstUnread(i int) bool {
+	if !c.unreadFrom.IsValid() || c.messages[i].ID <= c.unreadFrom || c.messages[i].Author.ID == c.me.ID {
+		return false
+	}
+	return i == 0 || c.messages[i-1].ID <= c.unreadFrom
+}
+
+// layoutNewLine is the red line with "NEW" at its end.
+func (c *chatView) layoutNewLine(gtx layout.Context) layout.Dimensions {
+	return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(16), Top: unit.Dp(8), Bottom: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				h := gtx.Dp(1)
+				paint.FillShape(gtx.Ops, colorRed, clip.Rect(image.Rect(0, 0, gtx.Constraints.Max.X, h)).Op())
+				return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, h)}
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Left: unit.Dp(4)}.Layout(gtx, label(c.u.th, 11, colorRed, tr("NEW")).Layout)
+			}))
+	})
+}
+
+func (c *chatView) layoutMessageOnly(gtx layout.Context, i int) layout.Dimensions {
 	if c.blockedHidden(i) {
 		// The first of a run of them says how many, the rest hide.
 		if i > 0 && c.blockedHidden(i-1) {
