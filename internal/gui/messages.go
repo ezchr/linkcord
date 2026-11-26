@@ -284,6 +284,9 @@ func isCommandReply(m discord.Message) bool {
 }
 
 func (c *chatView) layoutMessage(gtx layout.Context, i int) layout.Dimensions {
+	if len(c.echoes) > 0 && c.isEcho(c.messages[i].ID) {
+		defer paint.PushOpacity(gtx.Ops, 0.5).Pop()
+	}
 	if !c.firstUnread(i) {
 		return c.layoutMessageOnly(gtx, i)
 	}

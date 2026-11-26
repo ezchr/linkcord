@@ -200,6 +200,8 @@ type chatView struct {
 	// unreadFrom is the last message read when the channel was opened; the
 	// messages after it are marked new.
 	unreadFrom discord.MessageID
+	// echoes are the messages shown while being sent, by nonce.
+	echoes map[string]discord.MessageID
 	// heldUnread is the channel marked unread by hand, not marked read
 	// again while it stays open.
 	heldUnread discord.ChannelID
@@ -1177,6 +1179,7 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	c.typingUntil = time.Time{}
 	// What was read before opening it, for the "new" line above the rest.
 	c.unreadFrom, c.heldUnread = 0, 0
+	clear(c.echoes)
 	if rs := c.st.ReadState.ReadState(ch.ID); rs != nil && ch.LastMessageID > rs.LastMessageID {
 		c.unreadFrom = rs.LastMessageID
 	}
@@ -1358,6 +1361,13 @@ func (c *chatView) apply(ev gateway.Event) {
 	case *gateway.MessageCreateEvent:
 		if sel != nil && ev.ChannelID == sel.ID {
 			// Over older messages, new ones wait for the jump to the present.
+			// The faded copy shown while sending gives way to it.
+			if ev.Nonce != "" && ev.Author.ID == c.me.ID {
+				if _, ok := c.echoes[ev.Nonce]; ok {
+					real := ev.Message
+					c.replaceEcho(ev.Nonce, &real)
+				}
+			}
 			if !c.detached && !slices.ContainsFunc(c.messages, func(m discord.Message) bool { return m.ID == ev.ID }) {
 				c.messages = append(c.messages, ev.Message)
 				c.trimOpenMessages()

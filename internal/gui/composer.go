@@ -884,6 +884,30 @@ func (c *chatView) send() {
 		return
 	}
 	cs.sending = len(files) > 0
+	// A message of text alone shows at once, faded, until Discord has it,
+	// as in its client.
+	echoNonce := newNonce()
+	var echoID discord.MessageID
+	if len(files) == 0 && len(parts) == 1 {
+		echoID = discord.MessageID(discord.NewSnowflake(time.Now()))
+		m := discord.Message{
+			ID: echoID, ChannelID: id, GuildID: c.selChannel.GuildID, Author: c.me,
+			Content: parts[0], Timestamp: discord.NewTimestamp(time.Now()), Nonce: echoNonce,
+		}
+		if silent {
+			m.Flags = discord.SuppressNotifications
+		}
+		if reply != nil {
+			m.Type = discord.InlinedReplyMessage
+			m.Reference = &discord.MessageReference{MessageID: reply.ID, ChannelID: id, GuildID: reply.GuildID}
+			m.ReferencedMessage = reply
+		}
+		if c.echoes == nil {
+			c.echoes = make(map[string]discord.MessageID)
+		}
+		c.echoes[echoNonce] = echoID
+		c.messages = append(c.messages, m)
+	}
 	sentBytes := new(atomic.Int64)
 	cs.upSent, cs.upTotal = sentBytes, 0
 	for _, f := range files {
@@ -902,6 +926,9 @@ func (c *chatView) send() {
 			data := api.SendMessageData{
 				Content: part,
 				Nonce:   newNonce(),
+			}
+			if i == 0 {
+				data.Nonce = echoNonce
 			}
 			if silent {
 				data.Flags = discord.SuppressNotifications
@@ -931,13 +958,21 @@ func (c *chatView) send() {
 					data.Files = append(data.Files, sendpart.File{Name: f.name, Reader: &countingReader{r: file, n: sentBytes}})
 				}
 			}
-			if _, err = c.st.SendMessageComplex(id, data); err != nil {
+			var sentMsg *discord.Message
+			if sentMsg, err = c.st.SendMessageComplex(id, data); err != nil {
 				break
+			}
+			if i == 0 && echoID.IsValid() {
+				real := *sentMsg
+				c.u.post(func() { c.replaceEcho(echoNonce, &real) })
 			}
 			sent++
 		}
 		c.u.post(func() {
 			cs.sending = false
+			if err != nil {
+				c.replaceEcho(echoNonce, nil)
+			}
 			if err == nil || c.selChannel == nil || c.selChannel.ID != id {
 				return
 			}
@@ -1107,4 +1142,34 @@ func (c *chatView) layoutUploadProgress(gtx layout.Context) layout.Dimensions {
 			return layout.Dimensions{Size: image.Pt(w, bh)}
 		}),
 	)
+}
+
+// replaceEcho swaps the faded message shown for one being sent with the one
+// Discord made of it, or takes it away if real is nil.
+func (c *chatView) replaceEcho(nonce string, real *discord.Message) {
+	id, ok := c.echoes[nonce]
+	if !ok {
+		return
+	}
+	delete(c.echoes, nonce)
+	i := slices.IndexFunc(c.messages, func(m discord.Message) bool { return m.ID == id })
+	if i < 0 {
+		return
+	}
+	if real == nil || slices.ContainsFunc(c.messages, func(m discord.Message) bool { return m.ID == real.ID }) {
+		c.messages = slices.Delete(c.messages, i, i+1)
+		return
+	}
+	c.messages[i] = *real
+}
+
+// isEcho reports whether message id is one being sent, shown before Discord
+// has it.
+func (c *chatView) isEcho(id discord.MessageID) bool {
+	for _, e := range c.echoes {
+		if e == id {
+			return true
+		}
+	}
+	return false
 }
