@@ -44,6 +44,9 @@ type VideoParams struct {
 // at, into a shared texture or a picture read back. It asks for keyframes
 // (PLI) when a picture is lost and reports how the video arrives.
 type VideoReceiver struct {
+	// rotation is the quarter turns clockwise the camera's pictures are
+	// shown at, as its video-orientation header extension tells.
+	rotation atomic.Int32
 	p VideoParams
 
 	mu        sync.Mutex
@@ -564,3 +567,13 @@ func (r *VideoReceiver) Close() {
 		r.fmu.Unlock()
 	})
 }
+
+// SetRotation sets the quarter turns clockwise the pictures are shown at.
+func (r *VideoReceiver) SetRotation(q int) {
+	if old := r.rotation.Swap(int32(q & 3)); old != int32(q&3) {
+		slog.Info("camera rotation", "quarter_turns", q&3)
+	}
+}
+
+// Rotation is the quarter turns clockwise the pictures are shown at.
+func (r *VideoReceiver) Rotation() int { return int(r.rotation.Load()) }

@@ -248,6 +248,8 @@ func newUI(w *app.Window) *ui {
 			})
 		}()
 	}
+	u.voice.muted, u.voice.deafened = settings.VoiceMuted, settings.VoiceDeafened
+	u.voice.mutedBefore = settings.VoiceMuted && !settings.VoiceDeafened
 	go u.watchNetwork()
 	// How the download of FFmpeg goes shows as the voice's messages do.
 	mediaNotify = func(s string) { u.post(func() { u.voiceInfo(s) }) }

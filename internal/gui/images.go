@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"image/color"
 	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
@@ -140,6 +141,16 @@ type images struct {
 	client   *http.Client
 	dir      string
 	lowPower bool
+
+	// colors are the primary colors of avatars (by unsigned URL) asked by
+	// avatarColor, computed once off the window's goroutine; a key with
+	// ok false is being computed.
+	colors map[string]avatarColorEntry
+}
+
+type avatarColorEntry struct {
+	c  color.NRGBA
+	ok bool
 }
 
 func newImages(u *ui) *images {
@@ -168,6 +179,58 @@ func newImages(u *ui) *images {
 		client:   &http.Client{Timeout: 30 * time.Second},
 		dir:      dir,
 		lowPower: performanceModeEnabled(),
+		colors:   make(map[string]avatarColorEntry),
+	}
+}
+
+// avatarColor returns the primary color of the picture at url as loaded at
+// size pixels (see primaryColor), and false until it is known. It is computed
+// once per picture, when it loads, or from the disk cache if it had loaded.
+func (im *images) avatarColor(url string, size int) (color.NRGBA, bool) {
+	if url == "" {
+		return color.NRGBA{}, false
+	}
+	ck := unsignedURL(url)
+	im.mu.Lock()
+	defer im.mu.Unlock()
+	if e, ok := im.colors[ck]; ok {
+		return e.c, e.ok
+	}
+	if len(im.colors) > 4096 {
+		clear(im.colors)
+	}
+	im.colors[ck] = avatarColorEntry{}
+	key := imageKey(size, url)
+	if e, ok := im.entries[key]; ok && e.state == imageReady {
+		// Loaded before anyone asked: read its copy on disk again.
+		go func() {
+			im.decode <- struct{}{}
+			img, err := im.fromDisk(stillKey(key, url))
+			if err != nil {
+				var frames []image.Image
+				if frames, _, err = im.animFromDisk(key, size); err == nil && len(frames) > 0 {
+					img = frames[0]
+				}
+			}
+			<-im.decode
+			if img == nil {
+				im.mu.Lock()
+				delete(im.colors, ck)
+				im.mu.Unlock()
+				return
+			}
+			im.setColor(ck, primaryColor(img))
+		}()
+	}
+	return color.NRGBA{}, false
+}
+
+func (im *images) setColor(ck string, c color.NRGBA) {
+	im.mu.Lock()
+	im.colors[ck] = avatarColorEntry{c: c, ok: true}
+	im.mu.Unlock()
+	if im.u != nil {
+		im.u.win.Invalidate()
 	}
 }
 
@@ -278,7 +341,28 @@ func (im *images) load(key, url string, size int, e *imageEntry) {
 	if err == nil && len(frames) == 1 {
 		img = frames[0]
 	}
+	ck := unsignedURL(url)
+	var col color.NRGBA
 	im.mu.Lock()
+	ce, wantColor := im.colors[ck]
+	im.mu.Unlock()
+	if wantColor && !ce.ok && err == nil {
+		src := img
+		if src == nil && len(frames) > 0 {
+			src = frames[0]
+		}
+		if src != nil {
+			col = primaryColor(src)
+		} else {
+			wantColor = false
+		}
+	} else {
+		wantColor = false
+	}
+	im.mu.Lock()
+	if wantColor {
+		im.colors[ck] = avatarColorEntry{c: col, ok: true}
+	}
 	switch {
 	case err != nil:
 		slog.Warn("failed to load image", "url", url, "err", err)

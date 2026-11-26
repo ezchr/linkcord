@@ -39,6 +39,9 @@ type State struct {
 	SessionID string
 	Token     string
 	Endpoint  string
+	// Video says in the identify that video is supported, so the server
+	// sends the video of other users' cameras.
+	Video bool
 }
 
 // Gateway represents a Discord Gateway Gateway connection.
@@ -203,8 +206,12 @@ func (g *gatewayImpl) sendIdentify(ctx context.Context) error {
 		SessionID: g.state.SessionID,
 		Token:     g.state.Token,
 	}
-	if !id.GuildID.IsValid() || id == (IdentifyCommand{}) {
+	if !id.GuildID.IsValid() || id.Token == "" || id.SessionID == "" {
 		return ErrMissingForIdentify
+	}
+	if g.state.Video {
+		id.Video = true
+		id.Streams = []IdentifyStream{{Type: "video", RID: "100", Quality: 100}}
 	}
 	id.MaxDAVEProtocolVersion = g.dave.MaxSupportedProtocolVersion()
 

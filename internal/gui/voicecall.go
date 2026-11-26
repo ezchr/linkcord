@@ -379,10 +379,14 @@ func (cv *callView) cardClick(id discord.UserID) *widget.Clickable {
 	return clickOf(cv.cards, id)
 }
 
-// cardColor is the color of the card of a user without video: their color,
-// darkened as Discord does.
-func cardColor(id discord.UserID) color.NRGBA {
-	col := colorFor(uint64(id))
+// cardColor is the color of the card of a user without video. Discord fills
+// it with the primary color of their avatar as it is (VideoBackground); until
+// that is known, their own color darkened.
+func (c *chatView) cardColor(guildID discord.GuildID, vs discord.VoiceState, px int) color.NRGBA {
+	if col, ok := c.u.images.avatarColor(c.voiceAvatarURL(guildID, vs), px); ok {
+		return col
+	}
+	col := colorFor(uint64(vs.UserID))
 	mix := func(v uint8) uint8 { return uint8(int(v) * 45 / 100) }
 	return color.NRGBA{R: mix(col.R), G: mix(col.G), B: mix(col.B), A: 0xff}
 }
@@ -404,7 +408,7 @@ func (c *chatView) layoutCallCard(gtx layout.Context, guildID discord.GuildID, v
 	// Green while they speak, blue while a sound they played sounds.
 	ringCol, speaking := c.voiceRingColor(gtx, vs.UserID)
 	rr := clip.UniformRRect(image.Rectangle{Max: size}, radius)
-	paint.FillShape(gtx.Ops, cardColor(vs.UserID), rr.Op(gtx.Ops))
+	paint.FillShape(gtx.Ops, c.cardColor(guildID, vs, min(size.Y*2/5, gtx.Dp(96), size.X*2/5)), rr.Op(gtx.Ops))
 
 	name := c.memberName(guildID, vs.UserID, vs.Member)
 	if vs.UserID == c.me.ID {

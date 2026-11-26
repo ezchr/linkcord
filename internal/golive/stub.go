@@ -3,6 +3,7 @@
 package golive
 
 import (
+	"sync/atomic"
 	"context"
 	"errors"
 	"image"
@@ -87,6 +88,9 @@ type VideoParams struct {
 
 // VideoReceiver receives a video; nothing is decoded here.
 type VideoReceiver struct {
+	// rotation is the quarter turns clockwise the camera's pictures are
+	// shown at, as its video-orientation header extension tells.
+	rotation atomic.Int32
 	video, rtx uint32
 	view       uint64
 	viewAt     time.Time
@@ -125,3 +129,9 @@ type transportFeedback struct{}
 func newTransportFeedback() *transportFeedback                  { return &transportFeedback{} }
 func (*transportFeedback) Observe(uint16, []byte, time.Time)    {}
 func (*transportFeedback) Feedback(sender, media uint32) []byte { return nil }
+
+// SetRotation sets the quarter turns clockwise the pictures are shown at.
+func (r *VideoReceiver) SetRotation(q int) { r.rotation.Store(int32(q & 3)) }
+
+// Rotation is the quarter turns clockwise the pictures are shown at.
+func (r *VideoReceiver) Rotation() int { return int(r.rotation.Load()) }

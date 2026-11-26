@@ -203,6 +203,13 @@ func (c *cameras) handle(p *udp.MediaPacket) bool {
 		recv = cam.recv
 	}
 	c.mu.Unlock()
+	if recv != nil && pt == payloadH264 {
+		if q, ok := videoOrientation(p); ok {
+			if rr, ok := recv.(interface{ SetRotation(int) }); ok {
+				rr.SetRotation(q)
+			}
+		}
+	}
 	if recv != nil && len(p.Payload) > 0 {
 		recv.Push(p.SSRC(), p.Sequence(), p.Timestamp(), p.Marker(), p.Payload)
 	}
@@ -287,4 +294,32 @@ func (c *cameras) sendWants(force bool) {
 	if err := c.session.Send(ctx, &cmd); err != nil {
 		slog.Debug("could not send media sink wants", "err", err)
 	}
+}
+
+// extVideoOrientation is the ID the voice server gives the
+// urn:3gpp:video-orientation header extension of camera video.
+const extVideoOrientation = 4
+
+// videoOrientation reads the quarter turns clockwise a picture is to be
+// shown at from p's one-byte header extensions, if it has them.
+func videoOrientation(p *udp.MediaPacket) (int, bool) {
+	if p.ExtensionProfile() != 0xBEDE {
+		return 0, false
+	}
+	e := p.Extension
+	for i := 0; i < len(e); {
+		if e[i] == 0 {
+			i++
+			continue
+		}
+		id, n := int(e[i]>>4), int(e[i]&0x0F)+1
+		if id == 15 || i+1+n > len(e) {
+			return 0, false
+		}
+		if id == extVideoOrientation {
+			return int(e[i+1] & 3), true
+		}
+		i += 1 + n
+	}
+	return 0, false
 }

@@ -84,7 +84,8 @@ func (c *chatView) layoutLostVoice(gtx layout.Context) layout.Dimensions {
 	if v.ch == nil {
 		return layout.Dimensions{}
 	}
-	if v.dismissed.Clicked(gtx) {
+	// Joining a call oneself makes the bar moot.
+	if v.dismissed.Clicked(gtx) || c.u.voiceStatus().Joined {
 		v.ch = nil
 		return layout.Dimensions{}
 	}

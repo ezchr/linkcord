@@ -633,6 +633,10 @@ func (u *ui) toggleVoice(deafen bool) {
 			v.deafened = false
 		}
 	}
+	if u.app.VoiceMuted != v.muted || u.app.VoiceDeafened != v.deafened {
+		u.app.VoiceMuted, u.app.VoiceDeafened = v.muted, v.deafened
+		u.saveAppSettings()
+	}
 	switch {
 	case deafen && v.deafened:
 		u.playSound(dcsound.Deafen)

@@ -26,6 +26,17 @@ type IdentifyCommand struct {
 	Token     string            `json:"token"`
 	// MaxDAVEProtocolVersion is the highest DAVE protocol version supported, 0 being none.
 	MaxDAVEProtocolVersion int `json:"max_dave_protocol_version"`
+	// Video and Streams say the client can take video, as Discord's
+	// clients do; without them the server sends no cameras.
+	Video   bool             `json:"video,omitempty"`
+	Streams []IdentifyStream `json:"streams,omitempty"`
+}
+
+// IdentifyStream is a stream told in IdentifyCommand.
+type IdentifyStream struct {
+	Type    string `json:"type"`
+	RID     string `json:"rid"`
+	Quality int    `json:"quality"`
 }
 
 // SelectProtocolCommand is a command for Op 1.

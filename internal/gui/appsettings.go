@@ -89,6 +89,10 @@ type appSettings struct {
 	// disconnects the user, VoiceNarrator says aloud who joins and leaves
 	// it, and NoVoiceStats stops counting the time in voice.
 	VoiceRejoin   bool `json:"voice_rejoin,omitempty"`
+	// VoiceMuted and VoiceDeafened keep mute and deafen across restarts,
+	// as Discord does.
+	VoiceMuted    bool `json:"voice_muted,omitempty"`
+	VoiceDeafened bool `json:"voice_deafened,omitempty"`
 	VoiceNarrator bool `json:"voice_narrator,omitempty"`
 	NoVoiceStats  bool `json:"no_voice_stats,omitempty"`
 	// ShowHiddenChannels lists the channels the user may not see too,

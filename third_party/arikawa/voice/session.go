@@ -451,7 +451,9 @@ func (s *Session) reconnectCtx(ctx context.Context) error {
 	s.ensureClosed()
 
 	ws.WSDebug("Start gateway.")
-	s.gateway = voicegateway.New(s.state, s.DAVE)
+	st := s.state
+	st.Video = len(s.Codecs) > 0
+	s.gateway = voicegateway.New(st, s.DAVE)
 
 	// Open the voice gateway. The function will block until Ready is received.
 	gwctx, gwcancel := context.WithCancel(context.Background())

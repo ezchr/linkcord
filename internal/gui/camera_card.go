@@ -2,14 +2,15 @@ package gui
 
 import (
 	"image"
+	"math"
 	"time"
 
+	"gioui.org/f32"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
-	"gioui.org/widget"
 
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ezchr/linkcord/internal/golive"
@@ -88,7 +89,13 @@ func (c *chatView) layoutCameraCard(gtx layout.Context, vs discord.VoiceState, s
 		// Their camera is on, but no video has been told of yet.
 		return false, c.cameraNote(gtx, "Camera loading…", size, y)
 	}
-	r.SetView(size.X, size.Y)
+	// A turned camera is decoded at the size it is shown at turned back.
+	turned := r.Rotation()&1 == 1
+	if turned {
+		r.SetView(size.Y, size.X)
+	} else {
+		r.SetView(size.X, size.Y)
+	}
 	frame := c.cameraFrame(vs.UserID, r)
 	if frame == nil {
 		// Asked for again while the card shows.
@@ -107,10 +114,24 @@ func (c *chatView) layoutCameraCard(gtx layout.Context, vs discord.VoiceState, s
 	if b.X <= 0 || b.Y <= 0 {
 		return true, nil
 	}
-	scale := min(float32(size.X)/float32(b.X), float32(size.Y)/float32(b.Y)) / gtx.Metric.PxPerDp
-	layout.Center.Layout(igtx, func(gtx layout.Context) layout.Dimensions {
-		return widget.Image{Src: *frame, Fit: widget.Contain, Position: layout.Center, Scale: scale}.Layout(gtx)
-	})
+	q := r.Rotation()
+	if q&1 == 1 {
+		b.X, b.Y = b.Y, b.X
+	}
+	s := min(float32(size.X)/float32(b.X), float32(size.Y)/float32(b.Y))
+	// The picture is drawn turned about its middle, which goes to the
+	// card's middle.
+	src := frame.Size()
+	w, h := float32(src.X)*s, float32(src.Y)*s
+	t := f32.AffineId().
+		Scale(f32.Point{}, f32.Pt(s, s)).
+		Offset(f32.Pt(-w/2, -h/2)).
+		Rotate(f32.Point{}, float32(q)*math.Pi/2).
+		Offset(f32.Pt(float32(size.X)/2, float32(size.Y)/2))
+	defer op.Affine(t).Push(gtx.Ops).Pop()
+	frame.Filter = paint.FilterLinear
+	frame.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
 	return true, nil
 }
 
