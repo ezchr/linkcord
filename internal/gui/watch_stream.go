@@ -280,7 +280,7 @@ func (c *chatView) layoutWatchedCard(gtx layout.Context, vs discord.VoiceState, 
 		igtx.Constraints = layout.Exact(size)
 		b := frame.Size()
 		scale := min(float32(size.X)/float32(b.X), float32(size.Y)/float32(b.Y)) / gtx.Metric.PxPerDp
-		widget.Image{Src: *frame, Fit: widget.Contain, Scale: scale}.Layout(igtx)
+		widget.Image{Src: *frame, Fit: widget.Contain, Position: layout.Center, Scale: scale}.Layout(igtx)
 		if s.hover.Update(gtx.Source) {
 			c.layoutStreamInfo(gtx, s)
 		}

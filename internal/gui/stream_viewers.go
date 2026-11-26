@@ -63,11 +63,17 @@ func (c *chatView) layoutStreamViewers(gtx layout.Context, guildID discord.Guild
 			s, step := gtx.Dp(20), gtx.Dp(14)
 			for i := n - 1; i >= 0; i-- {
 				id := ids[i]
+				// Viewers are mostly the server's members, kept as members
+				// rather than users; one not known yet is asked for.
 				user := discord.User{ID: id}
-				if u, err := c.st.Cabinet.User(id); err == nil {
-					user = *u
-				} else if id == c.me.ID {
+				if id == c.me.ID {
 					user = c.me
+				} else if m, err := c.st.Cabinet.Member(guildID, id); guildID.IsValid() && err == nil {
+					user = m.User
+				} else if u, err := c.st.Cabinet.User(id); err == nil {
+					user = *u
+				} else if guildID.IsValid() && !c.demo {
+					c.st.MemberState.RequestMember(guildID, id)
 				}
 				t := op.Offset(image.Pt(i*step, 0)).Push(gtx.Ops)
 				c.u.picture(gtx, c.authorAvatarURL(guildID, user), 20, colorFor(uint64(id)), user.DisplayOrUsername(), -1)

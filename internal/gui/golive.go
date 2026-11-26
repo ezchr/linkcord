@@ -336,7 +336,7 @@ func (c *chatView) layoutSourceCard(gtx layout.Context, i int) layout.Dimensions
 					st := rr.Push(gtx.Ops)
 					igtx := gtx
 					igtx.Constraints = layout.Exact(r.Max)
-					widget.Image{Src: img, Fit: widget.Contain, Scale: 1 / gtx.Metric.PxPerDp}.Layout(igtx)
+					widget.Image{Src: img, Fit: widget.Contain, Position: layout.Center, Scale: 1 / gtx.Metric.PxPerDp}.Layout(igtx)
 					st.Pop()
 				}
 				switch {
