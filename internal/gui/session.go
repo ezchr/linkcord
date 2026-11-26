@@ -2,6 +2,7 @@ package gui
 
 import (
 	"log/slog"
+	"time"
 
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/gateway"
@@ -96,12 +97,22 @@ func newState(token string) *ningen.State {
 	// kept between starts, as a browser does.
 	sess.Client = http.NewPersistentClient(token)
 	cab := defaultstore.New()
-	cab.MessageStore = newRecentStore(storeMessagesPerChannel, storeChannels)
+	messages := newRecentStore(storeMessagesPerChannel, storeChannels)
+	cab.MessageStore = messages
+	// Members and presences of servers not shown for a while are let go
+	// (memory_prune.go); the stores note which servers they hold.
+	tracker := &guildTracker{guilds: make(map[discord.GuildID]time.Time)}
+	cab.MemberStore = &prunedMembers{MemberStore: defaultstore.NewMember(), tracker: tracker}
+	cab.PresenceStore = &prunedPresences{PresenceStore: defaultstore.NewPresence(), tracker: tracker}
 	st := ningen.FromState(state.NewFromSession(sess, cab))
 	st.StateLog = func(err error) {
 		slog.Error("state log", "err", err)
 	}
 	st.OnRequest = append(st.OnRequest, http.PageHeaders(currentPage))
 	st.Client.Client.OnResponse = append(st.Client.Client.OnResponse, noteRateLimit)
+	// The demo has no gateway to ask for members again, so it keeps them.
+	if token != "demo" {
+		watchMemory(st, messages, tracker)
+	}
 	return st
 }

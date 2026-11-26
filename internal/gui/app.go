@@ -664,15 +664,23 @@ func (u *ui) quit() {
 }
 
 // tuneMemory bounds Go's heap. By default it lets the heap grow to twice what
-// is in use before collecting; Linkcord's live data is some 200 MB, and a
-// desktop program that sits open all day is better off collecting sooner:
-// at half again (GOGC 50), and harder near 512 MB in all. A GOGC or
-// GOMEMLIMIT set in the environment is left as it is.
+// is in use before collecting. A desktop program that sits open all day is
+// better off collecting a little sooner: at 75% over the live heap, with a
+// soft limit of 320 MB in all that makes collection harder past it.
+//
+// Measured with a synthetic heap and heavy allocation (60 to 150 MB live):
+// GOGC 50 spent about twice the GC CPU of GOGC 100 to save 35 to 70 MB;
+// GOGC 75 sits between, at some 35% less GC CPU than 50 for 15 to 30 MB
+// more. A 256 MB limit with 150 MB live had the collector run nearly all the
+// time (3.6 times the GC CPU) to save 20 MB, so the limit is a ceiling for
+// spikes, not what keeps the heap small; letting go of the state of servers
+// and channels not shown does that (memory_prune.go). A GOGC or GOMEMLIMIT
+// set in the environment is left as it is.
 func tuneMemory() {
 	if os.Getenv("GOGC") == "" {
-		debug.SetGCPercent(50)
+		debug.SetGCPercent(75)
 	}
 	if os.Getenv("GOMEMLIMIT") == "" {
-		debug.SetMemoryLimit(512 << 20)
+		debug.SetMemoryLimit(320 << 20)
 	}
 }
