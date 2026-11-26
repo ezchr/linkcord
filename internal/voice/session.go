@@ -3,10 +3,10 @@
 package voice
 
 import (
-	"fmt"
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"sync"
@@ -177,7 +177,7 @@ type Session struct {
 	speaking map[discord.UserID]bool
 	// heardAt is when each user's last voice packet came, for whoever stops
 	// sending without a last silent frame not to stay shown speaking.
-	heardAt map[discord.UserID]time.Time
+	heardAt  map[discord.UserID]time.Time
 	speakers map[uint32]*speaker
 	// volumes are how loud the users not played as they are sent are played, 1 being as they are sent.
 	volumes map[discord.UserID]float32
@@ -220,11 +220,13 @@ type Session struct {
 	// not got back. recovering is set while it is being got back, and
 	// recoveredAt is when it last was, in Unix nanoseconds; deadSince is
 	// since when the watchdog has seen the connection dead.
-	lost        chan error
-	recovering  atomic.Bool
+	lost       chan error
+	recovering atomic.Bool
+	// userLeft is set when the user leaves, which stops joining again.
+	userLeft atomic.Bool
 	// dropped is set when Discord said the connection is no longer in the
 	// channel, though it may look alive.
-	dropped atomic.Bool
+	dropped     atomic.Bool
 	recoveredAt atomic.Int64
 	deadSince   time.Time
 }
@@ -258,6 +260,13 @@ var recoverDelay = 2 * time.Second
 // at once, the call ends rather than rejoin forever.
 const recoverEvery = 30 * time.Second
 
+// rejoinTries and rejoinWait are how often and how far apart joining again
+// is tried: a minute, the time the main gateway takes at most to reconnect.
+var (
+	rejoinTries = 20
+	rejoinWait  = 3 * time.Second
+)
+
 // connectionLost gets the call back, by joining the channel again, once the
 // voice connection is lost; it ends the call, which Lost tells, when that
 // fails or the connection was lost again right after.
@@ -282,12 +291,31 @@ func (s *Session) connectionLost(why error) {
 			return
 		}
 		s.recoveredAt.Store(time.Now().UnixNano())
+		s.userLeft.Store(false)
 		slog.Warn("voice connection lost; joining the voice channel again", "err", why, "channel", status.ChannelID)
-		if err := s.rejoinChannel(status); err != nil {
-			s.tellLost(fmt.Errorf("%w; joining again failed: %v", why, err))
+		// The main gateway often drops at the same moment, which is why the
+		// voice was disconnected: try again while it reconnects.
+		var err error
+		for try := 0; try < rejoinTries; try++ {
+			if try > 0 {
+				time.Sleep(rejoinWait)
+				// The user left, or joined a channel themselves, meanwhile.
+				if s.userLeft.Load() || s.Status().Joined {
+					return
+				}
+			}
+			if err = s.rejoinChannel(status); err == nil {
+				return
+			}
+			slog.Warn("joining the voice channel again failed; trying again", "err", err, "try", try+1)
 		}
+		s.tellLost(fmt.Errorf("%w; joining again failed: %v", why, err))
 	}()
 }
+
+// LeftByUser says the user left the call, so a lost connection is not
+// joined again.
+func (s *Session) LeftByUser() { s.userLeft.Store(true) }
 
 // tellLost tells Lost why the call ended, unless what it was last told was
 // not read yet.

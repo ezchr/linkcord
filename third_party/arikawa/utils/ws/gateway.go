@@ -383,6 +383,9 @@ func (g *Gateway) spin(ctx context.Context, h Handler) {
 			}
 
 			if data, ok := op.Data.(*CloseEvent); ok {
+				// Why the server closed is kept in the log. (Changed by
+				// Linkcord.)
+				WSError(fmt.Errorf("websocket closed by the server: %w", data))
 				if g.opts.ErrorIsFatalClose(data) {
 					// Don't wrap the error, but instead, just pipe it as-is
 					// through the channel.

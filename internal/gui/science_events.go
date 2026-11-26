@@ -1,7 +1,6 @@
 package gui
 
 import (
-	"context"
 	"encoding/json"
 	"math/rand/v2"
 	"strconv"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/gateway"
-	"github.com/ayn2op/arikawa/v3/utils/ws"
 	"github.com/ayn2op/ningen/v3"
 )
 
@@ -142,29 +140,16 @@ func (c *chatView) trackReady(guilds, channels int) {
 	}
 }
 
-// qosCommand is op 40, QOS_HEARTBEAT, which the web client sends with each
-// session heartbeat.
-type qosCommand struct {
-	Seq int `json:"seq"`
-	QoS struct {
-		Active  bool     `json:"active"`
-		Ver     int      `json:"ver"`
-		Reasons []string `json:"reasons"`
-	} `json:"qos"`
-}
 
-func (*qosCommand) Op() ws.OpCode           { return 40 }
-func (*qosCommand) EventType() ws.EventType { return "" }
-
-// watchHeartbeat sends client_heartbeat and QOS_HEARTBEAT every 15 minutes
-// while the client is active, foregrounded or in a call, as the web
-// client's session heartbeat scheduler does.
+// watchHeartbeat tracks client_heartbeat every 15 minutes while the client
+// is active, foregrounded or in a call, as the web client's session
+// heartbeat scheduler does. Op 40 is not sent here: in the web client it is
+// the gateway heartbeat itself, carrying the last sequence number.
 func (c *chatView) watchHeartbeat() func() {
 	stop := make(chan struct{})
 	go func() {
 		t := time.NewTicker(15 * time.Minute)
 		defer t.Stop()
-		seq := 0
 		for {
 			select {
 			case <-stop:
@@ -194,15 +179,6 @@ func (c *chatView) watchHeartbeat() func() {
 					"is_system_locked":         false,
 					"uses_client_mods":         false,
 				}, "", 0)
-				seq++
-				q := &qosCommand{Seq: seq}
-				q.QoS.Active, q.QoS.Ver, q.QoS.Reasons = true, 31, reasons
-				st := c.st
-				go func() {
-					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-					defer cancel()
-					st.SendGateway(ctx, q)
-				}()
 			})
 		}
 	}()

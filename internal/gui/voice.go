@@ -615,6 +615,7 @@ func (u *ui) leaveVoice() {
 	}
 	if s := v.session; s != nil {
 		go func() {
+			s.LeftByUser()
 			if err := s.Leave(); err != nil {
 				u.post(func() { u.voiceFailed("Could not leave the voice channel", err) })
 			}

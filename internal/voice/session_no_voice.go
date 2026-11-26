@@ -120,3 +120,6 @@ func (*Session) SetVideoBackend(VideoBackend) {}
 
 // Camera is nil: no camera is shown.
 func (*Session) Camera(discord.UserID) VideoReceiver { return nil }
+
+// LeftByUser says the user left the call.
+func (s *Session) LeftByUser() {}
