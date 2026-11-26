@@ -10,6 +10,7 @@ import (
 	mrand "math/rand/v2"
 	"net/http"
 	"runtime"
+	"runtime/metrics"
 	"sync"
 	"time"
 
@@ -174,8 +175,6 @@ func (s *science) track(typ string, props map[string]any, key string, every time
 	if s.off != nil && s.off() {
 		return
 	}
-	var mem runtime.MemStats
-	runtime.ReadMemStats(&mem)
 	features, cpu, cpuOK := currentDeviceProps()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -191,7 +190,7 @@ func (s *science) track(typ string, props map[string]any, key string, every time
 		"rendered_locale":             lchttp.Locale(),
 		"uptime_app":                  int(time.Since(s.started).Seconds()),
 		"cpu_core_count":              runtime.NumCPU(),
-		"client_performance_memory":   mem.Sys / 1024,
+		"client_performance_memory":   memoryKB(),
 		"launch_signature":            lchttp.LaunchSignature(),
 		"accessibility_features":      features,
 	}
@@ -370,4 +369,27 @@ func (s *science) heartbeatSession() string {
 		return s.sessionID
 	}
 	return lchttp.HeartbeatSessionID()
+}
+
+// memKB caches the memory the Go runtime holds, in KB, read at most every
+// few seconds: runtime/metrics reads it without stopping the program, which
+// runtime.ReadMemStats does.
+var memKB struct {
+	sync.Mutex
+	at time.Time
+	kb uint64
+}
+
+func memoryKB() uint64 {
+	memKB.Lock()
+	defer memKB.Unlock()
+	if time.Since(memKB.at) > 5*time.Second {
+		s := []metrics.Sample{{Name: "/memory/classes/total:bytes"}}
+		metrics.Read(s)
+		if s[0].Value.Kind() == metrics.KindUint64 {
+			memKB.kb = s[0].Value.Uint64() / 1024
+		}
+		memKB.at = time.Now()
+	}
+	return memKB.kb
 }
