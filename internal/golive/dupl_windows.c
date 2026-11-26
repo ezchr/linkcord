@@ -78,7 +78,10 @@ struct lc_dupl {
 	ID3D11DeviceContext *ctx;
 	IDXGIOutputDuplication *dup;
 	// wgc captures instead of dup, for the graphics card, where Windows can.
+	// With hwnd, it captures that window, its device on the graphics card of
+	// the screen at x, y, and nothing is duplicated when it cannot.
 	lc_wgc *wgc;
+	uintptr_t hwnd;
 	ID3D11Texture2D *staging;
 	int sw, sh;
 	// frame is the last picture, BGRA, fw by fh with rows fw*4 bytes apart.
@@ -159,6 +162,12 @@ static HRESULT duplicate(lc_dupl *d) {
 				d->gen++;
 				// The encoder's threads use the device too.
 				lc_mt_protect((IUnknown *)d->dev);
+			}
+			if (SUCCEEDED(hr) && d->hwnd) {
+				d->wgc = lc_wgc_open_window(d->dev, d->hwnd);
+				hr = d->wgc ? S_OK : E_NOTIMPL;
+				IDXGIOutput_Release(o);
+				break;
 			}
 			if (SUCCEEDED(hr) && d->gpu && (d->wgc = lc_wgc_open(d->dev, od.Monitor))) {
 				IDXGIOutput_Release(o);
@@ -406,7 +415,10 @@ struct lc_gpucap {
 	int x, y; // a screen's top left
 	int cursor;
 	lc_dupl *d;
-	int dmx, dmy; // the top left of the screen d duplicates
+	int dmx, dmy; // the top left of the screen d duplicates, or of the window
+	// wwin is 1 while d captures the window itself, by Windows.Graphics.Capture,
+	// and -1 once that could not be: then it is cropped from the screen.
+	int wwin;
 	int devgen;   // d's device the textures below are of
 	int gen;      // counts the devices used, for the encoder
 	// comp is the picture with the pointer drawn, of the whole screen; the
@@ -632,6 +644,71 @@ static int gpu_pointer_moved(lc_gpucap *g) {
 
 int lc_window_uncovered(uintptr_t hwnd, int sx, int sy, int w, int h);
 
+typedef HRESULT(WINAPI *dwm_attr_fn)(HWND, DWORD, void *, DWORD);
+
+// window_frame is the window's bounds on the desktop as the compositor draws
+// it, without its shadow: what Windows.Graphics.Capture pictures.
+static int window_frame(HWND hwnd, RECT *r) {
+	static dwm_attr_fn attr;
+	static int loaded;
+	if (!loaded) {
+		loaded = 1;
+		HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
+		if (dwm) {
+			attr = (dwm_attr_fn)GetProcAddress(dwm, "DwmGetWindowAttribute");
+		}
+	}
+	if (attr && SUCCEEDED(attr(hwnd, 9 /* DWMWA_EXTENDED_FRAME_BOUNDS */, r, sizeof *r))) {
+		return 1;
+	}
+	return GetWindowRect(hwnd, r);
+}
+
+// gpu_window_wgc captures the window g->hwnd itself, where Windows can: covered
+// or across screens, it is pictured all the same. It returns what
+// lc_gpucap_grab does, with the client area's place in the picture at sx, sy,
+// or -3 when the window is to be cropped from the screen instead.
+static int gpu_window_wgc(lc_gpucap *g, HWND hwnd, int *sx, int *sy) {
+	if (g->wwin < 0) {
+		return -3;
+	}
+	if (!g->d) {
+		MONITORINFO mi;
+		memset(&mi, 0, sizeof mi);
+		mi.cbSize = sizeof mi;
+		if (!GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) {
+			g->wwin = -1;
+			return -3;
+		}
+		g->d = lc_dupl_open(mi.rcMonitor.left, mi.rcMonitor.top);
+		g->d->gpu = 1;
+		g->d->hwnd = g->hwnd;
+		g->devgen = -1;
+		if (poll(g->d) < 0 || !g->d->wgc) {
+			// Windows 10, LINKCORD_NO_WGC, or a window it will not capture.
+			lc_dupl_close(g->d);
+			g->d = NULL;
+			g->devgen = -1;
+			g->wwin = -1;
+			return -3;
+		}
+		g->wwin = 1;
+	} else if (poll(g->d) < 0) {
+		return -1;
+	}
+	RECT f;
+	POINT so = {0, 0};
+	if (!window_frame(hwnd, &f) || !ClientToScreen(hwnd, &so)) {
+		return 0;
+	}
+	// The pointer is placed against the window's frame, the picture's corner.
+	g->dmx = f.left;
+	g->dmy = f.top;
+	*sx = so.x > f.left ? so.x - f.left : 0;
+	*sy = so.y > f.top ? so.y - f.top : 0;
+	return g->d->have && g->d->gframe ? 1 : 0;
+}
+
 int lc_gpucap_grab(lc_gpucap *g, int *w, int *h, int *changed, int *gone) {
 	*gone = 0;
 	*changed = 1;
@@ -649,6 +726,18 @@ int lc_gpucap_grab(lc_gpucap *g, int *w, int *h, int *changed, int *gone) {
 		if (IsIconic(hwnd) || !GetClientRect(hwnd, &r) || r.right <= 0 || r.bottom <= 0) {
 			lc_dpi_restore(dpi);
 			return 0;
+		}
+		if (g->wwin >= 0) {
+			int wr = gpu_window_wgc(g, hwnd, &sx, &sy);
+			if (wr != -3) {
+				lc_dpi_restore(dpi);
+				if (wr <= 0) {
+					return wr;
+				}
+				sw = r.right;
+				sh = r.bottom;
+				goto picture;
+			}
 		}
 		POINT so = {0, 0};
 		ClientToScreen(hwnd, &so);
@@ -696,6 +785,7 @@ int lc_gpucap_grab(lc_gpucap *g, int *w, int *h, int *changed, int *gone) {
 	if (r == 0 || !g->d->gframe) {
 		return 0;
 	}
+picture:
 	if (g->devgen != g->d->gen) {
 		// A new device, as after a change of resolution: everything anew.
 		gpu_release(g);
@@ -707,7 +797,15 @@ int lc_gpucap_grab(lc_gpucap *g, int *w, int *h, int *changed, int *gone) {
 		sw = fw;
 		sh = fh;
 	}
-	if (sx + sw > fw || sy + sh > fh) {
+	if (g->wwin > 0) {
+		// While the window is resized, its picture may lag behind it: what is
+		// there of the client area is shared.
+		if (sx >= fw || sy >= fh) {
+			return 0;
+		}
+		sw = sx + sw > fw ? fw - sx : sw;
+		sh = sy + sh > fh ? fh - sy : sh;
+	} else if (sx + sw > fw || sy + sh > fh) {
 		return -2;
 	}
 	int fresh = 0;
@@ -876,8 +974,12 @@ void lc_com_release(void *p) {
 }
 
 // lc_gpucap_wgc reports whether Windows.Graphics.Capture takes the pictures.
+// It is 2 when it captures the window itself.
 int lc_gpucap_wgc(lc_gpucap *g) {
-	return g->d && g->d->wgc;
+	if (!g->d || !g->d->wgc) {
+		return 0;
+	}
+	return g->d->hwnd ? 2 : 1;
 }
 
 int lc_gpucap_gen(lc_gpucap *g) {

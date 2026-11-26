@@ -188,7 +188,10 @@ func (g *gpuCapture) close() { C.lc_gpucap_close(g.g) }
 
 // method names how pictures are taken.
 func (g *gpuCapture) method() string {
-	if C.lc_gpucap_wgc(g.g) != 0 {
+	switch C.lc_gpucap_wgc(g.g) {
+	case 2:
+		return "windows graphics capture (window), converted by the graphics card"
+	case 1:
 		return "windows graphics capture, converted by the graphics card"
 	}
 	return "desktop duplication, converted by the graphics card"

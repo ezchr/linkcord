@@ -1,6 +1,6 @@
 //go:build windows && !no_voice
 
-// Capturing a screen with Windows.Graphics.Capture, which Windows 10 2004 and
+// Capturing a screen or a window with Windows.Graphics.Capture, which Windows 10 2004 and
 // later have. Unlike desktop duplication it is handed every picture the
 // compositor makes, video played in full screen too. It is WinRT, used here
 // through its vtables and loaded when needed, so that Linkcord starts on
@@ -50,6 +50,7 @@ typedef HRESULT(STDMETHODCALLTYPE *m_out)(void *, void **);
 typedef HRESULT(STDMETHODCALLTYPE *m_size)(void *, lc_size *);
 typedef HRESULT(STDMETHODCALLTYPE *m_flag)(void *, unsigned char);
 typedef HRESULT(STDMETHODCALLTYPE *m_for_monitor)(void *, HMONITOR, REFIID, void **);
+typedef HRESULT(STDMETHODCALLTYPE *m_for_window)(void *, HWND, REFIID, void **);
 typedef HRESULT(STDMETHODCALLTYPE *m_pool_new)(void *, void *, int, int, lc_size, void **);
 typedef HRESULT(STDMETHODCALLTYPE *m_pool_recreate)(void *, void *, int, int, lc_size);
 typedef HRESULT(STDMETHODCALLTYPE *m_session_new)(void *, void *, void **);
@@ -138,7 +139,8 @@ void lc_wgc_close(lc_wgc *c) {
 	free(c);
 }
 
-lc_wgc *lc_wgc_open(void *dev, void *monitor) {
+// wgc_open captures the window hwnd, or else the screen monitor.
+static lc_wgc *wgc_open(void *dev, HWND hwnd, HMONITOR monitor) {
 	if (GetEnvironmentVariableW(L"LINKCORD_NO_WGC", NULL, 0) != 0 || !wgc_load()) {
 		return NULL;
 	}
@@ -152,7 +154,8 @@ lc_wgc *lc_wgc_open(void *dev, void *monitor) {
 	static const WCHAR item[] = L"Windows.Graphics.Capture.GraphicsCaptureItem";
 	static const WCHAR pool[] = L"Windows.Graphics.Capture.Direct3D11CaptureFramePool";
 	if (FAILED(factory(item, (UINT32)(sizeof item / sizeof item[0] - 1), &lc_IID_ItemInterop, &interop)) ||
-	    FAILED(LC_CALL(interop, 4, m_for_monitor, (HMONITOR)monitor, &lc_IID_Item, &c->item)) ||
+	    FAILED(hwnd ? LC_CALL(interop, 3, m_for_window, hwnd, &lc_IID_Item, &c->item)
+	                : LC_CALL(interop, 4, m_for_monitor, monitor, &lc_IID_Item, &c->item)) ||
 	    FAILED(LC_CALL(c->item, 7, m_size, &c->size)) ||
 	    FAILED(factory(pool, (UINT32)(sizeof pool / sizeof pool[0] - 1), &lc_IID_PoolStatics2, &statics)) ||
 	    FAILED(LC_CALL(statics, 6, m_pool_new, c->device, LC_BGRA, LC_BUFFERS, c->size, &c->pool)) ||
@@ -164,7 +167,7 @@ lc_wgc *lc_wgc_open(void *dev, void *monitor) {
 	if (FAILED(LC_QI(c->session, &lc_IID_Session2, &s2)) || FAILED(LC_CALL(s2, 7, m_flag, 0))) {
 		goto done;
 	}
-	// No yellow frame around the screen. Windows 11 lets it be left out
+	// No yellow frame around the screen or window. Windows 11 lets it be left out
 	// (IGraphicsCaptureSession3.IsBorderRequired); Windows 10 has no way to,
 	// and draws it for as long as the stream lasts. There, as Discord does,
 	// the screen is taken by desktop duplication, which shows nothing
@@ -186,6 +189,17 @@ done:
 		return NULL;
 	}
 	return c;
+}
+
+lc_wgc *lc_wgc_open(void *dev, void *monitor) {
+	return wgc_open(dev, NULL, (HMONITOR)monitor);
+}
+
+// lc_wgc_open_window captures the window hwnd, its frame included, wherever it
+// is and whatever covers it. As for a screen, only where Windows leaves out
+// the yellow frame (Windows 11).
+lc_wgc *lc_wgc_open_window(void *dev, uintptr_t hwnd) {
+	return wgc_open(dev, (HWND)hwnd, NULL);
 }
 
 // lc_wgc_next takes the newest picture, dropping older ones: 1 with its

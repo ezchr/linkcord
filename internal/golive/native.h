@@ -99,9 +99,10 @@ void lc_capture_release(lc_capture *c);
 
 void lc_capture_close(lc_capture *c);
 
-// lc_wgc captures a screen with Windows.Graphics.Capture: wgc_windows.c.
+// lc_wgc captures a screen or a window with Windows.Graphics.Capture: wgc_windows.c.
 typedef struct lc_wgc lc_wgc;
 lc_wgc *lc_wgc_open(void *dev, void *monitor);
+lc_wgc *lc_wgc_open_window(void *dev, uintptr_t hwnd);
 int lc_wgc_next(lc_wgc *c, void **tex);
 void lc_wgc_done(lc_wgc *c);
 void lc_wgc_close(lc_wgc *c);
