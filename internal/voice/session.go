@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	timeout = 15 * time.Second
+	timeout = 30 * time.Second // as long as Discord's clients wait
 	// hangover is how many frames are still sent after the last that was loud enough, for the ends of words not to be cut off.
 	hangover = 15
 )

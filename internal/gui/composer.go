@@ -133,6 +133,9 @@ func (c *chatView) attachFiles() {
 	}()
 }
 
+// maxAttachments is how many files a message can carry.
+const maxAttachments = 10
+
 // attachPaths adds files to the message being written, leaving out folders
 // and those too big for Discord.
 func (c *chatView) attachPaths(paths []string) {
@@ -140,6 +143,10 @@ func (c *chatView) attachPaths(paths []string) {
 		info, err := os.Stat(p)
 		if err != nil || info.IsDir() {
 			continue
+		}
+		if len(c.comp.files) >= maxAttachments {
+			c.sendErr = fmt.Sprintf(tr("You can send up to %d files at once."), maxAttachments)
+			break
 		}
 		if limit := c.uploadLimit(); info.Size() > limit {
 			c.sendErr = fmt.Sprintf(tr("\"%s\" is %s; you can send files up to %s here."), filepath.Base(p), formatSize(uint64(info.Size())), formatSize(uint64(limit)))
@@ -221,6 +228,10 @@ func (c *chatView) pasteText(e transfer.DataEvent) {
 		if c.composer.Insert(text) != 0 {
 			c.sendTyping()
 		}
+		return
+	}
+	if len(c.comp.files) >= maxAttachments {
+		c.sendErr = fmt.Sprintf(tr("You can send up to %d files at once."), maxAttachments)
 		return
 	}
 	f, err := textAsFile(text)

@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -181,8 +183,8 @@ type ui struct {
 	// wait before trying again.
 	connectTries int
 	retry        widget.Clickable
-	cancel     widget.Clickable
-	token      string
+	cancel       widget.Clickable
+	token        string
 }
 
 func newUI(w *app.Window) *ui {
@@ -521,6 +523,15 @@ func (u *ui) logout(errMsg string) {
 		slog.Error("failed to delete token", "err", err)
 	}
 	u.showLogin(errMsg)
+	// What this account left here goes too, as Discord's client clears its
+	// local data on log out: the next account must not see it.
+	go func() {
+		for _, p := range []string{deletedLogPath(), strings.TrimSuffix(deletedLogPath(), ".json") + ".jsonl", inboxPath(), lastPlacePath(), lostVoiceFile()} {
+			if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				slog.Warn("could not clear local data", "path", p, "err", err)
+			}
+		}
+	}()
 }
 
 func (u *ui) layoutConnecting(gtx layout.Context) layout.Dimensions {
