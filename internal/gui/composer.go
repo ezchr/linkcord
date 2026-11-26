@@ -831,6 +831,11 @@ func (c *chatView) send() {
 		c.sendErr = tr("Could not trim the audio: ") + tr(err.Error())
 		return
 	}
+	// Files need Attach Files, as Discord's client checks before sending.
+	if len(cs.files) > 0 && c.selChannel.GuildID.IsValid() && !c.can(c.selChannel.ID, discord.PermissionAttachFiles) {
+		c.sendErr = tr("You do not have permission to attach files in this channel.")
+		return
+	}
 	parts := []string{content}
 	if limit := c.messageLimit(); utf8.RuneCountInString(content) > limit {
 		if c.u.app.SplitLong {

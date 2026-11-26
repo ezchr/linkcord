@@ -626,7 +626,22 @@ func (c *chatView) saveEdit(id discord.MessageID) {
 	chID := c.selChannel.ID
 	go func() {
 		if _, err := c.st.EditMessage(chID, id, text); err != nil {
-			c.u.post(func() { c.sendErr = "Could not edit the message: " + err.Error() })
+			c.u.post(func() {
+				c.sendErr = "Could not edit the message: " + err.Error()
+				// What it said comes back, as in Discord's client, unless
+				// it changed since.
+				if c.closed || c.selChannel == nil || c.selChannel.ID != chID {
+					return
+				}
+				for j := range c.messages {
+					if c.messages[j].ID == id && c.messages[j].Content == text {
+						c.messages[j].Content, c.messages[j].EditedTimestamp = m.Content, m.EditedTimestamp
+						delete(c.selectables, id)
+						delete(c.richStates, id)
+						break
+					}
+				}
+			})
 		}
 	}()
 }

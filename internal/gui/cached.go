@@ -93,7 +93,13 @@ func (c *chatView) permsNow(chID discord.ChannelID) (discord.Permissions, bool) 
 			return 0, false
 		}
 		perms := restrictPerms(*g, *m, me, c.me.MFA, discord.CalcOverrides(*g, *parent, *m, roles), time.Now())
-		return threadPerms(perms, threadLocked(*ch)), true
+		p := threadPerms(perms, threadLocked(*ch))
+		// A private thread is seen only by its members and those who
+		// manage threads.
+		if ch.Type == discord.GuildPrivateThread && !c.threads.joined[ch.ID] && !perms.Has(discord.PermissionManageThreads) {
+			p &^= discord.PermissionViewChannel | discord.PermissionSendMessages
+		}
+		return p, true
 	}
 	return restrictPerms(*g, *m, me, c.me.MFA, discord.CalcOverrides(*g, *ch, *m, roles), time.Now()), true
 }
