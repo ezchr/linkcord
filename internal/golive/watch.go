@@ -101,11 +101,18 @@ type Watch struct {
 	// view is the size the picture is shown at, width<<32|height, set by
 	// SetView; 0 is unknown.
 	view            atomic.Uint64
+	// viewAt is when the GUI last set the view, in Unix nanoseconds.
+	viewAt atomic.Int64
+	// shownAgain is when the video was last asked for again after it was
+	// not shown, in Unix nanoseconds.
+	shownAgain atomic.Int64
 	videoBytes      atomic.Int64
 	reception       watchReception // guarded by mu
 	needIDR         atomic.Bool
 	lastPLI         atomic.Int64
 	srcW, srcH, fps int
+	// decW and decH are the size the running decoder gives pictures at.
+	decW, decH int
 	created         bool
 	once            sync.Once
 	decoder         *exec.Cmd
@@ -394,6 +401,7 @@ func startWatching(ctx context.Context, p WatchParams, v joinVariant) (*Watch, e
 	go w.follow(early)
 	go w.receive()
 	go w.askKeyframes()
+	go w.fitDecoder()
 	go w.transportFeedback()
 	return w, nil
 }
@@ -404,16 +412,47 @@ func (w *Watch) sendViewerState(ctx context.Context, ssrc uint32) {
 	w.conn.send(ctx, &videoCommand{AudioSSRC: ssrc, Streams: []videoStream{}})
 }
 
-// sendWants asks for the streamer's video, by its SSRC when known.
+// sendWants asks for the streamer's video, by its SSRC when known, as
+// Discord's client does: at quality 100 with pixelCounts the size the video
+// is shown at, so the server can send a smaller picture for a small tile, and
+// at 0 while it is not shown at all (the window minimized, the tile gone),
+// which stops the video until it shows again.
 func (w *Watch) sendWants(ctx context.Context, video uint32) {
 	wants := mediaSinkWantsCommand{"any": 100}
 	if video != 0 {
 		key := fmt.Sprint(video)
-		wants[key] = 100
-		wants["pixelCounts"] = map[string]int{key: maxWatchW * maxWatchH}
+		if w.viewShown() {
+			wants[key] = 100
+			wants["pixelCounts"] = map[string]int{key: w.viewPixels()}
+		} else {
+			wants[key] = 0
+		}
 	}
 	cmd := wants
 	w.conn.send(ctx, &cmd)
+}
+
+// viewHidden is how long without SetView before the video counts as not
+// shown: the GUI sets the view each frame it draws the stream.
+const viewHidden = 2 * time.Second
+
+// viewShown reports whether the GUI drew the stream lately; before it ever
+// has, the stream counts as shown.
+func (w *Watch) viewShown() bool {
+	at := w.viewAt.Load()
+	return at == 0 || time.Since(time.Unix(0, at)) < viewHidden
+}
+
+// viewPixels is how many pixels the video is shown in, as the web client's
+// pixelCounts (its width times height); the decoding bound before the GUI
+// says.
+func (w *Watch) viewPixels() int {
+	v := w.view.Load()
+	vw, vh := int(v>>32), int(v&0xFFFFFFFF)
+	if vw <= 0 || vh <= 0 {
+		return maxWatchW * maxWatchH
+	}
+	return vw * vh
 }
 
 // waitOp waits for the op that match accepts, keeping the others in keep.
@@ -927,12 +966,98 @@ func decodeAccel() string {
 	return ""
 }
 
-func (w *Watch) startDecoder(sw, sh int) error {
+// decodeSize is the size FFmpeg gives pictures of a sw×sh stream: bounded by
+// maxWatchW×maxWatchH, and no bigger than the view when it shows them much
+// smaller. FFmpeg scales and converts to RGBA in one pass, far cheaper than
+// converting the whole picture and shrinking it here, and the pictures
+// copied and drawn are smaller.
+func (w *Watch) decodeSize(sw, sh int) (int, int) {
 	ow, oh := sw, sh
 	if ow > maxWatchW || oh > maxWatchH {
 		k := min(float64(maxWatchW)/float64(ow), float64(maxWatchH)/float64(oh))
 		ow, oh = int(float64(ow)*k)&^1, int(float64(oh)*k)&^1
 	}
+	v := w.view.Load()
+	vw, vh := int(v>>32), int(v&0xFFFFFFFF)
+	if vw <= 0 || vh <= 0 {
+		return ow, oh
+	}
+	k := min(float64(vw)/float64(ow), float64(vh)/float64(oh))
+	if k >= 0.9 {
+		return ow, oh
+	}
+	return max(int(float64(ow)*k)&^1, 16), max(int(float64(oh)*k)&^1, 16)
+}
+
+// fitDecoder starts the decoder again at the view's size once the view has
+// settled at one far from what it decodes to, as when the stream goes from
+// a small tile to full screen or back. The new decoder starts from the next
+// keyframe.
+func (w *Watch) fitDecoder() {
+	t := time.NewTicker(500 * time.Millisecond)
+	defer t.Stop()
+	var pendW, pendH, steady int
+	// The wants last sent: re-sent, as the web client's delayed update,
+	// once the shown size or whether it is shown has changed.
+	sentShown, sentPixels := true, 0
+	for {
+		select {
+		case <-w.done:
+			return
+		case <-t.C:
+		}
+		if shown, px := w.viewShown(), w.viewPixels(); shown != sentShown || shown && abs(px-sentPixels)*10 > sentPixels {
+			w.mu.Lock()
+			video := w.videoSSRC
+			w.mu.Unlock()
+			if video != 0 {
+				w.sendWants(context.Background(), video)
+				if shown && !sentShown {
+					w.shownAgain.Store(time.Now().UnixNano())
+					// Back on screen: the video starts again from a keyframe.
+					w.requireKeyframe()
+					w.lastPLI.Store(0)
+					w.requestKeyframe()
+				}
+				w.log.Info("stream wants", "shown", shown, "pixels", px)
+				sentShown, sentPixels = shown, px
+			}
+		}
+		w.mu.Lock()
+		sw, sh, dw, dh, running := w.srcW, w.srcH, w.decW, w.decH, w.decoder != nil
+		w.mu.Unlock()
+		if !running || sw == 0 || w.p.FFmpeg == "" {
+			continue
+		}
+		nw, nh := w.decodeSize(sw, sh)
+		if abs(nw-dw)*5 <= dw && abs(nh-dh)*5 <= dh {
+			steady = 0
+			continue
+		}
+		if nw != pendW || nh != pendH {
+			pendW, pendH, steady = nw, nh, 0
+			continue
+		}
+		if steady++; steady < 2 {
+			continue
+		}
+		steady = 0
+		w.log.Info("decoding at the view's size", "width", nw, "height", nh)
+		if err := w.startDecoder(sw, sh); err != nil {
+			w.log.Warn("could not start the decoder", "err", err)
+			continue
+		}
+		w.requireKeyframe()
+		w.lastPLI.Store(0)
+		w.requestKeyframe()
+	}
+}
+
+func (w *Watch) startDecoder(sw, sh int) error {
+	ow, oh := w.decodeSize(sw, sh)
+	w.mu.Lock()
+	w.decW, w.decH = ow, oh
+	w.mu.Unlock()
 	args := []string{"-hide_banner", "-loglevel", "error",
 		"-fflags", "nobuffer", "-flags", "low_delay", "-probesize", "32", "-analyzeduration", "0"}
 	// The graphics card decodes, as Discord's client has it do, where that
@@ -942,7 +1067,13 @@ func (w *Watch) startDecoder(sw, sh int) error {
 	}
 	args = append(args, "-f", "h264", "-i", "pipe:0")
 	if ow != sw || oh != sh {
-		args = append(args, "-vf", fmt.Sprintf("scale=%d:%d:flags=bicubic", ow, oh))
+		// Area averaging when shrinking much, as the GUI's own shrink did:
+		// bilinear would skip pixels and look grainy.
+		flags := "bicubic"
+		if ow*2 < sw {
+			flags = "area"
+		}
+		args = append(args, "-vf", fmt.Sprintf("scale=%d:%d:flags=%s", ow, oh, flags))
 	}
 	// Raw H264 has no timestamps: FFmpeg would take it as 25 FPS and drop
 	// the pictures that come sooner, which live is all of them. FFmpeg
@@ -1242,6 +1373,7 @@ func (w *Watch) sendReport() {
 // SetView tells the size, in pixels, the stream is shown at.
 func (w *Watch) SetView(width, height int) {
 	w.view.Store(uint64(max(width, 0))<<32 | uint64(max(height, 0)))
+	w.viewAt.Store(time.Now().UnixNano())
 }
 
 // viewSize is the size to give pictures of ow×oh: shrunk to fit the view if
@@ -1361,9 +1493,12 @@ func (w *Watch) teardown() {
 // paused, 0 if it comes or before the first packet.
 func (w *Watch) Stalled() time.Duration {
 	last := w.lastPacket.Load()
-	if last == 0 || w.paused.Load() {
+	// Not shown, the video was asked to stop: nothing coming is no stall;
+	// shown again, it is counted from then.
+	if last == 0 || w.paused.Load() || !w.viewShown() {
 		return 0
 	}
+	last = max(last, w.shownAgain.Load())
 	return time.Since(time.Unix(0, last))
 }
 
