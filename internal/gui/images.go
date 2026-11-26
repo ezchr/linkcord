@@ -69,9 +69,11 @@ var animEpoch = time.Now()
 // separate so that reducing retained frames does not reject normal APNGs.
 const animBudget = 16 << 20
 
-// animFrameMin caps animations at 30 frames a second: a GIF asking for 10 ms
-// frames would otherwise redraw the whole window at every vsync.
-const animFrameMin = 33 * time.Millisecond
+// animFrameMin caps animations at 60 frames a second: those made at 60 play
+// at their own pace, while a GIF asking for 10 ms frames (most browsers
+// treat it as 100 ms) would otherwise redraw the whole window at every
+// vsync.
+const animFrameMin = time.Second / 60
 
 // animIdleDrop is how long an animation not laid out keeps its frames.
 const animIdleDrop = 30 * time.Second

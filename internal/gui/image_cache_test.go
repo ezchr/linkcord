@@ -129,7 +129,7 @@ func TestMinimizedAnimationDoesNotRedraw(t *testing.T) {
 	focusedRouter.Frame(&ops)
 	at, redraw := focusedRouter.WakeupTime()
 	if !redraw || !at.Equal(gtx.Now.Add(animFrameMin)) {
-		t.Fatalf("focused window not capped at 30 fps: %v, %v", at, redraw)
+		t.Fatalf("focused window not capped at 60 fps: %v, %v", at, redraw)
 	}
 
 	ops.Reset()

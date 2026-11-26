@@ -14,10 +14,10 @@ import (
 	"gioui.org/widget/material"
 )
 
-// spinnerFrame is how often a spinner moves: 20 frames a second is smooth
-// enough for a turning arc, where Gio's own loader redraws the window at
-// every vsync.
-const spinnerFrame = 50 * time.Millisecond
+// spinnerFrame is how often a spinner moves: 60 frames a second, where Gio's
+// own loader redraws the window at every vsync, 144 times a second on a
+// 144 Hz screen.
+const spinnerFrame = time.Second / 60
 
 // spinnerStyle is a turning arc, as material.Loader draws it, that asks for
 // its next redraw only when it moves next.

@@ -57,10 +57,10 @@ func TestIdleRedrawRate(t *testing.T) {
 	emoji := framesInSecond(t, func(gtx layout.Context) { im.frame(gtx, "emoji", 2) })
 	spin := framesInSecond(t, func(gtx layout.Context) { loader(nil).Layout(gtx) })
 	t.Logf("frames per second: animated emoji %d (was 100), spinner %d (was 60)", emoji, spin)
-	if emoji > 31 {
+	if emoji > 61 {
 		t.Fatalf("animated emoji drew %d frames in a second", emoji)
 	}
-	if spin > 21 {
+	if spin > 61 {
 		t.Fatalf("spinner drew %d frames in a second", spin)
 	}
 
