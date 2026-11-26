@@ -195,6 +195,9 @@ type chatView struct {
 	// myStatus is the status the user chose here, kept over what the
 	// sessions say.
 	myStatus discord.Status
+	// idle is set while the user is away from the computer, since idleSince.
+	idle      bool
+	idleSince time.Time
 	// chDrag is what is dragged in the channel list, whose rows were last
 	// drawn rowHeights tall.
 	chDrag     channelDrag
@@ -505,8 +508,9 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 
 	stopChan, stopStatus, stopPolls, stopMine := st.AddChanHandler(c.events), c.watchVoiceStatus(), c.watchPolls(), c.watchMyPresence()
 	stopSounds, stopViewers := c.watchSoundboard(), c.watchViewers()
-	stopCalls := c.watchCalls()
+	stopCalls, stopIdle := c.watchCalls(), c.watchIdle()
 	c.stopEvents = func() {
+		stopIdle()
 		stopCalls()
 		stopChan()
 		stopStatus()

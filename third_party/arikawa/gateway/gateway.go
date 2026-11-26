@@ -29,7 +29,7 @@ var (
 // deadbeatDuration is the duration that limits whether the gateway should
 // resume or restart entirely. If it's less than this duration, then it's deemed
 // resumable.
-const deadbeatDuration = 15 * time.Minute
+const deadbeatDuration = 3 * time.Minute
 
 // CodeInvalidSequence is the code returned by Discord to signal that the given
 // sequence number is invalid.
@@ -435,29 +435,19 @@ func (g *gatewayImpl) OnOp(ctx context.Context, op ws.Op) bool {
 		}
 
 	case *InvalidSessionEvent:
-		// Wipe the session state.
-		g.invalidate()
-
-		if !*data {
-			g.gateway.QueueReconnect()
-			break
+		resumable := *data && g.state.SessionID != "" && g.state.Sequence != 0
+		if !resumable {
+			// Wipe the session state; the next hello identifies anew.
+			g.invalidate()
 		}
 
-		// Discord expects us to wait before reconnecting.
+		// Discord expects a short random wait before trying again; the
+		// next hello then resumes the session if it can, or identifies.
 		g.retryTimer.Reset(time.Duration(rand.Intn(5)+1) * time.Second)
 		if err := g.retryTimer.Wait(ctx); err != nil {
-			g.gateway.SendErrorWrap(err, "failed to wait before identifying")
-			g.gateway.QueueReconnect()
-			break
+			g.gateway.SendErrorWrap(err, "failed to wait after an invalid session")
 		}
-
-		// If we fail to identify, then the gateway cannot continue with
-		// a bad identification, since it's likely a user error.
-		if err := g.sendIdentify(ctx); err != nil {
-			g.gateway.SendErrorWrap(err, "failed to identify")
-			g.gateway.QueueReconnect()
-			break
-		}
+		g.gateway.QueueReconnect()
 
 	case *HeartbeatCommand:
 		g.SendHeartbeat(ctx)
@@ -508,7 +498,8 @@ func (g *gatewayImpl) isDead() bool {
 	g.beatMutex.Lock()
 	defer g.beatMutex.Unlock()
 
-	// Allow 2 beats to miss before we declare dead. A connection that
+	// A beat that goes unacknowledged until the next one is due means dead,
+	// as in the web client. A connection that
 	// never acknowledged one counts from its hello: one that dies before
 	// its first acknowledgement (the network changing again right after a
 	// reconnect) would otherwise wait forever.
@@ -519,7 +510,7 @@ func (g *gatewayImpl) isDead() bool {
 	if last.IsZero() {
 		return false
 	}
-	return g.lastSentBeat.Sub(last) > 2*g.heartrate
+	return g.lastSentBeat.Sub(last) > g.heartrate+5*time.Second // slack for timer drift
 }
 
 // Reconnect has the gateway drop its connection and connect again,

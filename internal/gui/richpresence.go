@@ -120,6 +120,10 @@ func (c *chatView) pushPresence() {
 			}
 		}
 	}
+	cmd := presenceCommand{Status: status}
+	if c.idle && status == discord.OnlineStatus {
+		cmd.Status, cmd.AFK, cmd.Since = discord.IdleStatus, true, c.idleSince.UnixMilli()
+	}
 	games := c.gameActivities()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -136,7 +140,8 @@ func (c *chatView) pushPresence() {
 		if all == nil {
 			all = []json.RawMessage{}
 		}
-		if err := c.st.SendGateway(ctx, &presenceCommand{Activities: all, Status: status}); err != nil {
+		cmd.Activities = all
+		if err := c.st.SendGateway(ctx, &cmd); err != nil {
 			slog.Warn("could not show the activity", "err", err)
 		}
 	}()

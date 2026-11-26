@@ -6,7 +6,7 @@ import (
 )
 
 // A connection that said hello but never acknowledged a heartbeat (it died
-// right after a reconnect) is dead once two beats are missed, like one that
+// right after a reconnect) is dead once a beat goes unacknowledged, like one that
 // stopped acknowledging.
 func TestIsDeadWithoutAck(t *testing.T) {
 	now := time.Now()
@@ -16,6 +16,11 @@ func TestIsDeadWithoutAck(t *testing.T) {
 	g.lastSentBeat = now
 	if g.isDead() {
 		t.Fatal("dead 30s after hello with a 40s heartbeat")
+	}
+
+	g.helloBeat = now.Add(-50 * time.Second)
+	if !g.isDead() {
+		t.Fatal("not dead 50s after hello with a 40s heartbeat and no ack")
 	}
 
 	g.helloBeat = now.Add(-90 * time.Second)

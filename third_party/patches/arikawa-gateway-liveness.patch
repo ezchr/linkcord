@@ -1,0 +1,154 @@
+diff --git a/third_party/arikawa/gateway/gateway.go b/third_party/arikawa/gateway/gateway.go
+index 92c933a..711164a 100644
+--- a/third_party/arikawa/gateway/gateway.go
++++ b/third_party/arikawa/gateway/gateway.go
+@@ -29,7 +29,7 @@ var (
+ // deadbeatDuration is the duration that limits whether the gateway should
+ // resume or restart entirely. If it's less than this duration, then it's deemed
+ // resumable.
+-const deadbeatDuration = 15 * time.Minute
++const deadbeatDuration = 3 * time.Minute
+ 
+ // CodeInvalidSequence is the code returned by Discord to signal that the given
+ // sequence number is invalid.
+@@ -435,29 +435,19 @@ func (g *gatewayImpl) OnOp(ctx context.Context, op ws.Op) bool {
+ 		}
+ 
+ 	case *InvalidSessionEvent:
+-		// Wipe the session state.
+-		g.invalidate()
+-
+-		if !*data {
+-			g.gateway.QueueReconnect()
+-			break
++		resumable := *data && g.state.SessionID != "" && g.state.Sequence != 0
++		if !resumable {
++			// Wipe the session state; the next hello identifies anew.
++			g.invalidate()
+ 		}
+ 
+-		// Discord expects us to wait before reconnecting.
++		// Discord expects a short random wait before trying again; the
++		// next hello then resumes the session if it can, or identifies.
+ 		g.retryTimer.Reset(time.Duration(rand.Intn(5)+1) * time.Second)
+ 		if err := g.retryTimer.Wait(ctx); err != nil {
+-			g.gateway.SendErrorWrap(err, "failed to wait before identifying")
+-			g.gateway.QueueReconnect()
+-			break
+-		}
+-
+-		// If we fail to identify, then the gateway cannot continue with
+-		// a bad identification, since it's likely a user error.
+-		if err := g.sendIdentify(ctx); err != nil {
+-			g.gateway.SendErrorWrap(err, "failed to identify")
+-			g.gateway.QueueReconnect()
+-			break
++			g.gateway.SendErrorWrap(err, "failed to wait after an invalid session")
+ 		}
++		g.gateway.QueueReconnect()
+ 
+ 	case *HeartbeatCommand:
+ 		g.SendHeartbeat(ctx)
+@@ -508,7 +498,8 @@ func (g *gatewayImpl) isDead() bool {
+ 	g.beatMutex.Lock()
+ 	defer g.beatMutex.Unlock()
+ 
+-	// Allow 2 beats to miss before we declare dead. A connection that
++	// A beat that goes unacknowledged until the next one is due means dead,
++	// as in the web client. A connection that
+ 	// never acknowledged one counts from its hello: one that dies before
+ 	// its first acknowledgement (the network changing again right after a
+ 	// reconnect) would otherwise wait forever.
+@@ -519,7 +510,7 @@ func (g *gatewayImpl) isDead() bool {
+ 	if last.IsZero() {
+ 		return false
+ 	}
+-	return g.lastSentBeat.Sub(last) > 2*g.heartrate
++	return g.lastSentBeat.Sub(last) > g.heartrate+5*time.Second // slack for timer drift
+ }
+ 
+ // Reconnect has the gateway drop its connection and connect again,
+diff --git a/third_party/arikawa/gateway/isdead_test.go b/third_party/arikawa/gateway/isdead_test.go
+index 8fee34d..7aa56e3 100644
+--- a/third_party/arikawa/gateway/isdead_test.go
++++ b/third_party/arikawa/gateway/isdead_test.go
+@@ -6,7 +6,7 @@ import (
+ )
+ 
+ // A connection that said hello but never acknowledged a heartbeat (it died
+-// right after a reconnect) is dead once two beats are missed, like one that
++// right after a reconnect) is dead once a beat goes unacknowledged, like one that
+ // stopped acknowledging.
+ func TestIsDeadWithoutAck(t *testing.T) {
+ 	now := time.Now()
+@@ -18,6 +18,11 @@ func TestIsDeadWithoutAck(t *testing.T) {
+ 		t.Fatal("dead 30s after hello with a 40s heartbeat")
+ 	}
+ 
++	g.helloBeat = now.Add(-50 * time.Second)
++	if !g.isDead() {
++		t.Fatal("not dead 50s after hello with a 40s heartbeat and no ack")
++	}
++
+ 	g.helloBeat = now.Add(-90 * time.Second)
+ 	if !g.isDead() {
+ 		t.Fatal("not dead 90s after hello without any acknowledgement")
+diff --git a/third_party/arikawa/utils/handler/handler.go b/third_party/arikawa/utils/handler/handler.go
+index d3fe18d..51088be 100644
+--- a/third_party/arikawa/utils/handler/handler.go
++++ b/third_party/arikawa/utils/handler/handler.go
+@@ -16,6 +16,7 @@ package handler
+ import (
+ 	"context"
+ 	"fmt"
++	"log/slog"
+ 	"reflect"
+ 	"slices"
+ 	"sync"
+@@ -55,17 +56,30 @@ func (h *Handler) Call(ev any) {
+ 
+ 	for _, entry := range s.typed[reflect.TypeOf(ev)] {
+ 		if !entry.removed.Load() {
+-			entry.call(ev)
++			safeCall(entry, ev)
+ 		}
+ 	}
+ 
+ 	for _, entry := range s.ifaces {
+ 		if !entry.removed.Load() {
+-			entry.call(ev)
++			safeCall(entry, ev)
+ 		}
+ 	}
+ }
+ 
++// safeCall runs one handler, logging a panic instead of letting it take down
++// the event loop, as the web client does with a failing listener.
++func safeCall(e *entry, ev any) {
++	defer logPanic(ev)
++	e.call(ev)
++}
++
++func logPanic(ev any) {
++	if r := recover(); r != nil {
++		slog.Error("event handler panicked", "event", fmt.Sprintf("%T", ev), "panic", r)
++	}
++}
++
+ // AddHandler adds the handler, returning a function that would remove this handler when called. The handler is called in its own goroutine for each event.
+ //
+ // The event type E must either be a pointer, which matches only that exact event type, or an interface, which matches every event implementing it.
+@@ -73,7 +87,12 @@ func (h *Handler) Call(ev any) {
+ //	// An example of a valid function handler.
+ //	h.AddHandler(func(*gateway.MessageCreateEvent) {})
+ func (h *Handler) AddHandler[E any](fn func(E)) (rm func()) {
+-	return h.add(eventType[E](), matcher[E](func(ev E) { go fn(ev) }))
++	return h.add(eventType[E](), matcher[E](func(ev E) {
++		go func() {
++			defer logPanic(ev)
++			fn(ev)
++		}()
++	}))
+ }
+ 
+ // AddSyncHandler is a synchronous variant of AddHandler. Handlers added using this method will block the Call method, which is helpful if the user needs to rely on the order of events arriving. Handlers added using this method should not block for very long, as it may clog up other handlers.

@@ -16,6 +16,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"slices"
 	"sync"
@@ -55,14 +56,27 @@ func (h *Handler) Call(ev any) {
 
 	for _, entry := range s.typed[reflect.TypeOf(ev)] {
 		if !entry.removed.Load() {
-			entry.call(ev)
+			safeCall(entry, ev)
 		}
 	}
 
 	for _, entry := range s.ifaces {
 		if !entry.removed.Load() {
-			entry.call(ev)
+			safeCall(entry, ev)
 		}
+	}
+}
+
+// safeCall runs one handler, logging a panic instead of letting it take down
+// the event loop, as the web client does with a failing listener.
+func safeCall(e *entry, ev any) {
+	defer logPanic(ev)
+	e.call(ev)
+}
+
+func logPanic(ev any) {
+	if r := recover(); r != nil {
+		slog.Error("event handler panicked", "event", fmt.Sprintf("%T", ev), "panic", r)
 	}
 }
 
@@ -73,7 +87,12 @@ func (h *Handler) Call(ev any) {
 //	// An example of a valid function handler.
 //	h.AddHandler(func(*gateway.MessageCreateEvent) {})
 func (h *Handler) AddHandler[E any](fn func(E)) (rm func()) {
-	return h.add(eventType[E](), matcher[E](func(ev E) { go fn(ev) }))
+	return h.add(eventType[E](), matcher[E](func(ev E) {
+		go func() {
+			defer logPanic(ev)
+			fn(ev)
+		}()
+	}))
 }
 
 // AddSyncHandler is a synchronous variant of AddHandler. Handlers added using this method will block the Call method, which is helpful if the user needs to rely on the order of events arriving. Handlers added using this method should not block for very long, as it may clog up other handlers.
