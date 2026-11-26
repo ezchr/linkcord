@@ -7,6 +7,7 @@ package opus
 #cgo CFLAGS: -O2 -w
 #cgo windows LDFLAGS: -static
 #include <opus.h>
+#include <stdlib.h>
 
 // The ctls of libopus take a variable number of arguments, which cgo cannot
 // call, so these call them with one.
@@ -25,6 +26,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"unsafe"
 )
 
@@ -58,13 +60,16 @@ func errorOf(code C.int) error {
 	return fmt.Errorf("%w: %s", ErrInternal, C.GoString(C.opus_strerror(code)))
 }
 
-// state returns memory of size bytes for a libopus encoder or decoder, aligned
-// for any of what it holds. It is Go memory, which does not move, holds no Go
-// pointers and is only passed to libopus for the length of a call, so cgo
-// allows it, and the garbage collector frees it with whoever holds it.
+// state returns zeroed C memory of size bytes for a libopus encoder or
+// decoder, freed with C.free. It must not be Go memory: *C.OpusEncoder and
+// *C.OpusDecoder point to C types Go knows nothing of, and the garbage
+// collector does not follow such pointers, so Go memory held only by them
+// was freed and reused while libopus still used it, which crashed calls.
 func state(size C.int) unsafe.Pointer {
-	return unsafe.Pointer(unsafe.SliceData(make([]uint64, (int(size)+7)/8)))
+	return C.calloc(1, C.size_t(size))
 }
+
+func freeState(p unsafe.Pointer) { C.free(p) }
 
 // EncoderConfig is how an encoder encodes.
 type EncoderConfig struct {
@@ -117,7 +122,11 @@ func NewEncoder(cfg EncoderConfig) (*Encoder, error) {
 	}
 
 	st := (*C.OpusEncoder)(state(C.opus_encoder_get_size(C.int(cfg.Channels))))
+	if st == nil {
+		return nil, ErrInternal
+	}
 	if code := C.opus_encoder_init(st, C.opus_int32(cfg.SampleRate), C.int(cfg.Channels), C.int(application)); code != C.OPUS_OK {
+		freeState(unsafe.Pointer(st))
 		return nil, errorOf(code)
 	}
 
@@ -141,10 +150,13 @@ func NewEncoder(cfg EncoderConfig) (*Encoder, error) {
 		{C.OPUS_SET_DTX_REQUEST, boolInt(cfg.DTX)},
 	} {
 		if code := C.linkcord_opus_encoder_set(st, ctl.request, C.opus_int32(ctl.value)); code != C.OPUS_OK {
+			freeState(unsafe.Pointer(st))
 			return nil, errorOf(code)
 		}
 	}
-	return &Encoder{st: st, channels: cfg.Channels}, nil
+	e := &Encoder{st: st, channels: cfg.Channels}
+	runtime.AddCleanup(e, freeState, unsafe.Pointer(st))
+	return e, nil
 }
 
 func boolInt(b bool) int {
@@ -163,6 +175,8 @@ func (e *Encoder) Encode(pcm []int16, buf []byte) (int, error) {
 	}
 	n := C.opus_encode(e.st, (*C.opus_int16)(unsafe.Pointer(&pcm[0])), C.int(len(pcm)/e.channels),
 		(*C.uchar)(unsafe.Pointer(&buf[0])), C.opus_int32(min(len(buf), 1<<30)))
+	// The state is freed once e is unreachable: not before the call ends.
+	runtime.KeepAlive(e)
 	if n < 0 {
 		return 0, errorOf(n)
 	}
@@ -172,6 +186,7 @@ func (e *Encoder) Encode(pcm []int16, buf []byte) (int, error) {
 // Reset makes the encoder start anew, as if no frame were encoded.
 func (e *Encoder) Reset() {
 	C.linkcord_opus_encoder_reset(e.st)
+	runtime.KeepAlive(e)
 }
 
 // Decoder decodes Opus packets to interleaved 16-bit PCM, in order. It is
@@ -188,10 +203,16 @@ func NewDecoder(sampleRate, channels int) (*Decoder, error) {
 		return nil, fmt.Errorf("%w: %d channels", ErrBadArg, channels)
 	}
 	st := (*C.OpusDecoder)(state(C.opus_decoder_get_size(C.int(channels))))
+	if st == nil {
+		return nil, ErrInternal
+	}
 	if code := C.opus_decoder_init(st, C.opus_int32(sampleRate), C.int(channels)); code != C.OPUS_OK {
+		freeState(unsafe.Pointer(st))
 		return nil, errorOf(code)
 	}
-	return &Decoder{st: st, channels: channels}, nil
+	d := &Decoder{st: st, channels: channels}
+	runtime.AddCleanup(d, freeState, unsafe.Pointer(st))
+	return d, nil
 }
 
 // Decode decodes packet into pcm and returns how many samples of each
@@ -219,6 +240,7 @@ func (d *Decoder) decode(packet []byte, pcm []int16, fec C.int) (int, error) {
 		data = (*C.uchar)(unsafe.Pointer(&packet[0]))
 	}
 	n := C.opus_decode(d.st, data, C.opus_int32(len(packet)), (*C.opus_int16)(unsafe.Pointer(&pcm[0])), C.int(len(pcm)/d.channels), fec)
+	runtime.KeepAlive(d)
 	if n < 0 {
 		return 0, errorOf(n)
 	}
@@ -228,6 +250,7 @@ func (d *Decoder) decode(packet []byte, pcm []int16, fec C.int) (int, error) {
 // Reset makes the decoder start anew, as if no packet were decoded.
 func (d *Decoder) Reset() {
 	C.linkcord_opus_decoder_reset(d.st)
+	runtime.KeepAlive(d)
 }
 
 // Version is the version of libopus.
