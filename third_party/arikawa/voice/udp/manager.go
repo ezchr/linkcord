@@ -124,6 +124,20 @@ func (m *Manager) Latency() time.Duration {
 	return m.conn.Latency()
 }
 
+// Stopped reports whether the connection is closed or not made yet, without
+// waiting for a Pause to end as IsClosed does. (Added by Linkcord.)
+func (m *Manager) Stopped() bool {
+	m.stopMu.Lock()
+	defer m.stopMu.Unlock()
+
+	select {
+	case <-m.stopConn:
+		return true
+	default:
+		return m.conn == nil
+	}
+}
+
 // IsClosed returns true if the connection is closed.
 func (m *Manager) IsClosed() bool {
 	return m.acquireConn() == nil

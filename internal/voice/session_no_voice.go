@@ -20,6 +20,8 @@ func (*Session) Status() Status               { return Status{} }
 func (*Session) Speaking(discord.UserID) bool { return false }
 func (*Session) Latency() time.Duration       { return 0 }
 func (*Session) Leave() error                 { return nil }
+func (*Session) Lost() <-chan error           { return nil }
+func (*Session) Connected() bool              { return false }
 func (*Session) Toggle(bool) error            { return nil }
 
 func (*Session) SetVolume(discord.UserID, float32) {}

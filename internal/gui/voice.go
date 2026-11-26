@@ -502,6 +502,13 @@ func (u *ui) voiceSession(st *ningen.State) *voice.Session {
 		u.applyVolume(id)
 	}
 	updates := v.session.Updates()
+	lost := v.session.Lost()
+	go func() {
+		// A call that ended on its own, its connection lost, says so.
+		for err := range lost {
+			u.post(func() { u.voiceFailed("Disconnected from the voice channel", err) })
+		}
+	}()
 	go func() {
 		// The status and who speaks are read while laying out.
 		for range updates {
@@ -543,7 +550,9 @@ func (c *chatView) joinable(ch discord.Channel) error {
 // joinVoice joins the voice channel ch, leaving the one the user is in.
 func (c *chatView) joinVoice(ch discord.Channel) {
 	u := c.u
-	if u.voiceChannel() == ch.ID {
+	// The channel joined, or being joined, is not joined again, unless its
+	// connection died: joining is then how it is got back.
+	if st := u.voiceStatus(); st.ChannelID == ch.ID && (u.voice.demoChannel.IsValid() || !st.Joined || u.voice.session == nil || u.voice.session.Connected()) {
 		return
 	}
 	if err := c.joinable(ch); err != nil {

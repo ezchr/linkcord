@@ -146,6 +146,13 @@ func (g *Gateway) Ready() *ReadyEvent {
 	return g.ready
 }
 
+// Running reports whether the gateway's event loop is still running: it
+// stops for good on a fatal close code or once its context is cancelled.
+// (Added by Linkcord.)
+func (g *Gateway) Running() bool {
+	return g.gateway.HasStarted()
+}
+
 // LastError returns the last error that the gateway has received. It only
 // returns a valid error if the gateway's event loop as exited. If the event
 // loop hasn't been started AND stopped, the function will panic.
@@ -238,6 +245,15 @@ func (g *gatewayImpl) OnOp(ctx context.Context, op ws.Op) bool {
 	}
 
 	switch data := op.Data.(type) {
+	case *ws.CloseEvent:
+		// A close that the session can come back from, such as the server
+		// going away or the connection dropping: connect again, which
+		// resumes once ready. The fatal codes never get here; the loop
+		// ends on them. (Added by Linkcord.)
+		slog.Warn("voice websocket closed; reconnecting", "code", data.Code, "reason", data.Err, "resume", g.ready != nil)
+		g.gateway.QueueReconnect()
+	case *ResumedEvent:
+		slog.Info("voice websocket resumed")
 	case *HelloEvent:
 		g.gateway.ResetHeartbeat(data.HeartbeatInterval.Duration())
 

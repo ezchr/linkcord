@@ -3,6 +3,7 @@
 package voice
 
 import (
+	"fmt"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -214,6 +215,87 @@ type Session struct {
 	// the first join; cams routes their video once joined.
 	videoBackend VideoBackend
 	cams         atomic.Pointer[cameras]
+
+	// lost is sent why the call ended on its own, the connection lost and
+	// not got back. recovering is set while it is being got back, and
+	// recoveredAt is when it last was, in Unix nanoseconds; deadSince is
+	// since when the watchdog has seen the connection dead.
+	lost        chan error
+	recovering  atomic.Bool
+	// dropped is set when Discord said the connection is no longer in the
+	// channel, though it may look alive.
+	dropped atomic.Bool
+	recoveredAt atomic.Int64
+	deadSince   time.Time
+}
+
+// Lost is sent why the voice channel joined was left on its own: the
+// connection was lost, by Discord or the network, and joining again failed.
+func (s *Session) Lost() <-chan error { return s.lost }
+
+// Connected reports whether the voice channel joined is connected, or is
+// being joined or reconnected: false once the connection died, for joining
+// the channel again to not be taken for a click on the channel already
+// joined.
+func (s *Session) Connected() bool {
+	status := s.Status()
+	if !status.Joined {
+		return false
+	}
+	if s.recovering.Load() {
+		return true
+	}
+	session := s.session.Load()
+	return session != nil && session.Alive()
+}
+
+// recoverDelay is how long, once the connection is lost, before it is got
+// back: Discord's leave or move, which says why, comes in that while, and
+// ends or moves the call instead.
+var recoverDelay = 2 * time.Second
+
+// recoverEvery is how often the connection is got back at most: lost again
+// at once, the call ends rather than rejoin forever.
+const recoverEvery = 30 * time.Second
+
+// connectionLost gets the call back, by joining the channel again, once the
+// voice connection is lost; it ends the call, which Lost tells, when that
+// fails or the connection was lost again right after.
+func (s *Session) connectionLost(why error) {
+	if !s.Status().Joined || !s.recovering.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer s.recovering.Store(false)
+		time.Sleep(recoverDelay)
+		status := s.Status()
+		if !status.Joined {
+			return // left, or moved out, which Discord told
+		}
+		if session := s.session.Load(); session != nil && session.Alive() && !s.dropped.Load() {
+			return // reconnected in the meantime
+		}
+		if time.Since(time.Unix(0, s.recoveredAt.Load())) < recoverEvery {
+			slog.Warn("voice connection lost again; leaving the voice channel", "err", why)
+			s.Leave()
+			s.tellLost(why)
+			return
+		}
+		s.recoveredAt.Store(time.Now().UnixNano())
+		slog.Warn("voice connection lost; joining the voice channel again", "err", why, "channel", status.ChannelID)
+		if err := s.rejoinChannel(status); err != nil {
+			s.tellLost(fmt.Errorf("%w; joining again failed: %v", why, err))
+		}
+	}()
+}
+
+// tellLost tells Lost why the call ended, unless what it was last told was
+// not read yet.
+func (s *Session) tellLost(why error) {
+	select {
+	case s.lost <- why:
+	default:
+	}
 }
 
 // SetVideoBackend has the cameras of the voice channels joined shown by b.
@@ -250,6 +332,7 @@ func New(state *state.State, sensitivity float64) *Session {
 		heardAt:  make(map[discord.UserID]time.Time),
 		speakers: make(map[uint32]*speaker),
 		volumes:  make(map[discord.UserID]float32),
+		lost:     make(chan error, 1),
 	}
 	s.SetSensitivity(sensitivity)
 	s.SetInputVolume(1)
@@ -326,7 +409,13 @@ func (s *Session) follow(event *gateway.VoiceStateUpdateEvent) {
 		s.setStatus(Status{ChannelID: event.ChannelID, Joined: true})
 	case !own && !event.ChannelID.IsValid():
 		// The user's other device leaving, as joining here moves the call
-		// from it: this connection carries on.
+		// from it: this connection carries on. Unless it is this
+		// connection's, joined under a main gateway session since replaced:
+		// Discord dropped it, and it is joined again.
+		if session := s.session.Load(); session != nil && event.SessionID != "" && event.SessionID == session.SessionID() {
+			s.dropped.Store(true)
+			s.connectionLost(errors.New("Discord dropped the voice connection"))
+		}
 	default:
 		s.left()
 	}
@@ -508,6 +597,11 @@ func (s *Session) Join(channelID discord.ChannelID) (err error) {
 			return e2ee
 		}
 		session.AddHandler(func(event *ws.BackgroundErrorEvent) { slog.Debug("voice gateway error", "err", event.Err) })
+		// The voice websocket closed for good, or Discord dropped the
+		// connection, or reconnecting to a new voice server failed: the
+		// call is got back or ended, never left joined on nothing.
+		session.AddHandler(func(ev *voice.ClosedEvent) { s.connectionLost(ev) })
+		session.AddHandler(func(ev *voice.ReconnectError) { s.connectionLost(ev) })
 		session.SetLinkcordOnly(s.linkcordOnly.Load())
 		if s.videoBackend != nil {
 			// Cameras: the voice server is told the video codecs, and the
@@ -562,6 +656,7 @@ func (s *Session) Join(channelID discord.ChannelID) (err error) {
 
 	s.setStatus(Status{ChannelID: channelID, Joined: true})
 	s.joinedChannel = channelID
+	s.dropped.Store(false)
 
 	return nil
 }
@@ -820,10 +915,17 @@ func (s *Session) Reconnect() { s.rejoin() }
 // rejoin leaves the voice channel joined and joins it again, muted and
 // deafened as the user was, which gets new keys from Discord.
 func (s *Session) rejoin() {
-	status := s.Status()
-	if !status.Joined {
-		return
+	if status := s.Status(); status.Joined {
+		if err := s.rejoinChannel(status); err != nil {
+			slog.Warn("could not join the voice channel again", "err", err)
+		}
 	}
+}
+
+// rejoinChannel leaves the voice channel of status and joins it again, as
+// the user was muted and deafened. A join that fails leaves the user in no
+// channel.
+func (s *Session) rejoinChannel(status Status) error {
 	s.mu.Lock()
 	muted, deafened := s.capture == nil, s.playback == nil
 	s.mu.Unlock()
@@ -832,8 +934,7 @@ func (s *Session) rejoin() {
 		slog.Warn("could not leave the voice channel to join it again", "err", err)
 	}
 	if err := s.Join(status.ChannelID); err != nil {
-		slog.Warn("could not join the voice channel again", "err", err)
-		return
+		return err
 	}
 	if !muted {
 		s.Toggle(false)
@@ -841,7 +942,12 @@ func (s *Session) rejoin() {
 	if deafened {
 		s.Toggle(true)
 	}
+	return nil
 }
+
+// deadFor is how long the watchdog sees the connection dead before getting it
+// back: longer than moving to a new voice server takes.
+const deadFor = 30 * time.Second
 
 // watchDevices starts again, every two seconds, the microphone or speakers
 // in use if they stopped, as one does when Windows loses it for a moment, a
@@ -850,7 +956,24 @@ func (s *Session) rejoin() {
 func (s *Session) watchDevices() {
 	for range time.Tick(2 * time.Second) {
 		if !s.Status().Joined {
+			s.deadSince = time.Time{}
 			continue
+		}
+		// A connection that died without anything saying so, the voice
+		// gateway or UDP closed, is got back after a while: the events that
+		// say so got it back sooner, if they came.
+		if session := s.session.Load(); session != nil && !s.recovering.Load() && s.mu.TryLock() {
+			alive := session.Alive()
+			s.mu.Unlock()
+			switch {
+			case alive:
+				s.deadSince = time.Time{}
+			case s.deadSince.IsZero():
+				s.deadSince = time.Now()
+			case time.Since(s.deadSince) > deadFor:
+				s.deadSince = time.Time{}
+				s.connectionLost(errors.New("the voice connection stopped"))
+			}
 		}
 		// Keys that stay broken send what is said with keys the others no
 		// longer have: Discord's own clients hear nothing. Joining again

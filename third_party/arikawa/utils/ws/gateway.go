@@ -371,7 +371,14 @@ func (g *Gateway) spin(ctx context.Context, h Handler) {
 
 		case op, ok := <-g.srcOp:
 			if !ok {
-				// Skip zero-value Ops that may happen on gateway closure.
+				// The connection is gone, and its channel, closed, would be
+				// read again at once forever. A close event, sent before,
+				// already queued a reconnect if it could be recovered from;
+				// one is queued regardless, for a connection that ended
+				// without saying so not to leave the loop on nothing.
+				// (Changed by Linkcord.)
+				g.srcOp = nil
+				g.QueueReconnect()
 				continue
 			}
 

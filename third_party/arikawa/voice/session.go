@@ -54,6 +54,48 @@ func (e ReconnectError) Error() string {
 // Unwrap returns e.Err.
 func (e ReconnectError) Unwrap() error { return e.Err }
 
+// ClosedEvent is emitted into Session.Handler when the voice connection ends
+// without Leave or a reconnect of the session's own: the voice gateway
+// stopped on a close code it cannot come back from, such as 4006 (session
+// no longer valid), 4009 (timed out) or 4014 (disconnected), or Discord said
+// that this connection is no longer in the channel. Nothing is sent or heard
+// after it until the channel is joined again. (Added by Linkcord.)
+type ClosedEvent struct {
+	// Err is why, a *ws.CloseEvent for a close code.
+	Err error
+	// Code is the voice websocket's close code, or -1 if there is none.
+	Code int
+}
+
+// Error implements error.
+func (e *ClosedEvent) Error() string {
+	if e.Code >= 0 {
+		return fmt.Sprintf("voice connection closed (code %d): %v", e.Code, e.Err)
+	}
+	return "voice connection closed: " + e.Err.Error()
+}
+
+// Unwrap returns e.Err.
+func (e *ClosedEvent) Unwrap() error { return e.Err }
+
+// Op implements ws.Event; it is an internal event.
+func (e *ClosedEvent) Op() ws.OpCode { return -1 }
+
+// EventType implements ws.Event.
+func (e *ClosedEvent) EventType() ws.EventType { return "__voice.ClosedEvent" }
+
+// closedEvent makes the ClosedEvent of the gateway loop's last error.
+func closedEvent(err error) *ClosedEvent {
+	ev := &ClosedEvent{Err: err, Code: -1}
+	if err == nil {
+		ev.Err = errors.New("voice gateway stopped")
+	}
+	if ce, ok := errors.AsType[*ws.CloseEvent](err); ok {
+		ev.Code = ce.Code
+	}
+	return ev
+}
+
 var (
 	_ MainSession = (*session.Session)(nil)
 	_ MainSession = (*state.State)(nil)
@@ -109,6 +151,9 @@ type Session struct {
 	sendBuf, recvBuf []byte
 
 	gateway  *voicegateway.Gateway
+	// current is gateway, read without the mutex, which a reconnect holds
+	// for long. (Added by Linkcord.)
+	current atomic.Pointer[voicegateway.Gateway]
 	gwCancel context.CancelFunc
 	gwDone   <-chan struct{}
 	// speaking is what Speaking told Discord last, told every new voice
@@ -226,6 +271,12 @@ func (s *Session) updateState(ev *gateway.VoiceStateUpdateEvent) {
 		// Disconnected by someone else, or by connecting from another client.
 		if !ev.ChannelID.IsValid() || ev.SessionID != s.state.SessionID {
 			s.ensureClosed()
+			reason := "disconnected from the voice channel"
+			if ev.ChannelID.IsValid() {
+				reason = "the voice channel was joined from another session"
+			}
+			slog.Warn("voice: "+reason, "session", ev.SessionID, "channel", ev.ChannelID)
+			go s.Handler.Call(&ClosedEvent{Err: errors.New(reason), Code: -1})
 			return
 		}
 
@@ -454,6 +505,7 @@ func (s *Session) reconnectCtx(ctx context.Context) error {
 	st := s.state
 	st.Video = len(s.Codecs) > 0
 	s.gateway = voicegateway.New(st, s.DAVE)
+	s.current.Store(s.gateway)
 
 	// Open the voice gateway. The function will block until Ready is received.
 	gwctx, gwcancel := context.WithCancel(context.Background())
@@ -475,7 +527,22 @@ func (s *Session) reconnectCtx(ctx context.Context) error {
 	}
 
 	// Start dispatching.
-	s.gwDone = ophandler.Loop(gwch, s.Handler)
+	done := ophandler.Loop(gwch, s.Handler)
+	s.gwDone = done
+
+	// A gateway that stops on its own, on a close code it cannot come back
+	// from, leaves the session joined but with nothing sent or heard: tell
+	// the handler, for it to join again or leave. (Added by Linkcord.)
+	gw := s.gateway
+	go func() {
+		<-done
+		if gwctx.Err() != nil {
+			return // Leave, or a reconnect of the session's own
+		}
+		ev := closedEvent(gw.LastError())
+		slog.Warn("voice gateway stopped", "code", ev.Code, "err", ev.Err)
+		s.Handler.Call(ev)
+	}()
 
 	if s.speaking != 0 {
 		if err := s.gateway.Speaking(ctx, s.speaking); err != nil {
@@ -552,6 +619,27 @@ func (s *Session) spinGateway(ctx context.Context, gwch <-chan ws.Op) error {
 			s.Handler.Call(ev.Data)
 		}
 	}
+}
+
+// Alive reports whether the session is connected to a voice channel: the
+// voice gateway is running and the UDP connection open. A session that
+// Discord or the voice server dropped is not, though nothing left it.
+// (Added by Linkcord.)
+func (s *Session) Alive() bool {
+	gateway := s.current.Load()
+	if s.joining.Load() || gateway == nil || !gateway.Running() {
+		return false
+	}
+	return !s.udpManager.Stopped()
+}
+
+// SessionID is the main gateway session that the voice connection was
+// joined with, "" before one is. (Added by Linkcord.)
+func (s *Session) SessionID() string {
+	s.mut.RLock()
+	defer s.mut.RUnlock()
+
+	return s.state.SessionID
 }
 
 // Speaking tells Discord we're speaking. This method should not be called
