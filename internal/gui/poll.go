@@ -165,14 +165,15 @@ func (c *chatView) updatePoll(gtx layout.Context, m discord.Message) {
 		if !c.pollClick(m.ID, fmt.Sprint(a.AnswerID)).Clicked(gtx) || closed || voted {
 			continue
 		}
-		if !p.AllowMultiselect {
-			c.votePoll(m, []int{a.AnswerID})
-			continue
-		}
+		// Picked, then sent with Vote, as in Discord; with one answer
+		// allowed, picking another leaves the first.
 		sel := c.pollChoice[m.ID]
-		if sel == nil {
+		if sel == nil || !p.AllowMultiselect {
+			on := sel[a.AnswerID]
 			sel = make(map[int]bool)
 			c.pollChoice[m.ID] = sel
+			sel[a.AnswerID] = !on
+			continue
 		}
 		sel[a.AnswerID] = !sel[a.AnswerID]
 	}
@@ -263,7 +264,7 @@ func (c *chatView) layoutPoll(gtx layout.Context, m discord.Message) layout.Dime
 	}
 	footer := []layout.FlexChild{layout.Flexed(1, label(th, 13, colorMuted, status).Layout)}
 	footer = append(footer, actions...)
-	if !results && p.AllowMultiselect {
+	if !results {
 		footer = append(footer, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Left: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				bg := colorSecondaryButton
