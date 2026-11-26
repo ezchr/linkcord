@@ -29,6 +29,7 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
+	"github.com/ezchr/linkcord/internal/wicimg"
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 )
@@ -411,8 +412,13 @@ func (im *images) fetchNet(url string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 }
 
-// decodeScaled decodes a still picture and shrinks it to size pixels.
+// decodeScaled decodes a still picture and shrinks it to size pixels. On
+// Windows, WIC shrinks it while it decodes; the Go decoders are used where it
+// fails.
 func decodeScaled(data []byte, size int) (image.Image, error) {
+	if img, err := wicimg.Still(data, size); err == nil {
+		return orient(img, exifOrientation(data)), nil
+	}
 	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
@@ -431,6 +437,9 @@ func isGIF(data []byte) bool {
 // the ones kept, so the animation keeps its speed.
 func decodeGIF(data []byte, size int) ([]image.Image, []time.Duration, error) {
 	size = min(size, animationMaxSide)
+	if frames, delays, err := wicimg.GIF(data, size, animBudget); err == nil {
+		return frames, delays, nil
+	}
 	g, err := gif.DecodeAll(bytes.NewReader(data))
 	if err != nil {
 		return nil, nil, err
