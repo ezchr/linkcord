@@ -175,6 +175,9 @@ type Session struct {
 	stateMu  sync.Mutex
 	status   Status
 	speaking map[discord.UserID]bool
+	// heardAt is when each user's last voice packet came, for whoever stops
+	// sending without a last silent frame not to stay shown speaking.
+	heardAt map[discord.UserID]time.Time
 	speakers map[uint32]*speaker
 	// volumes are how loud the users not played as they are sent are played, 1 being as they are sent.
 	volumes map[discord.UserID]float32
@@ -213,6 +216,7 @@ func New(state *state.State, sensitivity float64) *Session {
 		updates:  make(chan struct{}, 1),
 		mic:      make(chan []byte, 4),
 		speaking: make(map[discord.UserID]bool),
+		heardAt:  make(map[discord.UserID]time.Time),
 		speakers: make(map[uint32]*speaker),
 		volumes:  make(map[discord.UserID]float32),
 	}
@@ -475,6 +479,7 @@ func (s *Session) Join(channelID discord.ChannelID) (err error) {
 		go s.receive(session)
 		go s.send(session)
 		go s.report()
+		go s.expireSpeaking(nil) // for the session's life, as receive
 		go s.watchDevices()
 	}
 
@@ -710,6 +715,38 @@ func (s *Session) receive(session *voice.Session) {
 		}
 
 		s.setSpeaking(user, string(packet.Opus) != voice.Silence)
+		s.stateMu.Lock()
+		s.heardAt[user] = time.Now()
+		s.stateMu.Unlock()
+	}
+}
+
+// speakingIdle is how long without a packet before someone is no longer
+// shown speaking.
+const speakingIdle = 500 * time.Millisecond
+
+// expireSpeaking clears who stopped sending without saying so, until done.
+func (s *Session) expireSpeaking(done <-chan struct{}) {
+	t := time.NewTicker(250 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-t.C:
+		}
+		s.stateMu.Lock()
+		var quiet []discord.UserID
+		for u, at := range s.heardAt {
+			if time.Since(at) > speakingIdle {
+				quiet = append(quiet, u)
+				delete(s.heardAt, u)
+			}
+		}
+		s.stateMu.Unlock()
+		for _, u := range quiet {
+			s.setSpeaking(u, false)
+		}
 	}
 }
 
@@ -803,13 +840,18 @@ func (s *Session) report() {
 
 // send sends what the microphone captures to the voice channels that session joins, while it is loud enough.
 func (s *Session) send(session *voice.Session) {
-	encoder, err := opus.NewEncoder(opus.EncoderConfig{SampleRate: sampleRate, Channels: channels})
+	// 64 kbps, what Discord's clients send at in a channel left at its
+	// default bitrate.
+	encoder, err := opus.NewEncoder(opus.EncoderConfig{SampleRate: sampleRate, Channels: channels, Bitrate: 64000})
 	if err != nil {
 		slog.Error("failed to create Opus encoder", "err", err)
 		return
 	}
 
 	me, _ := s.state.Cabinet.Me()
+	// announced is the speaking state Discord was last told; joining told
+	// it speaking.
+	announced := true
 
 	var (
 		pcm     []byte
@@ -877,6 +919,23 @@ func (s *Session) send(session *voice.Session) {
 				}
 			case quiet < hangover+5:
 				s.sent.Add(1)
+			}
+
+			// Discord is told when speaking starts and stops, as its clients
+			// do, for others' rings to follow.
+			if talking := quiet < hangover; talking != announced {
+				announced = talking
+				flag := voicegateway.SpeakingFlag(0)
+				if talking {
+					flag = voicegateway.Microphone
+				}
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					if err := session.Speaking(ctx, flag); err != nil {
+						slog.Debug("failed to send speaking state", "err", err)
+					}
+				}()
 			}
 
 			if me != nil {
