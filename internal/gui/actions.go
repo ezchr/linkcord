@@ -467,6 +467,9 @@ func (c *chatView) openMessageMenu(m discord.Message) {
 	if m.Author.ID == c.me.ID && !gone {
 		items = append(items, menuItem{text: "Edit Message", act: func() { c.startEdit(m) }})
 	}
+	if !gone {
+		items = append(items, menuItem{text: "Mark Unread", act: func() { c.markUnread(m) }})
+	}
 	if selectableMessage(m, gone) {
 		// Holding the button on a message does the same.
 		items = append(items, menuItem{text: "Select", act: func() { c.enterSelection(m) }})

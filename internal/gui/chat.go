@@ -26,10 +26,12 @@ import (
 	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
+	"github.com/ayn2op/arikawa/v3/api"
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/ayn2op/arikawa/v3/gateway"
 	"github.com/ayn2op/arikawa/v3/state/store"
 	"github.com/ayn2op/arikawa/v3/utils/handler"
+	"github.com/ayn2op/arikawa/v3/utils/httputil"
 	"github.com/ayn2op/ningen/v3"
 	"github.com/ayn2op/ningen/v3/states/read"
 	"golang.org/x/exp/shiny/materialdesign/icons"
@@ -198,6 +200,9 @@ type chatView struct {
 	// unreadFrom is the last message read when the channel was opened; the
 	// messages after it are marked new.
 	unreadFrom discord.MessageID
+	// heldUnread is the channel marked unread by hand, not marked read
+	// again while it stays open.
+	heldUnread discord.ChannelID
 	// idle is set while the user is away from the computer, since idleSince.
 	idle      bool
 	idleSince time.Time
@@ -369,8 +374,8 @@ type chatView struct {
 	perms    map[discord.ChannelID]cachedPerm
 	// ackTimers are the channels seen waiting to be marked read.
 	ackTimers map[discord.ChannelID]*time.Timer
-	rels     []discord.Relationship
-	relsAt   time.Time
+	rels      []discord.Relationship
+	relsAt    time.Time
 
 	// act is what can be done to messages: see actions.go.
 	act actionState
@@ -1171,7 +1176,7 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 	// Typing was announced in the channel left; the new one is told anew.
 	c.typingUntil = time.Time{}
 	// What was read before opening it, for the "new" line above the rest.
-	c.unreadFrom = 0
+	c.unreadFrom, c.heldUnread = 0, 0
 	if rs := c.st.ReadState.ReadState(ch.ID); rs != nil && ch.LastMessageID > rs.LastMessageID {
 		c.unreadFrom = rs.LastMessageID
 	}
@@ -1314,6 +1319,10 @@ func (c *chatView) markRead(chID discord.ChannelID) {
 // seen marks the channel read as the user sees it, unless they read without
 // marking.
 func (c *chatView) seen(chID discord.ChannelID) {
+	// Marked unread by hand, it stays so while it is open, as in Discord.
+	if chID == c.heldUnread {
+		return
+	}
 	if !c.u.app.GhostRead {
 		c.ackSoon(chID)
 	}
@@ -2414,4 +2423,25 @@ func (c *chatView) mentionsMeIn(m *discord.Message, g gateway.UserGuildSetting) 
 		}
 	}
 	return false
+}
+
+// markUnread marks the channel unread from message m on, as Discord's
+// "Mark Unread" does: read up to the one before it, by hand.
+func (c *chatView) markUnread(m discord.Message) {
+	if c.selChannel == nil {
+		return
+	}
+	chID, prev := c.selChannel.ID, discord.MessageID(m.ID-1)
+	c.heldUnread, c.unreadFrom = chID, prev
+	if c.demo {
+		return
+	}
+	cl := c.st.Client
+	go func() {
+		err := cl.FastRequest("POST", api.EndpointChannels+chID.String()+"/messages/"+prev.String()+"/ack",
+			httputil.WithJSONBody(map[string]any{"manual": true, "mention_count": 0}))
+		if err != nil {
+			c.u.post(func() { c.sendErr = tr("Could not mark the message unread: ") + err.Error() })
+		}
+	}()
 }
