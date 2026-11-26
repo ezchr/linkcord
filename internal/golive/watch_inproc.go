@@ -94,6 +94,12 @@ type inprocDecoder struct {
 	ring   [4]*image.RGBA
 	i      int
 	closed bool
+	// tex is the shared texture pictures go into, when the GUI draws them
+	// from the graphics card; current, read under w.mu, is the one that
+	// has a picture, which the GUI draws, nil when it takes w.frame.
+	tex      *SharedFrame
+	current  *SharedFrame
+	noShared bool
 }
 
 // startInproc starts decoding a sw×sh stream inside Linkcord, in place of
@@ -148,6 +154,13 @@ func (d *inprocDecoder) Write(pic []byte) (int, error) {
 	// Decoded straight at the size shown: the graphics card averages it
 	// down, rather than shrink here.
 	ow, oh := w.viewSize(w.decodeSize(sw, sh))
+	if done, err := d.writeShared(pic, ow, oh); done || err != nil {
+		if err != nil {
+			d.fail(err)
+			return 0, err
+		}
+		return len(pic), nil
+	}
 	if d.ring[i] == nil || d.ring[i].Rect.Dx() != ow || d.ring[i].Rect.Dy() != oh {
 		d.ring[i] = image.NewRGBA(image.Rect(0, 0, ow, oh))
 	}
@@ -163,6 +176,7 @@ func (d *inprocDecoder) Write(pic []byte) (int, error) {
 	d.i = (i + 1) % len(d.ring)
 	w.mu.Lock()
 	current := w.decIn == d
+	d.current = nil
 	if current {
 		w.frame = img
 		w.decW, w.decH = ow, oh
@@ -185,6 +199,7 @@ func (d *inprocDecoder) Write(pic []byte) (int, error) {
 func (d *inprocDecoder) fail(err error) {
 	w := d.w
 	d.closed = true
+	d.dropShared()
 	d.d.close()
 	if !w.inprocOff.Swap(true) {
 		w.log.Warn("the in-process decoder failed; decoding with FFmpeg", "err", err)
@@ -202,7 +217,191 @@ func (d *inprocDecoder) Close() error {
 	defer d.mu.Unlock()
 	if !d.closed {
 		d.closed = true
+		d.dropShared()
 		d.d.close()
 	}
 	return nil
+}
+
+// readbackForced, set in the environment, has every picture read back
+// from the graphics card and drawn from memory, as before shared textures.
+const readbackForced = "LINKCORD_STREAM_READBACK"
+
+// sharedUnavailable is set once the GUI could not draw a shared texture,
+// as with a renderer other than Direct3D 11's: pictures are read back from
+// then on.
+var sharedUnavailable atomic.Bool
+
+// sharedFrames reports whether pictures go to the GUI as shared textures.
+func sharedFrames() bool {
+	return !sharedUnavailable.Load() && os.Getenv(readbackForced) == ""
+}
+
+// SharedFrame is a picture kept on the graphics card, in a texture of the
+// decoder's Direct3D 11 device that the GUI's device opens and draws: no
+// copy goes through memory. It is a paint.SharedImage of Linkcord's Gio.
+type SharedFrame struct {
+	mu      sync.Mutex
+	t       *C.lc_hwtex
+	size    image.Point
+	version atomic.Uint64
+	log     func(err error)
+}
+
+// Size is the size of the picture.
+func (f *SharedFrame) Size() image.Point { return f.size }
+
+// UseSharedTexture calls fn with the texture's shared handle and version,
+// the texture kept alive meanwhile; with 0 once it is freed.
+func (f *SharedFrame) UseSharedTexture(fn func(handle uintptr, version uint64)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	v := f.version.Load()
+	if f.t == nil || v == 0 {
+		fn(0, 0)
+		return
+	}
+	fn(uintptr(C.lc_hwtex_handle(f.t)), v)
+}
+
+// SharedTextureFailed is called by the GUI's renderer when it cannot draw
+// the texture: pictures are read back from then on.
+func (f *SharedFrame) SharedTextureFailed(err error) {
+	if !sharedUnavailable.Swap(true) && f.log != nil {
+		f.log(err)
+	}
+}
+
+func (f *SharedFrame) free() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.t != nil {
+		C.lc_hwtex_free(f.t)
+		f.t = nil
+	}
+}
+
+// newSharedFrame makes a w by h shared texture on the decoder's device, or
+// returns nil.
+func (d *hwDecoder) newSharedFrame(w, h int) *SharedFrame {
+	t := C.lc_hwtex_new(d.c, C.int(w), C.int(h))
+	if t == nil {
+		return nil
+	}
+	return &SharedFrame{t: t, size: image.Pt(w, h)}
+}
+
+// decodeShared decodes the access unit au into f, which it reports whether
+// it wrote a picture to, raising its version.
+func (d *hwDecoder) decodeShared(au []byte, f *SharedFrame) (bool, error) {
+	if len(au) == 0 {
+		return false, nil
+	}
+	var got C.int
+	if C.lc_hwdec_decode_tex(d.c, (*C.uint8_t)(unsafe.Pointer(&au[0])), C.int(len(au)), f.t, &got) != 0 {
+		return false, errors.New("golive: the graphics card's decoder failed")
+	}
+	if got != 0 {
+		f.version.Add(1)
+	}
+	return got != 0, nil
+}
+
+// writeShared decodes pic into the shared texture, at ow by oh, reporting
+// whether it did; false without an error has the picture read back
+// instead. Called with d.mu held.
+func (d *inprocDecoder) writeShared(pic []byte, ow, oh int) (bool, error) {
+	if d.noShared || !sharedFrames() || len(pic) == 0 {
+		if d.tex != nil {
+			d.dropShared()
+		}
+		return false, nil
+	}
+	w := d.w
+	if d.tex == nil || d.tex.size != image.Pt(ow, oh) {
+		f := d.d.newSharedFrame(ow, oh)
+		if f == nil {
+			d.noShared = true
+			w.log.Info("no shared texture for the stream; reading pictures back")
+			return false, nil
+		}
+		// The last one stays until this one has a picture: the GUI
+		// keeps drawing its last copy, and once freed sees no handle.
+		if d.tex != nil && d.tex != d.current {
+			d.tex.free()
+		}
+		f.log = func(err error) {
+			w.log.Warn("the GUI cannot draw the stream from the graphics card; reading pictures back", "err", err)
+		}
+		d.tex = f
+	}
+	got, err := d.d.decodeShared(pic, d.tex)
+	if err != nil {
+		return false, err
+	}
+	if C.lc_hwdec_no_shared(d.d.c) != 0 {
+		d.noShared = true
+		d.dropShared()
+		w.log.Info("the graphics card gives no RGBA for a shared texture; reading pictures back")
+		// This picture is lost; the next is read back.
+		return true, nil
+	}
+	if !got {
+		return true, nil
+	}
+	w.mu.Lock()
+	current := w.decIn == d
+	var old *SharedFrame
+	if current {
+		if d.current != d.tex {
+			old = d.current
+		}
+		d.current = d.tex
+		w.frame = nil
+		w.decW, w.decH = ow, oh
+		if w.waiting.IsZero() {
+			w.waiting = time.Now()
+		}
+	}
+	w.mu.Unlock()
+	if old != nil {
+		old.free()
+	}
+	if current {
+		w.frames.Add(1)
+		if w.p.OnFrame != nil {
+			w.p.OnFrame()
+		}
+	}
+	return true, nil
+}
+
+// dropShared frees the shared textures, the GUI going back to w.frame.
+// Called with d.mu held.
+func (d *inprocDecoder) dropShared() {
+	w := d.w
+	w.mu.Lock()
+	cur := d.current
+	d.current = nil
+	w.mu.Unlock()
+	if cur != nil && cur != d.tex {
+		cur.free()
+	}
+	if d.tex != nil {
+		d.tex.free()
+		d.tex = nil
+	}
+}
+
+// SharedFrame is the latest picture as a texture on the graphics card, or
+// nil when pictures come through Frame instead.
+func (w *Watch) SharedFrame() *SharedFrame {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	d, ok := w.decIn.(*inprocDecoder)
+	if !ok || d.current == nil {
+		return nil
+	}
+	w.waiting = time.Time{}
+	return d.current
 }

@@ -14,9 +14,9 @@ import (
 
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/disgoorg/godave"
+	"github.com/ezchr/linkcord/internal/opus"
 	"github.com/thomas-vilte/dave-go/session"
 	"github.com/thomas-vilte/mls-go/credentials"
-	"github.com/tphakala/go-opus/opus"
 )
 
 // TestWatchAudioDAVE plays stream sound encrypted end to end, as Discord

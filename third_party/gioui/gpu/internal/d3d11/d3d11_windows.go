@@ -869,3 +869,72 @@ func toBlendFactor(f driver.BlendFactor) (uint32, uint32) {
 func sliceOf(ptr uintptr, cap int) []byte {
 	return unsafe.Slice((*byte)(unsafe.Pointer(ptr)), cap)
 }
+
+// sharedTexture is a texture of another device, such as a video decoder's,
+// opened by its shared handle: Linkcord draws decoded video without reading
+// it back. Its keyed mutex orders the decoder's writes and the copies here.
+type sharedTexture struct {
+	backend *Backend
+	tex     *d3d11.Texture2D
+	mutex   *d3d11.IDXGIKeyedMutex
+	size    image.Point
+}
+
+func (b *Backend) OpenSharedTexture(handle uintptr) (driver.SharedTexture, error) {
+	tex, err := b.dev.OpenSharedResource(handle)
+	if err != nil {
+		return nil, err
+	}
+	desc := tex.GetDesc()
+	if desc.Format != d3d11.DXGI_FORMAT_R8G8B8A8_UNORM || desc.MipLevels != 1 || desc.ArraySize != 1 {
+		d3d11.IUnknownRelease(unsafe.Pointer(tex), tex.Vtbl.Release)
+		return nil, fmt.Errorf("d3d11: shared texture of format %d, %d levels, %d slices", desc.Format, desc.MipLevels, desc.ArraySize)
+	}
+	km, err := d3d11.IUnknownQueryInterface(unsafe.Pointer(tex), tex.Vtbl.QueryInterface, &d3d11.IID_IDXGIKeyedMutex)
+	if err != nil {
+		d3d11.IUnknownRelease(unsafe.Pointer(tex), tex.Vtbl.Release)
+		return nil, err
+	}
+	return &sharedTexture{
+		backend: b,
+		tex:     tex,
+		mutex:   (*d3d11.IDXGIKeyedMutex)(unsafe.Pointer(km)),
+		size:    image.Pt(int(desc.Width), int(desc.Height)),
+	}, nil
+}
+
+func (s *sharedTexture) Size() image.Point { return s.size }
+
+func (s *sharedTexture) CopyTo(dst driver.Texture) (bool, error) {
+	t := dst.(*Texture)
+	if t.width != s.size.X || t.height != s.size.Y {
+		return false, fmt.Errorf("d3d11: shared texture of %v copied to %dx%d", s.size, t.width, t.height)
+	}
+	// The decoder holds it only while it queues a copy: a few
+	// milliseconds at most, else the last picture stays.
+	switch r := s.mutex.AcquireSync(0, 8); r {
+	case 0:
+	case d3d11.WAIT_TIMEOUT:
+		return false, nil
+	default:
+		return false, d3d11.ErrorCode{Name: "AcquireSync", Code: r}
+	}
+	// RGBA into sRGB RGBA: the same typeless format, which copies as is.
+	s.backend.ctx.CopySubresourceRegion((*d3d11.Resource)(unsafe.Pointer(t.tex)), 0, 0, 0, 0,
+		(*d3d11.Resource)(unsafe.Pointer(s.tex)), 0, nil)
+	s.mutex.ReleaseSync(0)
+	if t.mipmap {
+		s.backend.ctx.GenerateMips(t.resView)
+	}
+	return true, nil
+}
+
+func (s *sharedTexture) Release() {
+	if s.mutex != nil {
+		d3d11.IUnknownRelease(unsafe.Pointer(s.mutex), s.mutex.Vtbl.Release)
+	}
+	if s.tex != nil {
+		d3d11.IUnknownRelease(unsafe.Pointer(s.tex), s.tex.Vtbl.Release)
+	}
+	*s = sharedTexture{}
+}

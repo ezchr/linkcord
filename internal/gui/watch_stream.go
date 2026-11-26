@@ -32,6 +32,9 @@ type streamWatch struct {
 	// new one.
 	op    paint.ImageOp
 	shown *image.RGBA
+	// shownGPU is the texture op draws when the picture stays on the
+	// graphics card: the renderer copies it again as it changes.
+	shownGPU *golive.SharedFrame
 	// hover is the pointer over the stream, which shows its size and
 	// pictures a second.
 	hover gesture.Hover
@@ -246,6 +249,13 @@ func (c *chatView) watchedFrame(id discord.UserID) *paint.ImageOp {
 	if s == nil || s.w == nil {
 		return nil
 	}
+	if f := s.w.SharedFrame(); f != nil {
+		if f != s.shownGPU {
+			s.op, s.shown, s.shownGPU = paint.NewSharedImageOp(f), nil, f
+		}
+		return &s.op
+	}
+	s.shownGPU = nil
 	img := s.w.Frame()
 	if img == nil {
 		return nil

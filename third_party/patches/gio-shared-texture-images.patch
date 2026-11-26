@@ -1,0 +1,430 @@
+diff --git a/gpu/gpu.go b/gpu/gpu.go
+index 52d8144..2d8fb75 100644
+--- a/gpu/gpu.go
++++ b/gpu/gpu.go
+@@ -67,6 +67,8 @@ type renderer struct {
+ 	intersections packer
+ 	layers        packer
+ 	layerFBOs     fboSet
++	// blank is drawn for a shared image not ready or not drawable.
++	blank driver.Texture
+ }
+ 
+ type drawOps struct {
+@@ -197,11 +199,28 @@ const (
+ 
+ // imageOpData is the shadow of paint.ImageOp.
+ type imageOpData struct {
+-	src    *image.RGBA
++	src *image.RGBA
++	// shared, if set, is drawn in place of src: see paint.SharedImage.
++	shared sharedImage
+ 	handle any
+ 	filter byte
+ }
+ 
++// sharedImage is paint.SharedImage, which this package does not import.
++type sharedImage interface {
++	Size() image.Point
++	UseSharedTexture(f func(handle uintptr, version uint64))
++	SharedTextureFailed(err error)
++}
++
++// size is the size of the image drawn.
++func (d imageOpData) size() image.Point {
++	if d.shared != nil {
++		return d.shared.Size()
++	}
++	return d.src.Bounds().Size()
++}
++
+ type linearGradientOpData struct {
+ 	stop1  f32.Point
+ 	color1 color.NRGBA
+@@ -214,6 +233,9 @@ func decodeImageOp(data []byte, refs []any) imageOpData {
+ 	if handle == nil {
+ 		return imageOpData{}
+ 	}
++	if sh, ok := refs[0].(sharedImage); ok {
++		return imageOpData{shared: sh, handle: handle, filter: data[1]}
++	}
+ 	return imageOpData{
+ 		src:    refs[0].(*image.RGBA),
+ 		handle: handle,
+@@ -265,6 +287,12 @@ type resource interface {
+ type texture struct {
+ 	src *image.RGBA
+ 	tex driver.Texture
++	// For a shared image: the texture opened, the version last copied from
++	// it, and whether it cannot be drawn.
++	shared  driver.SharedTexture
++	version uint64
++	copied  bool
++	failed  bool
+ }
+ 
+ type blitter struct {
+@@ -471,6 +499,9 @@ func (r *renderer) texHandle(cache *textureCache, data imageOpData) driver.Textu
+ 		cache.put(key, t)
+ 	}
+ 	tex = t.(*texture)
++	if data.shared != nil {
++		return r.sharedTexHandle(tex, data)
++	}
+ 	if tex.tex != nil {
+ 		return tex.tex
+ 	}
+@@ -500,6 +531,86 @@ func (t *texture) release() {
+ 	if t.tex != nil {
+ 		t.tex.Release()
+ 	}
++	if t.shared != nil {
++		t.shared.Release()
++	}
++}
++
++// filters are the texture filters of an image's filter.
++func filters(filter byte) (min, mag driver.TextureFilter) {
++	switch filter {
++	case filterNearest:
++		return driver.FilterNearest, driver.FilterNearest
++	default:
++		return driver.FilterLinearMipmapLinear, driver.FilterLinear
++	}
++}
++
++// sharedTexHandle is the texture of a shared image: opened once from its
++// handle, and copied into a texture of this device whenever its version
++// changes. A shared image that cannot be drawn is reported to its source
++// and drawn blank.
++func (r *renderer) sharedTexHandle(tex *texture, data imageOpData) driver.Texture {
++	if tex.failed {
++		return r.blankTexture()
++	}
++	opener, ok := r.ctx.(driver.SharedTextureOpener)
++	if !ok {
++		tex.failed = true
++		data.shared.SharedTextureFailed(errors.New("gpu: the renderer cannot draw shared textures"))
++		return r.blankTexture()
++	}
++	var err error
++	data.shared.UseSharedTexture(func(handle uintptr, version uint64) {
++		if handle == 0 {
++			return
++		}
++		if tex.shared == nil {
++			var st driver.SharedTexture
++			st, err = opener.OpenSharedTexture(handle)
++			if err != nil {
++				return
++			}
++			tex.shared = st
++		}
++		if tex.tex == nil {
++			sz := tex.shared.Size()
++			minF, magF := filters(data.filter)
++			tex.tex, err = r.ctx.NewTexture(driver.TextureFormatSRGBA, sz.X, sz.Y, minF, magF, driver.BufferBindingTexture)
++			if err != nil {
++				return
++			}
++		}
++		if tex.copied && tex.version == version {
++			return
++		}
++		var done bool
++		done, err = tex.shared.CopyTo(tex.tex)
++		if done {
++			tex.version, tex.copied = version, true
++		}
++	})
++	if err != nil {
++		tex.failed = true
++		data.shared.SharedTextureFailed(err)
++	}
++	if tex.failed || !tex.copied {
++		return r.blankTexture()
++	}
++	return tex.tex
++}
++
++// blankTexture is a transparent texture of one pixel.
++func (r *renderer) blankTexture() driver.Texture {
++	if r.blank == nil {
++		t, err := r.ctx.NewTexture(driver.TextureFormatSRGBA, 1, 1, driver.FilterNearest, driver.FilterNearest, driver.BufferBindingTexture)
++		if err != nil {
++			panic(err)
++		}
++		t.Upload(image.Point{}, image.Pt(1, 1), make([]byte, 4), 4)
++		r.blank = t
++	}
++	return r.blank
+ }
+ 
+ func newRenderer(ctx driver.Device) *renderer {
+@@ -527,6 +638,10 @@ func (r *renderer) release() {
+ 	r.pather.release()
+ 	r.blitter.release()
+ 	r.layerFBOs.delete(r.ctx, 0)
++	if r.blank != nil {
++		r.blank.Release()
++		r.blank = nil
++	}
+ }
+ 
+ func newBlitter(ctx driver.Device) *blitter {
+@@ -1093,7 +1208,7 @@ loop:
+ 			inf := float32(1e6)
+ 			dst := f32.Rect(-inf, -inf, inf, inf)
+ 			if state.matType == materialTexture {
+-				sz := state.image.src.Rect.Size()
++				sz := state.image.size()
+ 				dst = f32.Rectangle{Max: layout.FPt(sz)}
+ 			}
+ 			clipData, bnd, partialTrans := d.boundsForTransformedRect(dst, t)
+@@ -1188,7 +1303,7 @@ func (d *drawState) materialFor(rect f32.Rectangle, off f32.Point, partTrans f32
+ 	case materialTexture:
+ 		m.material = materialTexture
+ 		dr := rect.Add(off).Round()
+-		sz := d.image.src.Bounds().Size()
++		sz := d.image.size()
+ 		sr := f32.Rectangle{
+ 			Max: f32.Point{
+ 				X: float32(sz.X),
+diff --git a/gpu/internal/d3d11/d3d11_windows.go b/gpu/internal/d3d11/d3d11_windows.go
+index 5769481..7c7cf39 100644
+--- a/gpu/internal/d3d11/d3d11_windows.go
++++ b/gpu/internal/d3d11/d3d11_windows.go
+@@ -869,3 +869,72 @@ func toBlendFactor(f driver.BlendFactor) (uint32, uint32) {
+ func sliceOf(ptr uintptr, cap int) []byte {
+ 	return unsafe.Slice((*byte)(unsafe.Pointer(ptr)), cap)
+ }
++
++// sharedTexture is a texture of another device, such as a video decoder's,
++// opened by its shared handle: Linkcord draws decoded video without reading
++// it back. Its keyed mutex orders the decoder's writes and the copies here.
++type sharedTexture struct {
++	backend *Backend
++	tex     *d3d11.Texture2D
++	mutex   *d3d11.IDXGIKeyedMutex
++	size    image.Point
++}
++
++func (b *Backend) OpenSharedTexture(handle uintptr) (driver.SharedTexture, error) {
++	tex, err := b.dev.OpenSharedResource(handle)
++	if err != nil {
++		return nil, err
++	}
++	desc := tex.GetDesc()
++	if desc.Format != d3d11.DXGI_FORMAT_R8G8B8A8_UNORM || desc.MipLevels != 1 || desc.ArraySize != 1 {
++		d3d11.IUnknownRelease(unsafe.Pointer(tex), tex.Vtbl.Release)
++		return nil, fmt.Errorf("d3d11: shared texture of format %d, %d levels, %d slices", desc.Format, desc.MipLevels, desc.ArraySize)
++	}
++	km, err := d3d11.IUnknownQueryInterface(unsafe.Pointer(tex), tex.Vtbl.QueryInterface, &d3d11.IID_IDXGIKeyedMutex)
++	if err != nil {
++		d3d11.IUnknownRelease(unsafe.Pointer(tex), tex.Vtbl.Release)
++		return nil, err
++	}
++	return &sharedTexture{
++		backend: b,
++		tex:     tex,
++		mutex:   (*d3d11.IDXGIKeyedMutex)(unsafe.Pointer(km)),
++		size:    image.Pt(int(desc.Width), int(desc.Height)),
++	}, nil
++}
++
++func (s *sharedTexture) Size() image.Point { return s.size }
++
++func (s *sharedTexture) CopyTo(dst driver.Texture) (bool, error) {
++	t := dst.(*Texture)
++	if t.width != s.size.X || t.height != s.size.Y {
++		return false, fmt.Errorf("d3d11: shared texture of %v copied to %dx%d", s.size, t.width, t.height)
++	}
++	// The decoder holds it only while it queues a copy: a few
++	// milliseconds at most, else the last picture stays.
++	switch r := s.mutex.AcquireSync(0, 8); r {
++	case 0:
++	case d3d11.WAIT_TIMEOUT:
++		return false, nil
++	default:
++		return false, d3d11.ErrorCode{Name: "AcquireSync", Code: r}
++	}
++	// RGBA into sRGB RGBA: the same typeless format, which copies as is.
++	s.backend.ctx.CopySubresourceRegion((*d3d11.Resource)(unsafe.Pointer(t.tex)), 0, 0, 0, 0,
++		(*d3d11.Resource)(unsafe.Pointer(s.tex)), 0, nil)
++	s.mutex.ReleaseSync(0)
++	if t.mipmap {
++		s.backend.ctx.GenerateMips(t.resView)
++	}
++	return true, nil
++}
++
++func (s *sharedTexture) Release() {
++	if s.mutex != nil {
++		d3d11.IUnknownRelease(unsafe.Pointer(s.mutex), s.mutex.Vtbl.Release)
++	}
++	if s.tex != nil {
++		d3d11.IUnknownRelease(unsafe.Pointer(s.tex), s.tex.Vtbl.Release)
++	}
++	*s = sharedTexture{}
++}
+diff --git a/gpu/internal/driver/driver.go b/gpu/internal/driver/driver.go
+index 8a43990..fbd8ecc 100644
+--- a/gpu/internal/driver/driver.go
++++ b/gpu/internal/driver/driver.go
+@@ -251,3 +251,19 @@ func UploadImage(t Texture, offset image.Point, img *image.RGBA) {
+ 	pixels = img.Pix[start:end]
+ 	t.Upload(offset, size, pixels, img.Stride)
+ }
++
++// SharedTextureOpener is implemented by a Device that can draw textures
++// another device shares with it (Linkcord: Direct3D 11 only).
++type SharedTextureOpener interface {
++	// OpenSharedTexture opens the shared RGBA texture of handle.
++	OpenSharedTexture(handle uintptr) (SharedTexture, error)
++}
++
++// SharedTexture is a texture opened from another device.
++type SharedTexture interface {
++	Size() image.Point
++	// CopyTo copies the texture into dst, of the same size, reporting
++	// false when the other device held it too long to copy now.
++	CopyTo(dst Texture) (bool, error)
++	Release()
++}
+diff --git a/internal/d3d11/d3d11_windows.go b/internal/d3d11/d3d11_windows.go
+index 20b9f5f..c6130fe 100644
+--- a/internal/d3d11/d3d11_windows.go
++++ b/internal/d3d11/d3d11_windows.go
+@@ -1693,3 +1693,66 @@ func CreateDepthView(d *Device, width, height, depthBits int) (*DepthStencilView
+ 	IUnknownRelease(unsafe.Pointer(depthTex), depthTex.Vtbl.Release)
+ 	return depthView, err
+ }
++
++// Linkcord: drawing textures shared by another Direct3D 11 device, such as
++// a video decoder's, without reading them back.
++
++// IDXGIKeyedMutex orders the use of a shared texture between devices.
++type IDXGIKeyedMutex struct {
++	Vtbl *struct {
++		_IUnknownVTbl
++		SetPrivateData          uintptr
++		SetPrivateDataInterface uintptr
++		GetPrivateData          uintptr
++		GetParent               uintptr
++		GetDevice               uintptr
++		AcquireSync             uintptr
++		ReleaseSync             uintptr
++	}
++}
++
++var IID_IDXGIKeyedMutex = GUID{0x9d8e1289, 0xd7b3, 0x465f, 0x81, 0x26, 0x25, 0x0e, 0x34, 0x9a, 0xf8, 0x5d}
++
++// WAIT_TIMEOUT is what AcquireSync returns when the other device holds the
++// texture past the time given.
++const WAIT_TIMEOUT = 0x102
++
++// OpenSharedResource opens the texture of a legacy shared handle on d.
++func (d *Device) OpenSharedResource(handle uintptr) (*Texture2D, error) {
++	var tex *Texture2D
++	r, _, _ := syscall.Syscall6(
++		d.Vtbl.OpenSharedResource,
++		4,
++		uintptr(unsafe.Pointer(d)),
++		handle,
++		uintptr(unsafe.Pointer(&IID_Texture2D)),
++		uintptr(unsafe.Pointer(&tex)),
++		0, 0,
++	)
++	if r != 0 {
++		return nil, ErrorCode{Name: "OpenSharedResource", Code: uint32(r)}
++	}
++	return tex, nil
++}
++
++// AcquireSync takes the texture with key, waiting at most ms milliseconds.
++// It returns the HRESULT: 0, WAIT_TIMEOUT or an error.
++func (m *IDXGIKeyedMutex) AcquireSync(key uint64, ms uint32) uint32 {
++	r, _, _ := syscall.Syscall(m.Vtbl.AcquireSync, 3, uintptr(unsafe.Pointer(m)), uintptr(key), uintptr(ms))
++	return uint32(r)
++}
++
++// ReleaseSync gives the texture back with key.
++func (m *IDXGIKeyedMutex) ReleaseSync(key uint64) uint32 {
++	r, _, _ := syscall.Syscall(m.Vtbl.ReleaseSync, 2, uintptr(unsafe.Pointer(m)), uintptr(key), 0)
++	return uint32(r)
++}
++
++// GetDesc describes the texture: ID3D11Texture2D::GetDesc, the 11th entry
++// of its vtable after IUnknown's, ID3D11DeviceChild's and ID3D11Resource's.
++func (t *Texture2D) GetDesc() TEXTURE2D_DESC {
++	var desc TEXTURE2D_DESC
++	vtbl := (*[11]uintptr)(unsafe.Pointer(t.Vtbl))
++	syscall.Syscall(vtbl[10], 2, uintptr(unsafe.Pointer(t)), uintptr(unsafe.Pointer(&desc)), 0)
++	return desc
++}
+diff --git a/op/paint/paint.go b/op/paint/paint.go
+index e3afc93..22dcbe1 100644
+--- a/op/paint/paint.go
++++ b/op/paint/paint.go
+@@ -32,6 +32,8 @@ type ImageOp struct {
+ 	uniform bool
+ 	color   color.NRGBA
+ 	src     *image.RGBA
++	// shared, if set, is drawn in place of src (Linkcord).
++	shared SharedImage
+ 
+ 	// handle is a key to uniquely identify this ImageOp
+ 	// in a map of cached textures.
+@@ -96,7 +98,33 @@ func NewImageOp(src image.Image) ImageOp {
+ 	}
+ }
+ 
++// SharedImage is a picture kept on the graphics card by another Direct3D
++// 11 device, such as a video decoder's, which the renderer draws without
++// it being read back (Linkcord). Only the Direct3D 11 renderer can draw it.
++type SharedImage interface {
++	// Size is the size of the texture, which does not change.
++	Size() image.Point
++	// UseSharedTexture calls f with the legacy shared handle of an
++	// R8G8B8A8_UNORM texture with a keyed mutex (key 0), and a version
++	// that changes whenever its content does; the texture stays alive
++	// during the call. A handle of 0 means nothing to draw yet.
++	UseSharedTexture(f func(handle uintptr, version uint64))
++	// SharedTextureFailed is called when the renderer cannot draw the
++	// image, as with another renderer than Direct3D 11's: the source
++	// should then give pixels through NewImageOp instead.
++	SharedTextureFailed(err error)
++}
++
++// NewSharedImageOp creates an ImageOp drawing src. The same src may be
++// given each frame: its version tells when to copy it again.
++func NewSharedImageOp(src SharedImage) ImageOp {
++	return ImageOp{shared: src, handle: src}
++}
++
+ func (i ImageOp) Size() image.Point {
++	if i.shared != nil {
++		return i.shared.Size()
++	}
+ 	if i.src == nil {
+ 		return image.Point{}
+ 	}
+@@ -109,7 +137,17 @@ func (i ImageOp) Add(o *op.Ops) {
+ 			Color: i.color,
+ 		}.Add(o)
+ 		return
+-	} else if i.src == nil || i.src.Bounds().Empty() {
++	}
++	if i.shared != nil {
++		if i.shared.Size().X <= 0 || i.shared.Size().Y <= 0 {
++			return
++		}
++		data := ops.Write2(&o.Internal, ops.TypeImageLen, i.shared, i.handle)
++		data[0] = byte(ops.TypeImage)
++		data[1] = byte(i.Filter)
++		return
++	}
++	if i.src == nil || i.src.Bounds().Empty() {
+ 		return
+ 	}
+ 	data := ops.Write2(&o.Internal, ops.TypeImageLen, i.src, i.handle)

@@ -251,3 +251,19 @@ func UploadImage(t Texture, offset image.Point, img *image.RGBA) {
 	pixels = img.Pix[start:end]
 	t.Upload(offset, size, pixels, img.Stride)
 }
+
+// SharedTextureOpener is implemented by a Device that can draw textures
+// another device shares with it (Linkcord: Direct3D 11 only).
+type SharedTextureOpener interface {
+	// OpenSharedTexture opens the shared RGBA texture of handle.
+	OpenSharedTexture(handle uintptr) (SharedTexture, error)
+}
+
+// SharedTexture is a texture opened from another device.
+type SharedTexture interface {
+	Size() image.Point
+	// CopyTo copies the texture into dst, of the same size, reporting
+	// false when the other device held it too long to copy now.
+	CopyTo(dst Texture) (bool, error)
+	Release()
+}

@@ -32,6 +32,8 @@ type ImageOp struct {
 	uniform bool
 	color   color.NRGBA
 	src     *image.RGBA
+	// shared, if set, is drawn in place of src (Linkcord).
+	shared SharedImage
 
 	// handle is a key to uniquely identify this ImageOp
 	// in a map of cached textures.
@@ -96,7 +98,33 @@ func NewImageOp(src image.Image) ImageOp {
 	}
 }
 
+// SharedImage is a picture kept on the graphics card by another Direct3D
+// 11 device, such as a video decoder's, which the renderer draws without
+// it being read back (Linkcord). Only the Direct3D 11 renderer can draw it.
+type SharedImage interface {
+	// Size is the size of the texture, which does not change.
+	Size() image.Point
+	// UseSharedTexture calls f with the legacy shared handle of an
+	// R8G8B8A8_UNORM texture with a keyed mutex (key 0), and a version
+	// that changes whenever its content does; the texture stays alive
+	// during the call. A handle of 0 means nothing to draw yet.
+	UseSharedTexture(f func(handle uintptr, version uint64))
+	// SharedTextureFailed is called when the renderer cannot draw the
+	// image, as with another renderer than Direct3D 11's: the source
+	// should then give pixels through NewImageOp instead.
+	SharedTextureFailed(err error)
+}
+
+// NewSharedImageOp creates an ImageOp drawing src. The same src may be
+// given each frame: its version tells when to copy it again.
+func NewSharedImageOp(src SharedImage) ImageOp {
+	return ImageOp{shared: src, handle: src}
+}
+
 func (i ImageOp) Size() image.Point {
+	if i.shared != nil {
+		return i.shared.Size()
+	}
 	if i.src == nil {
 		return image.Point{}
 	}
@@ -109,7 +137,17 @@ func (i ImageOp) Add(o *op.Ops) {
 			Color: i.color,
 		}.Add(o)
 		return
-	} else if i.src == nil || i.src.Bounds().Empty() {
+	}
+	if i.shared != nil {
+		if i.shared.Size().X <= 0 || i.shared.Size().Y <= 0 {
+			return
+		}
+		data := ops.Write2(&o.Internal, ops.TypeImageLen, i.shared, i.handle)
+		data[0] = byte(ops.TypeImage)
+		data[1] = byte(i.Filter)
+		return
+	}
+	if i.src == nil || i.src.Bounds().Empty() {
 		return
 	}
 	data := ops.Write2(&o.Internal, ops.TypeImageLen, i.src, i.handle)

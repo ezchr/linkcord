@@ -224,4 +224,21 @@ void lc_hwdec_size(lc_hwdec *d, int *w, int *h);
 
 void lc_hwdec_close(lc_hwdec *d);
 
+// lc_hwtex is a texture of a decoder's device shared with the GUI's, by a
+// legacy shared handle, with a keyed mutex: pictures go into it and are
+// drawn from it without being read back.
+typedef struct lc_hwtex lc_hwtex;
+
+// lc_hwtex_new makes a w by h RGBA shared texture on d's device, or
+// returns NULL.
+lc_hwtex *lc_hwtex_new(lc_hwdec *d, int w, int h);
+uintptr_t lc_hwtex_handle(lc_hwtex *t);
+void lc_hwtex_free(lc_hwtex *t);
+
+// lc_hwdec_decode_tex is lc_hwdec_decode with the picture going into out,
+// at its size. Where the graphics card cannot give RGBA,
+// lc_hwdec_no_shared then reports 1 and nothing is written.
+int lc_hwdec_decode_tex(lc_hwdec *d, const uint8_t *au, int len, lc_hwtex *out, int *got);
+int lc_hwdec_no_shared(lc_hwdec *d);
+
 #endif

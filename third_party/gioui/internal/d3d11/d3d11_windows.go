@@ -1693,3 +1693,66 @@ func CreateDepthView(d *Device, width, height, depthBits int) (*DepthStencilView
 	IUnknownRelease(unsafe.Pointer(depthTex), depthTex.Vtbl.Release)
 	return depthView, err
 }
+
+// Linkcord: drawing textures shared by another Direct3D 11 device, such as
+// a video decoder's, without reading them back.
+
+// IDXGIKeyedMutex orders the use of a shared texture between devices.
+type IDXGIKeyedMutex struct {
+	Vtbl *struct {
+		_IUnknownVTbl
+		SetPrivateData          uintptr
+		SetPrivateDataInterface uintptr
+		GetPrivateData          uintptr
+		GetParent               uintptr
+		GetDevice               uintptr
+		AcquireSync             uintptr
+		ReleaseSync             uintptr
+	}
+}
+
+var IID_IDXGIKeyedMutex = GUID{0x9d8e1289, 0xd7b3, 0x465f, 0x81, 0x26, 0x25, 0x0e, 0x34, 0x9a, 0xf8, 0x5d}
+
+// WAIT_TIMEOUT is what AcquireSync returns when the other device holds the
+// texture past the time given.
+const WAIT_TIMEOUT = 0x102
+
+// OpenSharedResource opens the texture of a legacy shared handle on d.
+func (d *Device) OpenSharedResource(handle uintptr) (*Texture2D, error) {
+	var tex *Texture2D
+	r, _, _ := syscall.Syscall6(
+		d.Vtbl.OpenSharedResource,
+		4,
+		uintptr(unsafe.Pointer(d)),
+		handle,
+		uintptr(unsafe.Pointer(&IID_Texture2D)),
+		uintptr(unsafe.Pointer(&tex)),
+		0, 0,
+	)
+	if r != 0 {
+		return nil, ErrorCode{Name: "OpenSharedResource", Code: uint32(r)}
+	}
+	return tex, nil
+}
+
+// AcquireSync takes the texture with key, waiting at most ms milliseconds.
+// It returns the HRESULT: 0, WAIT_TIMEOUT or an error.
+func (m *IDXGIKeyedMutex) AcquireSync(key uint64, ms uint32) uint32 {
+	r, _, _ := syscall.Syscall(m.Vtbl.AcquireSync, 3, uintptr(unsafe.Pointer(m)), uintptr(key), uintptr(ms))
+	return uint32(r)
+}
+
+// ReleaseSync gives the texture back with key.
+func (m *IDXGIKeyedMutex) ReleaseSync(key uint64) uint32 {
+	r, _, _ := syscall.Syscall(m.Vtbl.ReleaseSync, 2, uintptr(unsafe.Pointer(m)), uintptr(key), 0)
+	return uint32(r)
+}
+
+// GetDesc describes the texture: ID3D11Texture2D::GetDesc, the 11th entry
+// of its vtable after IUnknown's, ID3D11DeviceChild's and ID3D11Resource's.
+func (t *Texture2D) GetDesc() TEXTURE2D_DESC {
+	var desc TEXTURE2D_DESC
+	vtbl := (*[11]uintptr)(unsafe.Pointer(t.Vtbl))
+	syscall.Syscall(vtbl[10], 2, uintptr(unsafe.Pointer(t)), uintptr(unsafe.Pointer(&desc)), 0)
+	return desc
+}

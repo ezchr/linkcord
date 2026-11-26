@@ -34,6 +34,8 @@ LC_DGUID(lc_dec_IID_IMFDXGIBuffer, 0xe7174cfa, 0x1c9e, 0x48b1, 0x88, 0x66, 0x62,
 LC_DGUID(lc_dec_IID_ID3D11Texture2D, 0x6f15aaf2, 0xd208, 0x4e89, 0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c);
 LC_DGUID(lc_dec_IID_ID3D11VideoDevice, 0x10ec4d5b, 0x975a, 0x4689, 0xb9, 0xe4, 0xd0, 0xaa, 0xc3, 0x0f, 0xe3, 0x33);
 LC_DGUID(lc_dec_IID_ID3D11VideoContext, 0x61f21c45, 0x3c0e, 0x4a74, 0x9c, 0xea, 0x67, 0x10, 0x0d, 0x9a, 0xd5, 0xe4);
+LC_DGUID(lc_dec_IID_IDXGIResource, 0x035f3ab4, 0x482e, 0x4e50, 0xb4, 0x1f, 0x8a, 0x7f, 0x8b, 0xd8, 0x96, 0x0b);
+LC_DGUID(lc_dec_IID_IDXGIKeyedMutex, 0x9d8e1289, 0xd7b3, 0x465f, 0x81, 0x26, 0x25, 0x0e, 0x34, 0x9a, 0xf8, 0x5d);
 
 typedef HRESULT(WINAPI *dec_startup_fn)(ULONG, DWORD);
 typedef HRESULT(WINAPI *dec_media_type_fn)(IMFMediaType **);
@@ -127,7 +129,70 @@ struct lc_hwdec {
 		ID3D11VideoProcessorInputView *view;
 	} views[LC_DEC_VIEWS];
 	int nviews;
+	// no_shared is set once the output could not go to a shared texture:
+	// the graphics card gives only BGRA.
+	int no_shared;
 };
+
+// lc_hwtex is a texture shared with the GUI's Direct3D 11 device, which
+// draws the pictures from it without reading them back. Its keyed mutex
+// (key 0 on both sides) orders the writes here and the GUI's copies.
+struct lc_hwtex {
+	ID3D11Texture2D *tex;
+	IDXGIKeyedMutex *km;
+	HANDLE handle;
+	int w, h;
+};
+
+void lc_hwtex_free(lc_hwtex *t) {
+	if (!t) {
+		return;
+	}
+	if (t->km) {
+		IDXGIKeyedMutex_Release(t->km);
+	}
+	if (t->tex) {
+		ID3D11Texture2D_Release(t->tex);
+	}
+	free(t);
+}
+
+lc_hwtex *lc_hwtex_new(lc_hwdec *d, int w, int h) {
+	lc_hwtex *t = calloc(1, sizeof *t);
+	if (!t) {
+		return NULL;
+	}
+	D3D11_TEXTURE2D_DESC td;
+	memset(&td, 0, sizeof td);
+	td.Width = (UINT)w;
+	td.Height = (UINT)h;
+	td.MipLevels = td.ArraySize = 1;
+	td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	td.SampleDesc.Count = 1;
+	td.Usage = D3D11_USAGE_DEFAULT;
+	td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+	td.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+	IDXGIResource *r = NULL;
+	if (FAILED(ID3D11Device_CreateTexture2D(d->dev, &td, NULL, &t->tex)) ||
+	    FAILED(ID3D11Texture2D_QueryInterface(t->tex, &lc_dec_IID_IDXGIKeyedMutex, (void **)&t->km)) ||
+	    FAILED(ID3D11Texture2D_QueryInterface(t->tex, &lc_dec_IID_IDXGIResource, (void **)&r))) {
+		lc_hwtex_free(t);
+		return NULL;
+	}
+	HRESULT hr = IDXGIResource_GetSharedHandle(r, &t->handle);
+	IDXGIResource_Release(r);
+	if (FAILED(hr) || !t->handle) {
+		lc_hwtex_free(t);
+		return NULL;
+	}
+	t->w = w;
+	t->h = h;
+	return t;
+}
+
+uintptr_t lc_hwtex_handle(lc_hwtex *t) { return (uintptr_t)t->handle; }
+
+int lc_hwdec_no_shared(lc_hwdec *d) { return d->no_shared; }
 
 #define LC_DREL(p, fn) \
 	do { \
@@ -456,8 +521,9 @@ static ID3D11VideoProcessorInputView *dec_view(lc_hwdec *d, ID3D11Texture2D *tex
 }
 
 // dec_render scales and converts the decoded picture s to ow by oh RGBA
-// into rgba, with rows ow*4 bytes apart.
-static int dec_render(lc_hwdec *d, IMFSample *s, uint8_t *rgba, int ow, int oh) {
+// into rgba, with rows ow*4 bytes apart, or, with out set, into that shared
+// texture of the same size. It returns 0 with *got set, or -1.
+static int dec_render(lc_hwdec *d, IMFSample *s, uint8_t *rgba, lc_hwtex *out, int ow, int oh, int *got) {
 	IMFMediaBuffer *b = NULL;
 	if (FAILED(IMFSample_GetBufferByIndex(s, 0, &b))) {
 		return -1;
@@ -498,6 +564,28 @@ static int dec_render(lc_hwdec *d, IMFSample *s, uint8_t *rgba, int ow, int oh) 
 			goto done;
 		}
 	}
+	if (out) {
+		if (!d->rgba || out->w != ow || out->h != oh) {
+			// Left to the caller to read back instead.
+			d->no_shared = 1;
+			ret = 0;
+			goto done;
+		}
+		// The GUI holds it only while it queues a copy.
+		HRESULT ah = IDXGIKeyedMutex_AcquireSync(out->km, 0, 500);
+		if (ah != S_OK) {
+			// Not taken in time: this picture is skipped.
+			ret = FAILED(ah) ? -1 : 0;
+			goto done;
+		}
+		ID3D11DeviceContext_CopyResource(d->ctx, (ID3D11Resource *)out->tex, (ID3D11Resource *)d->st[d->nst - 1].out);
+		IDXGIKeyedMutex_ReleaseSync(out->km, 0);
+		// The GUI's device sees the copy once it has been sent.
+		ID3D11DeviceContext_Flush(d->ctx);
+		*got = 1;
+		ret = 0;
+		goto done;
+	}
 	ID3D11DeviceContext_CopyResource(d->ctx, (ID3D11Resource *)d->staging, (ID3D11Resource *)d->st[d->nst - 1].out);
 	D3D11_MAPPED_SUBRESOURCE m;
 	if (FAILED(ID3D11DeviceContext_Map(d->ctx, (ID3D11Resource *)d->staging, 0, D3D11_MAP_READ, 0, &m))) {
@@ -519,6 +607,7 @@ static int dec_render(lc_hwdec *d, IMFSample *s, uint8_t *rgba, int ow, int oh) 
 		}
 	}
 	ID3D11DeviceContext_Unmap(d->ctx, (ID3D11Resource *)d->staging, 0);
+	*got = 1;
 	ret = 0;
 done:
 	ID3D11Texture2D_Release(tex);
@@ -527,7 +616,7 @@ done:
 
 // dec_drain takes every picture the decoder has ready, rendering each into
 // rgba: the last one stays. It returns 0 or -1.
-static int dec_drain(lc_hwdec *d, uint8_t *rgba, int ow, int oh, int *got) {
+static int dec_drain(lc_hwdec *d, uint8_t *rgba, lc_hwtex *out, int ow, int oh, int *got) {
 	for (;;) {
 		MFT_OUTPUT_DATA_BUFFER ob;
 		memset(&ob, 0, sizeof ob);
@@ -558,9 +647,7 @@ static int dec_drain(lc_hwdec *d, uint8_t *rgba, int ow, int oh, int *got) {
 		} else if (FAILED(hr)) {
 			ret = -1;
 		} else if (ob.pSample) {
-			if (dec_render(d, ob.pSample, rgba, ow, oh) == 0) {
-				*got = 1;
-			} else {
+			if (dec_render(d, ob.pSample, rgba, out, ow, oh, got) != 0) {
 				ret = -1;
 			}
 		}
@@ -576,7 +663,7 @@ static int dec_drain(lc_hwdec *d, uint8_t *rgba, int ow, int oh, int *got) {
 	}
 }
 
-int lc_hwdec_decode(lc_hwdec *d, const uint8_t *au, int len, uint8_t *rgba, int ow, int oh, int *got) {
+static int dec_decode(lc_hwdec *d, const uint8_t *au, int len, uint8_t *rgba, lc_hwtex *out, int ow, int oh, int *got) {
 	*got = 0;
 	if (ow <= 0 || oh <= 0) {
 		return -1;
@@ -609,7 +696,7 @@ int lc_hwdec_decode(lc_hwdec *d, const uint8_t *au, int len, uint8_t *rgba, int 
 	d->ts += 166667;
 	HRESULT hr = IMFTransform_ProcessInput(d->t, 0, s, 0);
 	if (hr == MF_E_NOTACCEPTING) {
-		if (dec_drain(d, rgba, ow, oh, got) < 0) {
+		if (dec_drain(d, rgba, out, ow, oh, got) < 0) {
 			IMFSample_Release(s);
 			return -1;
 		}
@@ -619,7 +706,15 @@ int lc_hwdec_decode(lc_hwdec *d, const uint8_t *au, int len, uint8_t *rgba, int 
 	if (FAILED(hr)) {
 		return -1;
 	}
-	return dec_drain(d, rgba, ow, oh, got);
+	return dec_drain(d, rgba, out, ow, oh, got);
+}
+
+int lc_hwdec_decode(lc_hwdec *d, const uint8_t *au, int len, uint8_t *rgba, int ow, int oh, int *got) {
+	return dec_decode(d, au, len, rgba, NULL, ow, oh, got);
+}
+
+int lc_hwdec_decode_tex(lc_hwdec *d, const uint8_t *au, int len, lc_hwtex *out, int *got) {
+	return dec_decode(d, au, len, NULL, out, out->w, out->h, got);
 }
 
 // lc_hwdec_size reports the size of the picture shown, once known.

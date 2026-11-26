@@ -232,6 +232,7 @@ When merging upstream discordo changes, replace `github.com/ayn2op/discordo` mod
 `go.mod` uses local copies of Gio and its extensions, Arikawa and dave-go. Patch files are retained in `third_party/patches/` so the changes can be reapplied to newer versions.
 
 - **Gio v0.10.3:** checks for Windows APIs unavailable on Windows 7 and falls back to classic mouse messages. Direct3D hardware failures fall back to WARP.
+- **Gio, shared textures (`gio-shared-texture-images.patch`):** `paint.NewSharedImageOp` draws a texture another Direct3D 11 device shares (legacy shared handle, keyed mutex), copied on the graphics card into Gio's own texture when its version changes, so the stream viewer draws decoded video without reading it back. Renderers other than Direct3D 11 report the image as undrawable and the viewer reads pictures back instead.
 - **gioui.org/x v0.10.3:** draws image glyphs in rich text so color emoji remain visible; also supports the project's rich-text span callback, and reports where every span and its letters are laid out, for selecting text.
 - **Arikawa (ayn2op fork, 2026-10-12):** users carry their avatar decoration, nameplate and server tag (`avatar_decoration_data`, `collectibles`, `primary_guild`), which Discord sends with every user and Arikawa dropped. A voice session tells every voice server it is moved to that it speaks, as it told the first; otherwise, after Discord moves a call to another server, nobody hears the user.
 - **Arikawa, polls:** messages carry their poll (`poll`), which Arikawa dropped.

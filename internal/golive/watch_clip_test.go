@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tphakala/go-opus/opus"
+	"github.com/ezchr/linkcord/internal/opus"
 )
 
 func TestSaveClip(t *testing.T) {

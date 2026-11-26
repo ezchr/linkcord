@@ -67,6 +67,8 @@ type renderer struct {
 	intersections packer
 	layers        packer
 	layerFBOs     fboSet
+	// blank is drawn for a shared image not ready or not drawable.
+	blank driver.Texture
 }
 
 type drawOps struct {
@@ -197,9 +199,26 @@ const (
 
 // imageOpData is the shadow of paint.ImageOp.
 type imageOpData struct {
-	src    *image.RGBA
+	src *image.RGBA
+	// shared, if set, is drawn in place of src: see paint.SharedImage.
+	shared sharedImage
 	handle any
 	filter byte
+}
+
+// sharedImage is paint.SharedImage, which this package does not import.
+type sharedImage interface {
+	Size() image.Point
+	UseSharedTexture(f func(handle uintptr, version uint64))
+	SharedTextureFailed(err error)
+}
+
+// size is the size of the image drawn.
+func (d imageOpData) size() image.Point {
+	if d.shared != nil {
+		return d.shared.Size()
+	}
+	return d.src.Bounds().Size()
 }
 
 type linearGradientOpData struct {
@@ -213,6 +232,9 @@ func decodeImageOp(data []byte, refs []any) imageOpData {
 	handle := refs[1]
 	if handle == nil {
 		return imageOpData{}
+	}
+	if sh, ok := refs[0].(sharedImage); ok {
+		return imageOpData{shared: sh, handle: handle, filter: data[1]}
 	}
 	return imageOpData{
 		src:    refs[0].(*image.RGBA),
@@ -265,6 +287,12 @@ type resource interface {
 type texture struct {
 	src *image.RGBA
 	tex driver.Texture
+	// For a shared image: the texture opened, the version last copied from
+	// it, and whether it cannot be drawn.
+	shared  driver.SharedTexture
+	version uint64
+	copied  bool
+	failed  bool
 }
 
 type blitter struct {
@@ -471,6 +499,9 @@ func (r *renderer) texHandle(cache *textureCache, data imageOpData) driver.Textu
 		cache.put(key, t)
 	}
 	tex = t.(*texture)
+	if data.shared != nil {
+		return r.sharedTexHandle(tex, data)
+	}
 	if tex.tex != nil {
 		return tex.tex
 	}
@@ -500,6 +531,86 @@ func (t *texture) release() {
 	if t.tex != nil {
 		t.tex.Release()
 	}
+	if t.shared != nil {
+		t.shared.Release()
+	}
+}
+
+// filters are the texture filters of an image's filter.
+func filters(filter byte) (min, mag driver.TextureFilter) {
+	switch filter {
+	case filterNearest:
+		return driver.FilterNearest, driver.FilterNearest
+	default:
+		return driver.FilterLinearMipmapLinear, driver.FilterLinear
+	}
+}
+
+// sharedTexHandle is the texture of a shared image: opened once from its
+// handle, and copied into a texture of this device whenever its version
+// changes. A shared image that cannot be drawn is reported to its source
+// and drawn blank.
+func (r *renderer) sharedTexHandle(tex *texture, data imageOpData) driver.Texture {
+	if tex.failed {
+		return r.blankTexture()
+	}
+	opener, ok := r.ctx.(driver.SharedTextureOpener)
+	if !ok {
+		tex.failed = true
+		data.shared.SharedTextureFailed(errors.New("gpu: the renderer cannot draw shared textures"))
+		return r.blankTexture()
+	}
+	var err error
+	data.shared.UseSharedTexture(func(handle uintptr, version uint64) {
+		if handle == 0 {
+			return
+		}
+		if tex.shared == nil {
+			var st driver.SharedTexture
+			st, err = opener.OpenSharedTexture(handle)
+			if err != nil {
+				return
+			}
+			tex.shared = st
+		}
+		if tex.tex == nil {
+			sz := tex.shared.Size()
+			minF, magF := filters(data.filter)
+			tex.tex, err = r.ctx.NewTexture(driver.TextureFormatSRGBA, sz.X, sz.Y, minF, magF, driver.BufferBindingTexture)
+			if err != nil {
+				return
+			}
+		}
+		if tex.copied && tex.version == version {
+			return
+		}
+		var done bool
+		done, err = tex.shared.CopyTo(tex.tex)
+		if done {
+			tex.version, tex.copied = version, true
+		}
+	})
+	if err != nil {
+		tex.failed = true
+		data.shared.SharedTextureFailed(err)
+	}
+	if tex.failed || !tex.copied {
+		return r.blankTexture()
+	}
+	return tex.tex
+}
+
+// blankTexture is a transparent texture of one pixel.
+func (r *renderer) blankTexture() driver.Texture {
+	if r.blank == nil {
+		t, err := r.ctx.NewTexture(driver.TextureFormatSRGBA, 1, 1, driver.FilterNearest, driver.FilterNearest, driver.BufferBindingTexture)
+		if err != nil {
+			panic(err)
+		}
+		t.Upload(image.Point{}, image.Pt(1, 1), make([]byte, 4), 4)
+		r.blank = t
+	}
+	return r.blank
 }
 
 func newRenderer(ctx driver.Device) *renderer {
@@ -527,6 +638,10 @@ func (r *renderer) release() {
 	r.pather.release()
 	r.blitter.release()
 	r.layerFBOs.delete(r.ctx, 0)
+	if r.blank != nil {
+		r.blank.Release()
+		r.blank = nil
+	}
 }
 
 func newBlitter(ctx driver.Device) *blitter {
@@ -1093,7 +1208,7 @@ loop:
 			inf := float32(1e6)
 			dst := f32.Rect(-inf, -inf, inf, inf)
 			if state.matType == materialTexture {
-				sz := state.image.src.Rect.Size()
+				sz := state.image.size()
 				dst = f32.Rectangle{Max: layout.FPt(sz)}
 			}
 			clipData, bnd, partialTrans := d.boundsForTransformedRect(dst, t)
@@ -1188,7 +1303,7 @@ func (d *drawState) materialFor(rect f32.Rectangle, off f32.Point, partTrans f32
 	case materialTexture:
 		m.material = materialTexture
 		dr := rect.Add(off).Round()
-		sz := d.image.src.Bounds().Size()
+		sz := d.image.size()
 		sr := f32.Rectangle{
 			Max: f32.Point{
 				X: float32(sz.X),
