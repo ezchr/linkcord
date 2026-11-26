@@ -25,9 +25,11 @@ import (
 // event_sequence_number and client_uuid, plus the common properties
 // (rendered_locale, uptime_app, cpu_core_count, client_performance_memory),
 // and batches carry client_send_timestamp. Events are throttled per key as
-// the client throttles them. Device values are real ones read here; values
-// that identify a client build (launch signature, fingerprint) are not
-// sent. Nothing is sent while the user turns analytics off.
+// the client throttles them. Device values are real ones read here; the
+// launch signature and heartbeat session are the launch's own, shared with
+// the super properties. The fingerprint, which the web client only holds
+// logged out, is not sent with events, as there. Nothing is sent while the
+// user turns analytics off.
 type science struct {
 	client *httputil.Client
 	off    func() bool
@@ -98,7 +100,7 @@ func newScience(client *httputil.Client, off func() bool) *science {
 		off:       off,
 		last:      make(map[string]time.Time),
 		started:   time.Now(),
-		sessionID: newUUID(),
+		sessionID: lchttp.HeartbeatSessionID(),
 		uuid:      clientUUID{prefix: mrand.Uint32(), created: uint64(time.Now().UnixMilli())},
 		wake:      make(chan struct{}, 1),
 		done:      make(chan struct{}),
@@ -151,6 +153,7 @@ func (s *science) track(typ string, props map[string]any, key string, every time
 		"uptime_app":                  int(time.Since(s.started).Seconds()),
 		"cpu_core_count":              runtime.NumCPU(),
 		"client_performance_memory":   mem.Sys / 1024,
+		"launch_signature":            lchttp.LaunchSignature(),
 	}
 	for k, v := range props {
 		p[k] = v
@@ -281,6 +284,7 @@ func (s *science) beaker() {
 			"event_queue_batch_min_size":       st.minBatch,
 			"event_queue_batch_max_size":       st.maxBatch,
 			"event_queue_batch_avg_size":       avg,
+			"launch_signature":                 lchttp.LaunchSignature(),
 		}}
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		err := s.client.WithContext(ctx).FastRequest("POST", api.Endpoint+"beaker",

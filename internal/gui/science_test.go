@@ -36,7 +36,7 @@ func TestScienceTrack(t *testing.T) {
 		t.Fatalf("throttle: %d events queued", len(s.queue))
 	}
 	p := s.queue[0].Properties
-	for _, k := range []string{"client_track_timestamp", "client_heartbeat_session_id", "event_sequence_number", "client_uuid", "rendered_locale", "uptime_app", "cpu_core_count"} {
+	for _, k := range []string{"client_track_timestamp", "client_heartbeat_session_id", "event_sequence_number", "client_uuid", "rendered_locale", "uptime_app", "cpu_core_count", "launch_signature"} {
 		if _, ok := p[k]; !ok {
 			t.Errorf("missing %s", k)
 		}

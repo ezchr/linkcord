@@ -66,30 +66,27 @@ func IdentifyProperties() gateway.IdentifyProperties {
 func xSuperProperties() gateway.IdentifyProperties {
 	props := commonProperties()
 	props["client_app_state"] = "focused"
-	props["client_heartbeat_session_id"] = uuid.NewV4().String()
-	props["launch_signature"] = generateLaunchSignature()
+	props["client_heartbeat_session_id"] = heartbeatSessionID
+	props["launch_signature"] = launchSignature
 	return props
 }
 
-func generateLaunchSignature() string {
-	// Discord uses specific UUID bits to detect client modifications.
-	// This mask clears detection bits to avoid identification.
-	// Reference: https://docs.discord.food/reference#launch-signature
-	//
-	// Required version and variant bits for UUIDv4 validity are set by uuid.NewV4.
-	// Reference: https://pkg.go.dev/uuid#NewV4
-	mask := [16]byte{
-		0b11111111, 0b01111111, 0b11101111, 0b11101111,
-		0b11110111, 0b11101111, 0b11110111, 0b11111111,
-		0b11011111, 0b01111110, 0b11111111, 0b10111111,
-		0b11111110, 0b11111111, 0b11110111, 0b11111111,
-	}
-	id := uuid.NewV4()
-	for i := range mask {
-		id[i] &= mask[i]
-	}
-	return id.String()
-}
+// launchSignature is this launch's launch_signature. Discord's web client
+// makes it once per load with libdiscore's generateLaunchSignature, which
+// (disassembled, client study doc 06) is a random UUID and nothing else:
+// it is held for the launch and sent in the super properties of every
+// request, in every analytics event and in the hourly report.
+var launchSignature = uuid.NewV4().String()
+
+// heartbeatSessionID is this session's client_heartbeat_session_id, the same
+// in the super properties and in every analytics event, as on the web.
+var heartbeatSessionID = uuid.NewV4().String()
+
+// LaunchSignature is this launch's launch_signature.
+func LaunchSignature() string { return launchSignature }
+
+// HeartbeatSessionID is this session's client_heartbeat_session_id.
+func HeartbeatSessionID() string { return heartbeatSessionID }
 
 // Locale is the UI locale the client reports, as in X-Discord-Locale.
 func Locale() string { return string(locale) }
