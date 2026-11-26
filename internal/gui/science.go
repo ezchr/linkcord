@@ -28,8 +28,8 @@ import (
 // the client throttles them. Device values are real ones read here; the
 // launch signature and heartbeat session are the launch's own, shared with
 // the super properties. The fingerprint, which the web client only holds
-// logged out, is not sent with events, as there. Nothing is sent while the
-// user turns analytics off.
+// logged out, is not sent with events, as there. It is always on, as in
+// Discord's own client; off exists only for tests.
 type science struct {
 	client *httputil.Client
 	off    func() bool

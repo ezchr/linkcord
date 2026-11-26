@@ -68,9 +68,6 @@ type appSettings struct {
 	GhostRead bool `json:"ghost_read,omitempty"`
 	// GhostTyping writes without others seeing that the user is typing.
 	GhostTyping bool `json:"ghost_typing,omitempty"`
-	// NoTelemetry stops sending the account-health analytics events that
-	// Discord's own client sends to /science.
-	NoTelemetry bool `json:"no_telemetry,omitempty"`
 	// SplitLong sends text too long for a message as several messages,
 	// rather than as message.txt.
 	SplitLong bool `json:"split_long,omitempty"`
@@ -232,7 +229,6 @@ type generalView struct {
 	splitBtn                                 widget.Clickable
 	editHistoryBtn                           widget.Clickable
 	whoReactedBtn                            widget.Clickable
-	telemetryBtn                             widget.Clickable
 	modInfoBtn                               widget.Clickable
 	platformIconsBtn, staffTagsBtn           widget.Clickable
 	rejoinBtn, narratorBtn, statsBtn         widget.Clickable
@@ -404,10 +400,6 @@ func (c *chatView) updateGeneral(gtx layout.Context) {
 		u.app.SplitLong = !u.app.SplitLong
 		u.saveAppSettings()
 	}
-	if g.telemetryBtn.Clicked(gtx) {
-		u.app.NoTelemetry = !u.app.NoTelemetry
-		u.saveAppSettings()
-	}
 	if g.fakeMuteBtn.Clicked(gtx) {
 		u.voice.fakeMute = !u.voice.fakeMute
 		u.applyFake()
@@ -559,11 +551,6 @@ func (c *chatView) featureRows() []layout.Widget {
 		func(gtx layout.Context) layout.Dimensions {
 			return switchRow(gtx, th, &g.editHistoryBtn, "Show Edit History",
 				"What messages said before they were edited is kept while Linkcord is open: their \"(edited)\" shows it. Only you see it.", !c.u.app.NoEditHistory)
-		},
-		layout.Spacer{Height: unit.Dp(16)}.Layout,
-		func(gtx layout.Context) layout.Dimensions {
-			return switchRow(gtx, th, &g.telemetryBtn, "Send Analytics Like Discord",
-				"Sends Discord the everyday analytics its web client sends (the app opening, channels, servers and the member list viewed, messages read, voice joined and left, a heartbeat every 15 minutes and an hourly report), so the account looks like one using Discord's own app. No message text, typing or searches. Turn off to send nothing.", !c.u.app.NoTelemetry)
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {

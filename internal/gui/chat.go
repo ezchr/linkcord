@@ -747,7 +747,7 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 	c.inter.sessionID = ready.SessionID
 	if !c.demo {
 		if c.sci == nil {
-			c.sci = newScience(c.st.Client.Client, func() bool { return c.u.app.NoTelemetry })
+			c.sci = newScience(c.st.Client.Client, nil)
 		}
 		c.sci.setSession(ready.AnalyticsToken, ready.User.ID)
 		c.loadExperiments()

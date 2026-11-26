@@ -194,9 +194,6 @@ func (c *chatView) watchHeartbeat() func() {
 					"is_system_locked":         false,
 					"uses_client_mods":         false,
 				}, "", 0)
-				if c.u.app.NoTelemetry {
-					return
-				}
 				seq++
 				q := &qosCommand{Seq: seq}
 				q.QoS.Active, q.QoS.Ver, q.QoS.Reasons = true, 31, reasons
