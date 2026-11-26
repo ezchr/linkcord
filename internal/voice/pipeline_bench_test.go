@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/tphakala/go-opus/opus"
+	"github.com/ezchr/linkcord/internal/opus"
 )
 
 // The pipeline benchmarks run what one 20 ms packet costs, with made up
@@ -20,7 +20,7 @@ func benchSend(b *testing.B, farLoud bool) {
 	e, p := newEcho(), newProcessor()
 	defer e.reset()
 	defer p.close()
-	enc, err := opus.NewEncoder(opus.EncoderConfig{SampleRate: sampleRate, Channels: channels, Bitrate: 64000})
+	enc, err := opus.NewEncoder(voiceEncoderConfig)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func BenchmarkSendFarSilent(b *testing.B)  { benchSend(b, false) }
 // them, as receive and mix do.
 func BenchmarkReceive(b *testing.B) {
 	const speakers = 3
-	enc, err := opus.NewEncoder(opus.EncoderConfig{SampleRate: sampleRate, Channels: channels, Bitrate: 64000})
+	enc, err := opus.NewEncoder(voiceEncoderConfig)
 	if err != nil {
 		b.Fatal(err)
 	}

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/ayn2op/arikawa/v3/discord"
-	"github.com/tphakala/go-opus/opus"
+	"github.com/ezchr/linkcord/internal/opus"
 )
 
 const (
@@ -44,6 +44,21 @@ type speaker struct {
 	guard levelGuard
 }
 
+// voiceEncoderConfig is how what the user says is encoded: at 64 kbps,
+// what Discord's clients send at in a channel left at its default bitrate,
+// tuned for speech, at the highest complexity, and with in-band FEC sized
+// for 10% of packets lost, as Discord's clients send, for a lost packet to
+// be made up from the next.
+var voiceEncoderConfig = opus.EncoderConfig{
+	SampleRate:  sampleRate,
+	Channels:    channels,
+	Application: opus.VOIP,
+	Bitrate:     64000,
+	Complexity:  10,
+	FEC:         true,
+	PacketLoss:  10,
+}
+
 // newSpeaker returns a speaker whose first packet has the sequence number seq.
 func newSpeaker(seq uint16) (*speaker, error) {
 	decoder, err := opus.NewDecoder(sampleRate, channels)
@@ -66,12 +81,27 @@ func (s *speaker) decode(packet []byte) error {
 	if err != nil {
 		return err
 	}
+	s.append(pcm[:n*channels])
+	return nil
+}
 
-	for _, sample := range pcm[:n*channels] {
+// decodeFEC appends the frame lost before packet, made up from what packet
+// carries of it, or as decode does with nil if it carries nothing.
+func (s *speaker) decodeFEC(packet []byte) error {
+	pcm := s.pcm[:frameSamples]
+	n, err := s.decoder.DecodeFEC(packet, pcm)
+	if err != nil {
+		return err
+	}
+	s.append(pcm[:n*channels])
+	return nil
+}
+
+// append appends pcm to what is buffered.
+func (s *speaker) append(pcm []int16) {
+	for _, sample := range pcm {
 		s.buf = binary.LittleEndian.AppendUint16(s.buf, uint16(sample))
 	}
-
-	return nil
 }
 
 // write buffers the packet with the sequence number seq.
@@ -86,10 +116,15 @@ func (s *speaker) write(seq uint16, packet []byte) error {
 	}
 
 	if gap > 1 && gap <= maxLost+1 {
-		for range gap - 1 {
+		for range gap - 2 {
 			if err := s.decode(nil); err != nil {
 				return err
 			}
+		}
+		// The last lost is made up from what packet carries of it, if sent
+		// with FEC as Discord's clients send.
+		if err := s.decodeFEC(packet); err != nil {
+			return err
 		}
 	}
 

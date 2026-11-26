@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gen2brain/malgo"
-	"github.com/tphakala/go-opus/opus"
+	"github.com/ezchr/linkcord/internal/opus"
 )
 
 // maxRecording is how long a voice message can be, as Discord's.
@@ -109,7 +109,7 @@ func VoiceMessage(stereo []int16) (ogg []byte, seconds float64, waveform []byte,
 	if len(mono) < frame {
 		return nil, 0, nil, errors.New("the recording is too short")
 	}
-	encoder, err := opus.NewEncoder(opus.EncoderConfig{SampleRate: sampleRate, Channels: 1})
+	encoder, err := opus.NewEncoder(opus.EncoderConfig{SampleRate: sampleRate, Channels: 1, Application: opus.VOIP})
 	if err != nil {
 		return nil, 0, nil, err
 	}
