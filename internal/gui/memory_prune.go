@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -26,8 +27,11 @@ import (
 // the subscription is sent again; members the chat needs are asked for again
 // with MemberState.RequestMember, as for any member not known.
 const (
-	memberIdleAfter = 10 * time.Minute
-	pruneEvery      = time.Minute
+	memberIdleAfter = 30 * time.Minute
+	// keepRecentGuilds servers viewed last keep their members however long
+	// ago, so going back to them shows names and colors at once.
+	keepRecentGuilds = 5
+	pruneEvery       = time.Minute
 	// freeOSAfter is how many members and presences let go at once make it
 	// worth giving the freed memory back to Windows right away.
 	freeOSAfter = 5000
@@ -213,8 +217,9 @@ func (p *memoryPruner) prune(st *ningen.State, shown discord.GuildID, now time.T
 		meID = me.ID
 	}
 	freed := 0
+	recent := recentGuilds(p.viewed, keepRecentGuilds)
 	for g, first := range p.tracker.snapshot() {
-		if g == shown {
+		if g == shown || recent[g] {
 			continue
 		}
 		last, wasShown := p.viewed[g]
@@ -270,4 +275,18 @@ func dropGuildMembers(cab *store.Cabinet, g discord.GuildID, me discord.UserID) 
 		}
 	}
 	return n
+}
+
+// recentGuilds are the n servers viewed last.
+func recentGuilds(viewed map[discord.GuildID]time.Time, n int) map[discord.GuildID]bool {
+	ids := make([]discord.GuildID, 0, len(viewed))
+	for g := range viewed {
+		ids = append(ids, g)
+	}
+	slices.SortFunc(ids, func(a, b discord.GuildID) int { return viewed[b].Compare(viewed[a]) })
+	out := make(map[discord.GuildID]bool, n)
+	for _, g := range ids[:min(n, len(ids))] {
+		out[g] = true
+	}
+	return out
 }
