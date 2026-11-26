@@ -59,7 +59,9 @@ type interactions struct {
 	failed map[discord.MessageID]bool
 	clicks map[string]*widget.Clickable
 	// open is the key of the menu showing its options, if any.
-	open  string
+	open string
+	// picked are the options chosen in the open menu that takes several.
+	picked map[string]bool
 	modal *modalView
 }
 
@@ -261,19 +263,38 @@ func (c *chatView) updateComponent(gtx layout.Context, m discord.Message, key st
 		if !ok {
 			return
 		}
+		t := int(comp.Type())
 		if ip.click(key).Clicked(gtx) && !sel.disabled {
 			if ip.open == key {
 				ip.open = ""
+				if sel.multi() {
+					c.sendPicked(m, key, sel, t)
+				}
 			} else {
 				ip.open = key
+				if sel.multi() {
+					ip.picked = make(map[string]bool)
+					for _, o := range sel.options {
+						if o.Default {
+							ip.picked[o.Value] = true
+						}
+					}
+				}
 			}
 		}
 		for i, opt := range sel.options {
 			if !ip.click(fmt.Sprintf("%s/o%d", key, i)).Clicked(gtx) {
 				continue
 			}
+			if sel.multi() {
+				if ip.picked[opt.Value] {
+					delete(ip.picked, opt.Value)
+				} else if len(ip.picked) < sel.max {
+					ip.picked[opt.Value] = true
+				}
+				continue
+			}
 			ip.open = ""
-			t := int(comp.Type())
 			c.interact(m, key, map[string]any{"component_type": t, "type": t, "custom_id": sel.customID, "values": []string{opt.Value}})
 		}
 	}
@@ -285,6 +306,37 @@ type selectMenu struct {
 	placeholder string
 	disabled    bool
 	options     []discord.SelectOption
+	// min and max are how many options may be chosen (1 and 1 unless the
+	// bot says otherwise); with max over 1, options are picked, and sent
+	// as the menu closes, as in Discord.
+	min, max int
+}
+
+func (s selectMenu) multi() bool { return s.max > 1 }
+
+// newSelect makes a menu with the limits Discord sends, options in defaults
+// marked chosen.
+func newSelect(id discord.ComponentID, placeholder string, disabled bool, opts []discord.SelectOption, limits [2]int, defaults []string) selectMenu {
+	lo, hi := 1, 1
+	if limits != [2]int{} {
+		lo, hi = limits[0], max(limits[1], 1)
+	}
+	if len(defaults) > 0 {
+		for i := range opts {
+			if slices.Contains(defaults, opts[i].Value) {
+				opts[i].Default = true
+			}
+		}
+	}
+	return selectMenu{id, placeholder, disabled, opts, lo, hi}
+}
+
+func idStrings[T fmt.Stringer](ids []T) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.String()
+	}
+	return out
 }
 
 // selectOf returns the menu of comp if it is one. The menus of users, roles
@@ -316,23 +368,35 @@ func selectOf(c *chatView, comp discord.Component) (selectMenu, bool) {
 	}
 	switch v := comp.(type) {
 	case *discord.StringSelectComponent:
-		return selectMenu{v.CustomID, v.Placeholder, v.Disabled, v.Options}, true
+		return newSelect(v.CustomID, v.Placeholder, v.Disabled, slices.Clone(v.Options), v.ValueLimits, nil), true
 	case *discord.UserSelectComponent:
-		return selectMenu{v.CustomID, v.Placeholder, v.Disabled, users()}, true
+		return newSelect(v.CustomID, v.Placeholder, v.Disabled, users(), v.ValueLimits, idStrings(v.DefaultUsers)), true
 	case *discord.RoleSelectComponent:
-		return selectMenu{v.CustomID, v.Placeholder, v.Disabled, roles()}, true
+		return newSelect(v.CustomID, v.Placeholder, v.Disabled, roles(), v.ValueLimits, idStrings(v.DefaultRoles)), true
 	case *discord.MentionableSelectComponent:
-		return selectMenu{v.CustomID, v.Placeholder, v.Disabled, append(users(), roles()...)}, true
+		var defaults []string
+		for _, d := range v.DefaultMentions {
+			if d.UserID().IsValid() {
+				defaults = append(defaults, d.UserID().String())
+			} else {
+				defaults = append(defaults, d.RoleID().String())
+			}
+		}
+		return newSelect(v.CustomID, v.Placeholder, v.Disabled, append(users(), roles()...), v.ValueLimits, defaults), true
 	case *discord.ChannelSelectComponent:
 		var out []discord.SelectOption
 		chs, _ := c.st.Cabinet.Channels(guildID)
 		for _, ch := range chs {
+			// Only the kinds of channel the bot asks for, if it says.
+			if len(v.ChannelTypes) > 0 && !slices.Contains(v.ChannelTypes, ch.Type) {
+				continue
+			}
 			if ch.Type != discord.GuildCategory && c.can(ch.ID, discord.PermissionViewChannel) {
 				out = append(out, discord.SelectOption{Label: "#" + ch.Name, Value: ch.ID.String()})
 			}
 		}
 		slices.SortFunc(out, func(a, b discord.SelectOption) int { return strings.Compare(a.Label, b.Label) })
-		return selectMenu{v.CustomID, v.Placeholder, v.Disabled, out}, true
+		return newSelect(v.CustomID, v.Placeholder, v.Disabled, out, v.ValueLimits, idStrings(v.DefaultChannels)), true
 	}
 	return selectMenu{}, false
 }
@@ -517,8 +581,15 @@ func (c *chatView) layoutSelect(gtx layout.Context, key string, sel selectMenu) 
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
 	chosen := ""
 	for _, o := range sel.options {
-		if o.Default {
-			chosen = o.Label
+		on := o.Default
+		if open && sel.multi() {
+			on = ip.picked[o.Value]
+		}
+		if on {
+			if chosen != "" {
+				chosen += ", "
+			}
+			chosen += o.Label
 		}
 	}
 	box := func(gtx layout.Context) layout.Dimensions {
@@ -588,7 +659,7 @@ func (c *chatView) layoutSelect(gtx layout.Context, key string, sel selectMenu) 
 					}
 					return layout.Flex{Axis: layout.Vertical}.Layout(gtx, lines...)
 				}))
-				if o.Default {
+				if on := o.Default; (open && sel.multi() && ip.picked[o.Value]) || (!sel.multi() && on) {
 					parts = append(parts, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return icon(gtx, iconCheck, 18, colorAccent) }))
 				}
 				return layout.Flex{Alignment: layout.Middle}.Layout(gtx, parts...)
@@ -704,4 +775,32 @@ func (c *chatView) layoutFileComponent(gtx layout.Context, m discord.Message, f 
 		}
 	}
 	return label(c.u.th, 14, colorMuted, f.Name).Layout(gtx)
+}
+
+// sendPicked sends what was picked in a menu taking several options, as it
+// closes, if it is as many as the bot asks for and not what it was.
+func (c *chatView) sendPicked(m discord.Message, key string, sel selectMenu, t int) {
+	ip := &c.inter
+	var values []string
+	same := true
+	for _, o := range sel.options {
+		if ip.picked[o.Value] {
+			values = append(values, o.Value)
+		}
+		if ip.picked[o.Value] != o.Default {
+			same = false
+		}
+	}
+	ip.picked = nil
+	if same {
+		return
+	}
+	if len(values) < sel.min {
+		c.sendErr = fmt.Sprintf(tr("Choose at least %d."), sel.min)
+		return
+	}
+	if values == nil {
+		values = []string{}
+	}
+	c.interact(m, key, map[string]any{"component_type": t, "type": t, "custom_id": sel.customID, "values": values})
 }
