@@ -1,0 +1,21 @@
+--- a/celt/x86/x86cpu.c	2024-07-30 15:25:04.000000000 -0400
++++ b/celt/x86/x86cpu.c	2026-11-26 16:11:22.722173600 -0500
+@@ -122,6 +122,18 @@
+         cpu_feature->HW_SSE2 = (info[3] & (1 << 26)) != 0;
+         cpu_feature->HW_SSE41 = (info[2] & (1 << 19)) != 0;
+         cpu_feature->HW_AVX2 = (info[2] & (1 << 28)) != 0 && (info[2] & (1 << 12)) != 0;
++        /* Linkcord: AVX also needs the OS to save the YMM registers, which
++           Windows 7 before SP1 does not: OSXSAVE, then XCR0 bits 1 and 2. */
++        if (cpu_feature->HW_AVX2) {
++            unsigned int xcr0_lo, xcr0_hi;
++            if (!(info[2] & (1 << 27))) {
++                cpu_feature->HW_AVX2 = 0;
++            } else {
++                __asm__ __volatile__ ("xgetbv" : "=a" (xcr0_lo), "=d" (xcr0_hi) : "c" (0));
++                (void)xcr0_hi;
++                if ((xcr0_lo & 6) != 6) cpu_feature->HW_AVX2 = 0;
++            }
++        }
+         if (cpu_feature->HW_AVX2 && nIds >= 7) {
+             cpuid(info, 7);
+             cpu_feature->HW_AVX2 = cpu_feature->HW_AVX2 && (info[1] & (1 << 5)) != 0;

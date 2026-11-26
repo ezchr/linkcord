@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/ayn2op/arikawa/v3/discord"
-	"github.com/tphakala/go-opus/opus"
+	"github.com/ezchr/linkcord/internal/opus"
 )
 
 // frame is how long an Opus packet of the voice channel lasts.

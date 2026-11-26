@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tphakala/go-opus/opus"
+	"github.com/ezchr/linkcord/internal/opus"
 )
 
 // streamClip keeps the stream watched as it came, its pictures still
