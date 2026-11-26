@@ -2328,7 +2328,7 @@ func (c *chatView) notifies(m *discord.Message) bool {
 		return false
 	}
 	if m.GuildID.IsValid() {
-		return c.st.MessageMentions(m) != 0
+		return m.Author.ID != c.me.ID && c.guildNotifies(m)
 	}
 	for _, r := range c.friends.requests {
 		if r.ID == m.ChannelID {
@@ -2339,4 +2339,71 @@ func (c *chatView) notifies(m *discord.Message) bool {
 		return false
 	}
 	return true
+}
+
+// guildNotifies is whether a server message notifies, as in Discord's client:
+// the level is the channel's, else its category's, else the server's; a mute
+// of any of them (while it lasts) leaves only mentions; "nothing" is nothing.
+func (c *chatView) guildNotifies(m *discord.Message) bool {
+	ms := c.st.MutedState
+	if ms == nil {
+		return c.st.MessageMentions(m) != 0
+	}
+	g := ms.GuildSettings(m.GuildID)
+	chain := []discord.ChannelID{m.ChannelID}
+	if ch, err := c.st.Cabinet.Channel(m.ChannelID); err == nil && ch.ParentID.IsValid() {
+		chain = append(chain, ch.ParentID)
+		if p, err := c.st.Cabinet.Channel(ch.ParentID); err == nil && p.ParentID.IsValid() {
+			chain = append(chain, p.ParentID) // a thread's channel's category
+		}
+	}
+	level := g.Notifications
+	muted := ms.Guild(m.GuildID, false)
+	found := false
+	for _, id := range chain {
+		muted = muted || ms.Channel(id)
+		if found {
+			continue
+		}
+		for _, o := range g.ChannelOverrides {
+			if o.ChannelID == id && o.Notifications != gateway.GuildDefaults {
+				level, found = o.Notifications, true
+				break
+			}
+		}
+	}
+	switch {
+	case level == gateway.NoNotifications:
+		return false
+	case level == gateway.AllNotifications && !muted:
+		return true
+	}
+	return c.mentionsMeIn(m, g)
+}
+
+// mentionsMeIn is whether a message mentions the user in its server: by name, by @everyone
+// or @here, or by one of their roles, unless the server's settings suppress
+// those.
+func (c *chatView) mentionsMeIn(m *discord.Message, g gateway.UserGuildSetting) bool {
+	for _, u := range m.Mentions {
+		if u.ID == c.me.ID {
+			return true
+		}
+	}
+	if m.MentionEveryone && !g.SuppressEveryone {
+		return true
+	}
+	if g.SuppressRoles || len(m.MentionRoleIDs) == 0 {
+		return false
+	}
+	me, err := c.st.Cabinet.Member(m.GuildID, c.me.ID)
+	if err != nil {
+		return false
+	}
+	for _, r := range m.MentionRoleIDs {
+		if slices.Contains(me.RoleIDs, r) {
+			return true
+		}
+	}
+	return false
 }
