@@ -12,7 +12,7 @@ import (
 	"github.com/ayn2op/arikawa/v3/discord"
 	"github.com/disgoorg/godave"
 	"github.com/thomas-vilte/dave-go/session"
-	"github.com/ezchr/linkcord/internal/opus"
+	"github.com/tphakala/go-opus/opus"
 )
 
 func TestWatchAudioReorderingAndPlayback(t *testing.T) {
