@@ -314,11 +314,11 @@ func TestStreamLoopback(t *testing.T) {
 			last = n
 		}
 		wd, ht, _ := w.Info()
-		stream.med.mu.Lock()
-		resent, missed := stream.med.resent, stream.med.resendMissed
-		stream.med.mu.Unlock()
+		stream.m().mu.Lock()
+		resent, missed := stream.m().resent, stream.m().resendMissed
+		stream.m().mu.Unlock()
 		w.mu.Lock()
-		t.Logf("resends: sent %d, not possible %d; received %d, ignored %d; streamer rtx %d, viewer expects video %d rtx %d", resent, missed, w.rtxSeen.Load(), w.rtxIgnored.Load(), stream.med.rtxSSRC, w.videoSSRC, w.rtxSSRC)
+		t.Logf("resends: sent %d, not possible %d; received %d, ignored %d; streamer rtx %d, viewer expects video %d rtx %d", resent, missed, w.rtxSeen.Load(), w.rtxIgnored.Load(), stream.m().rtxSSRC, w.videoSSRC, w.rtxSSRC)
 		w.mu.Unlock()
 		t.Logf("loss %.0f%%: first picture after %v, %dx%d, pictures a second %v, relayed %d, dropped %d, lost pictures %d, dave failures %d",
 			loss*100, first.Round(time.Millisecond), wd, ht, perSecond, f.relayed.Load(), f.dropped.Load(), w.lost.Load(), w.daveFailed.Load())

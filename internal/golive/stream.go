@@ -30,10 +30,30 @@ type Stream struct {
 	p    Params
 	key  string
 	log  *slog.Logger
-	conn *conn
-	ops  <-chan ws.Op
-	med  *media
-	rm   []func()
+	// connP and medP are the connections to the stream server, swapped
+	// for new ones when the stream reconnects.
+	connP atomic.Pointer[conn]
+	medP  atomic.Pointer[media]
+	ops   <-chan ws.Op
+	rm    []func()
+
+	// rtcServer and daveChannel are what the stream server is joined with.
+	rtcServer   string
+	daveChannel *big.Int
+	// created and servers carry the stream's STREAM_CREATE and
+	// STREAM_SERVER_UPDATE events.
+	created chan *StreamCreateEvent
+	servers chan *StreamServerUpdateEvent
+	// loopCtx lives as long as the stream, and connCancel closes the
+	// connection to the stream server.
+	loopCtx    context.Context
+	connCancel context.CancelFunc
+	// sentW and sentH are the size last told to the stream server.
+	sentW, sentH atomic.Int32
+	// reconnecting is set while the stream server is dialed again, and
+	// reconnects are when the last ones were.
+	reconnecting atomic.Bool
+	reconnects   []time.Time
 
 	cancel  context.CancelFunc
 	done    chan struct{}
@@ -81,6 +101,8 @@ func Start(ctx context.Context, p Params) (*Stream, error) {
 		source:    make(chan *capturer, 1),
 		seen:      make(map[string]bool),
 		connected: make(map[discord.UserID]bool),
+		created:   make(chan *StreamCreateEvent, 1),
+		servers:   make(chan *StreamServerUpdateEvent, 1),
 	}
 	ok := false
 	defer func() {
@@ -89,8 +111,7 @@ func Start(ctx context.Context, p Params) (*Stream, error) {
 		}
 	}()
 
-	created := make(chan *StreamCreateEvent, 1)
-	server := make(chan *StreamServerUpdateEvent, 1)
+	created, server := s.created, s.servers
 	s.rm = append(s.rm,
 		p.Subscribe(func(ev *StreamCreateEvent) {
 			if ev.StreamKey == s.key {
@@ -152,84 +173,20 @@ func Start(ctx context.Context, p Params) (*Stream, error) {
 		}
 	}
 
-	// The end-to-end encryption of a stream is keyed to its RTC channel,
-	// which older servers did not give: it was then the server's ID less one.
-	daveChannel := new(big.Int)
-	if _, ok := daveChannel.SetString(ce.RTCChannelID, 10); !ok {
-		daveChannel.SetString(ce.RTCServerID, 10)
-		daveChannel.Sub(daveChannel, big.NewInt(1))
-	}
+	daveChannel := daveChannelOf(ce)
 	s.log.Info("stream created", "rtc_server", ce.RTCServerID, "rtc_channel", ce.RTCChannelID, "dave_channel", daveChannel.String())
 
 	loopCtx, loopCancel := context.WithCancel(context.Background())
-	s.cancel = loopCancel
-	s.conn, s.ops = dial(loopCtx, se.Endpoint, identifyCommand{
-		ServerID:  ce.RTCServerID,
-		ChannelID: daveChannel.String(),
-		UserID:    p.UserID,
-		SessionID: p.SessionID,
-		Token:     se.Token,
-		Video:     true,
-		Streams:   []streamInfo{{Type: "screen", RID: "100", Quality: 100}},
-	}, daveChannel.Uint64(), s.log)
-
-	ready, err := s.waitFor(wait, func(ev ws.Event) bool { _, ok := ev.(*readyEvent); return ok })
-	if err != nil {
-		return nil, fmt.Errorf("golive: the stream server did not answer: %w", err)
-	}
-	r := ready.(*readyEvent)
-	if len(r.Streams) == 0 {
-		return nil, errors.New("golive: the stream server takes no video")
-	}
-	mode := slices.IndexFunc(modes, func(m string) bool { return slices.Contains(r.Modes, m) })
-	if mode < 0 {
-		return nil, fmt.Errorf("golive: no encryption mode in common with the stream server (%v)", r.Modes)
-	}
-	var ip string
-	var port uint16
-	s.med, ip, port, err = dialMedia(wait, fmt.Sprintf("%s:%d", r.IP, r.Port), r.SSRC)
-	if s.med != nil {
-		s.med.linkcordOnly = p.LinkcordOnly
-	}
+	s.cancel, s.loopCtx = loopCancel, loopCtx
+	s.rtcServer, s.daveChannel = ce.RTCServerID, daveChannel
+	c, ops, med, connCancel, err := s.connect(wait, loopCtx, se)
 	if err != nil {
 		return nil, err
 	}
-	s.med.mu.Lock()
-	s.med.ssrc = r.Streams[0].SSRC
-	s.med.rtxSSRC = r.Streams[0].RTXSSRC
-	s.med.audioSSRC = r.SSRC
-	s.med.mu.Unlock()
-	// As Discord's clients do: the server's version, and the stream told
-	// before it is active.
-	s.conn.send(wait, &versionCommand{})
-	if err := s.conn.send(wait, s.videoInactive()); err != nil {
-		return nil, err
-	}
-	if err := s.conn.send(wait, &selectProtocolCommand{
-		Protocol: "udp",
-		Codecs: []codecInfo{
-			{Name: "opus", Type: "audio", Priority: 1000, PayloadType: payloadOpus},
-			{Name: "H264", Type: "video", Priority: 2000, PayloadType: payloadH264, RTXPayloadType: payloadH264RTX, Encode: true, Decode: true},
-		},
-		Data:            voicegateway.SelectProtocolData{Address: ip, Port: port, Mode: modes[mode]},
-		Address:         ip,
-		Port:            port,
-		Mode:            modes[mode],
-		RTCConnectionID: newUUID(),
-		Experiments:     []string{"fixed_keyframe_interval"},
-	}); err != nil {
-		return nil, err
-	}
-	desc, err := s.waitFor(wait, func(ev ws.Event) bool { _, ok := ev.(*sessionDescriptionEvent); return ok })
-	if err != nil {
-		return nil, fmt.Errorf("golive: the stream server did not give a key: %w", err)
-	}
-	d := desc.(*sessionDescriptionEvent)
-	s.log.Info("stream server ready", "mode", d.Mode, "audio_codec", d.AudioCodec, "video_codec", d.VideoCodec,
-		"dave", d.DAVEProtocolVersion, "ssrc", r.SSRC, "video_ssrc", r.Streams[0].SSRC, "rtx_ssrc", r.Streams[0].RTXSSRC, "streams", len(r.Streams), "modes", r.Modes)
-	if err := s.med.useSecret(d.Mode, d.SecretKey); err != nil {
-		return nil, err
-	}
+	s.connP.Store(c)
+	s.medP.Store(med)
+	s.ops, s.connCancel = ops, connCancel
+	r := c.ready
 
 	capt := newCapturer(p.Source, true)
 	first, okGrab, gone := capt.grab()
@@ -242,8 +199,8 @@ func Start(ctx context.Context, p Params) (*Stream, error) {
 		w, h = first.w, first.h
 	}
 	ow, oh := p.Quality.size(w, h)
-	s.conn.send(wait, &voicegateway.SpeakingEvent{Speaking: voicegateway.Soundshare, SSRC: r.SSRC})
-	if err := s.conn.send(wait, s.video(ow, oh)); err != nil {
+	c.send(wait, &voicegateway.SpeakingEvent{Speaking: voicegateway.Soundshare, SSRC: r.SSRC})
+	if err := s.sendVideo(wait, c, ow, oh); err != nil {
 		capt.close()
 		return nil, err
 	}
@@ -258,9 +215,101 @@ func Start(ctx context.Context, p Params) (*Stream, error) {
 	return s, nil
 }
 
-// video is what the stream sends, w by h.
-func (s *Stream) video(w, h int) *videoCommand {
-	r := s.conn.ready
+// connect joins the stream server of se, as Start and reconnect do: it
+// identifies, sets up the media connection and gets its key. The
+// connection lives until loopCtx ends or the returned cancel is called.
+func (s *Stream) connect(wait, loopCtx context.Context, se *StreamServerUpdateEvent) (c *conn, ops <-chan ws.Op, med *media, cancel context.CancelFunc, err error) {
+	connCtx, cancel := context.WithCancel(loopCtx)
+	defer func() {
+		if err != nil {
+			if med != nil {
+				med.close()
+			}
+			cancel()
+		}
+	}()
+	c, ops = dial(connCtx, se.Endpoint, identifyCommand{
+		ServerID:  s.rtcServer,
+		ChannelID: s.daveChannel.String(),
+		UserID:    s.p.UserID,
+		SessionID: s.p.SessionID,
+		Token:     se.Token,
+		Video:     true,
+		Streams:   []streamInfo{{Type: "screen", RID: "100", Quality: 100}},
+	}, s.daveChannel.Uint64(), s.log)
+
+	ready, err := s.waitFor(wait, c, ops, func(ev ws.Event) bool { _, ok := ev.(*readyEvent); return ok })
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("golive: the stream server did not answer: %w", err)
+	}
+	r := ready.(*readyEvent)
+	if len(r.Streams) == 0 {
+		return nil, nil, nil, nil, errors.New("golive: the stream server takes no video")
+	}
+	mode := slices.IndexFunc(modes, func(m string) bool { return slices.Contains(r.Modes, m) })
+	if mode < 0 {
+		return nil, nil, nil, nil, fmt.Errorf("golive: no encryption mode in common with the stream server (%v)", r.Modes)
+	}
+	var ip string
+	var port uint16
+	med, ip, port, err = dialMedia(wait, fmt.Sprintf("%s:%d", r.IP, r.Port), r.SSRC)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	med.linkcordOnly = s.p.LinkcordOnly
+	med.mu.Lock()
+	med.ssrc = r.Streams[0].SSRC
+	med.rtxSSRC = r.Streams[0].RTXSSRC
+	med.audioSSRC = r.SSRC
+	med.mu.Unlock()
+	// As Discord's clients do: the server's version, and the stream told
+	// before it is active.
+	c.send(wait, &versionCommand{})
+	if err = c.send(wait, s.videoInactive(c)); err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if err = c.send(wait, &selectProtocolCommand{
+		Protocol: "udp",
+		Codecs: []codecInfo{
+			{Name: "opus", Type: "audio", Priority: 1000, PayloadType: payloadOpus},
+			{Name: "H264", Type: "video", Priority: 2000, PayloadType: payloadH264, RTXPayloadType: payloadH264RTX, Encode: true, Decode: true},
+		},
+		Data:            voicegateway.SelectProtocolData{Address: ip, Port: port, Mode: modes[mode]},
+		Address:         ip,
+		Port:            port,
+		Mode:            modes[mode],
+		RTCConnectionID: newUUID(),
+		Experiments:     []string{"fixed_keyframe_interval"},
+	}); err != nil {
+		return nil, nil, nil, nil, err
+	}
+	desc, err := s.waitFor(wait, c, ops, func(ev ws.Event) bool { _, ok := ev.(*sessionDescriptionEvent); return ok })
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("golive: the stream server did not give a key: %w", err)
+	}
+	d := desc.(*sessionDescriptionEvent)
+	s.log.Info("stream server ready", "mode", d.Mode, "audio_codec", d.AudioCodec, "video_codec", d.VideoCodec,
+		"dave", d.DAVEProtocolVersion, "ssrc", r.SSRC, "video_ssrc", r.Streams[0].SSRC, "rtx_ssrc", r.Streams[0].RTXSSRC, "streams", len(r.Streams), "modes", r.Modes)
+	if err = med.useSecret(d.Mode, d.SecretKey); err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return c, ops, med, cancel, nil
+}
+
+// c and m are the connections to the stream server in use.
+func (s *Stream) c() *conn  { return s.connP.Load() }
+func (s *Stream) m() *media { return s.medP.Load() }
+
+// sendVideo tells the stream server of c the stream is w by h.
+func (s *Stream) sendVideo(ctx context.Context, c *conn, w, h int) error {
+	s.sentW.Store(int32(w))
+	s.sentH.Store(int32(h))
+	return c.send(ctx, s.video(c, w, h))
+}
+
+// video is what the stream sends on c, w by h.
+func (s *Stream) video(c *conn, w, h int) *videoCommand {
+	r := c.ready
 	st := r.Streams[0]
 	return &videoCommand{
 		AudioSSRC: r.SSRC,
@@ -276,8 +325,8 @@ func (s *Stream) video(w, h int) *videoCommand {
 }
 
 // videoInactive tells the server of the stream before it sends anything.
-func (s *Stream) videoInactive() *videoCommand {
-	v := s.video(0, 0)
+func (s *Stream) videoInactive(c *conn) *videoCommand {
+	v := s.video(c, 0, 0)
 	v.Streams[0].Active = false
 	v.Streams[0].MaxBitrate, v.Streams[0].MaxFramerate = 0, 0
 	return v
@@ -293,12 +342,12 @@ func newUUID() string {
 }
 
 // waitFor waits for the gateway to send an event that match accepts.
-func (s *Stream) waitFor(ctx context.Context, match func(ws.Event) bool) (ws.Event, error) {
+func (s *Stream) waitFor(ctx context.Context, c *conn, ops <-chan ws.Op, match func(ws.Event) bool) (ws.Event, error) {
 	for {
 		select {
-		case op, ok := <-s.ops:
+		case op, ok := <-ops:
 			if !ok {
-				return nil, s.conn.gw.LastError()
+				return nil, c.gw.LastError()
 			}
 			if ce, ok := op.Data.(*ws.CloseEvent); ok {
 				return nil, ce
@@ -317,12 +366,16 @@ func (s *Stream) waitFor(ctx context.Context, match func(ws.Event) bool) (ws.Eve
 }
 
 // watch follows the stream's gateway: new viewers and new keys need a
-// keyframe to start from, and a closed gateway ends the stream.
+// keyframe to start from, and a closed gateway is dialed again, or ends
+// the stream if it cannot be.
 func (s *Stream) watch() {
 	for {
 		select {
 		case op, ok := <-s.ops:
 			if !ok {
+				if s.reconnect() {
+					continue
+				}
 				s.end(errors.New("the connection to the stream server was lost"))
 				return
 			}
@@ -351,7 +404,7 @@ func (s *Stream) watch() {
 			case *voicegateway.DAVEExecuteTransitionEvent:
 				s.requestKeyframe()
 			}
-		case <-s.med.keyframe:
+		case <-s.m().keyframe:
 			s.requestKeyframe()
 		case <-s.done:
 			return
@@ -512,13 +565,13 @@ func (s *Stream) loop(capt *capturer) {
 		case <-s.done:
 			return
 		case <-report.C:
-			if err := s.med.sendReport(); err != nil {
+			if err := s.m().sendReport(); err != nil {
 				s.log.Debug("could not send a sender report", "err", err)
 			}
 			continue
 		case <-stats.C:
-			ds := s.conn.dave.Stats()
-			dst := s.conn.dave.State()
+			ds := s.c().dave.Stats()
+			dst := s.c().dave.State()
 			frames := st.frames.Swap(0)
 			encodeNs := st.encodeNs.Swap(0)
 			name := ""
@@ -534,7 +587,7 @@ func (s *Stream) loop(capt *capturer) {
 				"size", fmt.Sprintf("%dx%d", ow, oh),
 				"dave_ready", dst.Ready, "dave_epoch", dst.EpochID, "dave_version", dst.ProtocolVersion,
 				"passthrough", ds.PassthroughFrames, "encrypt_failures", ds.EncryptFailures,
-				"rtcp_in", s.med.rtcpSummary(), "packets", s.med.packetCount())
+				"rtcp_in", s.m().rtcpSummary(), "packets", s.m().packetCount())
 			empty, grabs, grabTime, convertTime = 0, 0, 0, 0
 			continue
 		case next := <-s.source:
@@ -741,7 +794,7 @@ func (s *Stream) encodeLoop(jobs <-chan streamFrame, free chan<- []byte, st *enc
 				}
 			}
 			if resized {
-				s.conn.send(context.Background(), s.video(job.w, job.h))
+				s.sendVideo(context.Background(), s.c(), job.w, job.h)
 			}
 			wantNV12.Store(enc.nv12())
 			rateNow, rateAt = 0, time.Time{}
@@ -751,9 +804,9 @@ func (s *Stream) encodeLoop(jobs <-chan streamFrame, free chan<- []byte, st *enc
 		}
 		// The bitrate follows what gets through to the viewers, checked
 		// once a second.
-		if s.med != nil && time.Since(rateAt) > time.Second {
+		if s.m() != nil && time.Since(rateAt) > time.Second {
 			rateAt = time.Now()
-			if want := s.med.targetBitrate(s.p.Quality.bitrate(job.w, job.h)); want != rateNow {
+			if want := s.m().targetBitrate(s.p.Quality.bitrate(job.w, job.h)); want != rateNow {
 				if rateNow == 0 || abs(want-rateNow)*20 > rateNow {
 					enc.setBitrate(want)
 					if rateNow != 0 {
@@ -826,7 +879,12 @@ func (s *Stream) encodeLoop(jobs <-chan streamFrame, free chan<- []byte, st *enc
 		}
 		st.frames.Add(1)
 		st.bytes.Add(int64(len(out)))
-		if err := s.med.sendFrame(out, uint32(tsMs*90)); err != nil {
+		med := s.m()
+		if err := med.sendFrame(out, uint32(tsMs*90)); err != nil {
+			// The media connection given up for a new one.
+			if s.reconnecting.Load() || med != s.m() {
+				continue
+			}
 			s.end(fmt.Errorf("could not send the stream: %w", err))
 			return
 		}
@@ -923,7 +981,7 @@ func (s *Stream) soundLoop(pcm <-chan []int16, quit <-chan struct{}) {
 	var (
 		buf    []int16
 		packet = make([]byte, 4000)
-		out    = make([]byte, s.conn.dave.MaxEncryptedFrameSize(4000))
+		out    = make([]byte, s.c().dave.MaxEncryptedFrameSize(4000))
 		ts     uint32
 		last   time.Time
 	)
@@ -951,11 +1009,11 @@ func (s *Stream) soundLoop(pcm <-chan []int16, quit <-chan struct{}) {
 			if err != nil {
 				continue
 			}
-			m, err := s.conn.dave.Encrypt(s.med.audioSSRC, packet[:n], out)
+			m, err := s.c().dave.Encrypt(s.m().audioSSRC, packet[:n], out)
 			if err != nil {
 				continue
 			}
-			if err := s.med.sendAudio(out[:m], ts, marker); err != nil {
+			if err := s.m().sendAudio(out[:m], ts, marker); err != nil {
 				return
 			}
 			ts += 960
@@ -1011,8 +1069,8 @@ func (s *Stream) teardown() {
 	if err := s.p.Main.SendGateway(ctx, &streamDeleteCommand{StreamKey: s.key}); err != nil {
 		s.log.Warn("could not end the stream", "err", err)
 	}
-	if s.med != nil {
-		s.med.close()
+	if med := s.m(); med != nil {
+		med.close()
 	}
 	if s.cancel != nil {
 		s.cancel()
@@ -1023,7 +1081,7 @@ func (s *Stream) teardown() {
 // only.
 func (s *Stream) encrypt(pic []byte) ([]byte, error) {
 	for range 8 {
-		out, err := s.conn.dave.EncryptH264(pic)
+		out, err := s.c().dave.EncryptH264(pic)
 		if err != nil || !s.p.LinkcordOnly || veil(out) {
 			return out, err
 		}

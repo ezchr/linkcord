@@ -79,6 +79,12 @@ type streamDeleteCommand struct {
 	StreamKey string `json:"stream_key"`
 }
 
+// streamPingCommand asks Discord for the server of a stream again, after
+// the connection to it was lost: it answers with STREAM_SERVER_UPDATE.
+type streamPingCommand struct {
+	StreamKey string `json:"stream_key"`
+}
+
 // streamSetPausedCommand pauses a stream or resumes it.
 type streamSetPausedCommand struct {
 	StreamKey string `json:"stream_key"`
@@ -89,6 +95,8 @@ func (*streamCreateCommand) Op() ws.OpCode              { return 18 }
 func (*streamCreateCommand) EventType() ws.EventType    { return "" }
 func (*streamDeleteCommand) Op() ws.OpCode              { return 19 }
 func (*streamDeleteCommand) EventType() ws.EventType    { return "" }
+func (*streamPingCommand) Op() ws.OpCode                { return 21 }
+func (*streamPingCommand) EventType() ws.EventType      { return "" }
 func (*streamSetPausedCommand) Op() ws.OpCode           { return 22 }
 func (*streamSetPausedCommand) EventType() ws.EventType { return "" }
 
