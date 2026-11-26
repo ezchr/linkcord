@@ -542,6 +542,7 @@ func (c *chatView) joinVoice(ch discord.Channel) {
 		u.voiceFailed("Could not join "+ch.Name, err)
 		return
 	}
+	c.trackJoinVoice(ch)
 	u.stopStream()
 	if c.demo {
 		c.demoVoice(ch)
@@ -587,6 +588,9 @@ func (u *ui) leaveVoice() {
 		u.chat.stopWatching()
 	}
 	v := &u.voice
+	if u.chat != nil {
+		u.chat.trackVoiceDisconnect(u.voiceChannel())
+	}
 	v.leftAt = time.Now()
 	if v.demoChannel.IsValid() && u.chat != nil {
 		u.chat.demoVoice(discord.Channel{})

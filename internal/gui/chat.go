@@ -520,8 +520,9 @@ func newChatView(u *ui, st *ningen.State) *chatView {
 
 	stopChan, stopStatus, stopPolls, stopMine := st.AddChanHandler(c.events), c.watchVoiceStatus(), c.watchPolls(), c.watchMyPresence()
 	stopSounds, stopViewers := c.watchSoundboard(), c.watchViewers()
-	stopCalls, stopIdle := c.watchCalls(), c.watchIdle()
+	stopCalls, stopIdle, stopBeat := c.watchCalls(), c.watchIdle(), c.watchHeartbeat()
 	c.stopEvents = func() {
+		stopBeat()
 		stopIdle()
 		stopCalls()
 		stopChan()
@@ -747,8 +748,13 @@ func (c *chatView) load(ready *gateway.ReadyEvent) {
 		if c.sci == nil {
 			c.sci = newScience(c.st.Client.Client, func() bool { return c.u.app.NoTelemetry })
 		}
-		c.sci.setToken(ready.AnalyticsToken)
+		c.sci.setSession(ready.AnalyticsToken, ready.User.ID)
 		c.sci.track("app_opened", map[string]any{}, "app_opened", 5*time.Minute)
+		nch := 0
+		for _, g := range ready.Guilds {
+			nch += len(g.Channels)
+		}
+		c.trackReady(len(ready.Guilds), nch)
 	}
 	// Games and programs show what the user does in them through the RPC,
 	// as Discord's app has them.
@@ -1178,17 +1184,7 @@ func (c *chatView) selectChannel(ch discord.Channel) {
 		defer c.rebuildRows()
 	}
 	c.selChannel = &ch
-	if c.sci != nil {
-		props := map[string]any{"channel_id": ch.ID.String(), "channel_type": int(ch.Type)}
-		if ch.GuildID.IsValid() {
-			props["guild_id"] = ch.GuildID.String()
-		}
-		c.sci.track("channel_opened", props, "channel_opened:"+ch.ID.String(), 15*time.Minute)
-		if ch.GuildID.IsValid() {
-			c.sci.track("guild_viewed", map[string]any{"guild_id": ch.GuildID.String()},
-				"guild_viewed:"+ch.GuildID.String(), 15*time.Minute)
-		}
-	}
+	c.trackChannelOpened(ch)
 	c.notePage()
 	c.lastChannel[c.selGuild] = ch.ID
 	c.saveLastPlace()
@@ -1339,6 +1335,7 @@ func (c *chatView) markRead(chID discord.ChannelID) {
 	}
 	if last := c.st.LastMessage(chID); last.IsValid() {
 		go c.st.ReadState.MarkRead(chID, last)
+		c.trackAck(chID)
 	}
 }
 
@@ -1577,6 +1574,9 @@ func (c *chatView) update(gtx layout.Context) {
 	}
 	if c.membersToggle.Clicked(gtx) {
 		c.showMembers = !c.showMembers
+		if c.showMembers {
+			c.trackMemberList()
+		}
 	}
 	c.updateThreadButtons(gtx)
 	if ch := c.selChannel; ch != nil {

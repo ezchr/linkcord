@@ -562,8 +562,8 @@ func (c *chatView) featureRows() []layout.Widget {
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {
-			return switchRow(gtx, th, &g.telemetryBtn, "Send Minimal Analytics",
-				"Sends the few everyday events Discord's own client sends to it (the app opening, a channel or server opened), so the account is not flagged for sending none. No typing, message text or device details. Turn off to send nothing.", !c.u.app.NoTelemetry)
+			return switchRow(gtx, th, &g.telemetryBtn, "Send Analytics Like Discord",
+				"Sends Discord the everyday analytics its web client sends (the app opening, channels, servers and the member list viewed, messages read, voice joined and left, a heartbeat every 15 minutes and an hourly report), so the account looks like one using Discord's own app. No message text, typing or searches. Turn off to send nothing.", !c.u.app.NoTelemetry)
 		},
 		layout.Spacer{Height: unit.Dp(16)}.Layout,
 		func(gtx layout.Context) layout.Dimensions {

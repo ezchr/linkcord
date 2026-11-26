@@ -121,6 +121,7 @@ func (c *chatView) openSettings() {
 		return
 	}
 	c.closeMenu()
+	c.trackSettingsPane("My Account")
 	c.profile = nil
 	s.open, s.focused = true, false
 	s.list.Axis = layout.Vertical

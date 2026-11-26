@@ -90,3 +90,6 @@ func generateLaunchSignature() string {
 	}
 	return id.String()
 }
+
+// Locale is the UI locale the client reports, as in X-Discord-Locale.
+func Locale() string { return string(locale) }
