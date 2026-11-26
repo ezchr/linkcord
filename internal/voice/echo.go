@@ -19,6 +19,12 @@ const (
 	// capturing, as while muted, before what is played is no longer given
 	// to the canceller, which has no use for it then.
 	echoIdle = 50
+	// echoQuiet is how many blocks played in a row must be silent, below
+	// gateFloor, before the canceller is no longer run: 1 s, longer than the
+	// delay of the devices and the echo of a room. It has nothing to take
+	// out then, and both what is played and what is captured are skipped
+	// together for the two to stay in step.
+	echoQuiet = 100
 )
 
 // echo removes from what the microphone captures the echo of what Linkcord
@@ -33,6 +39,8 @@ type echo struct {
 	on atomic.Bool
 	// idle is how many blocks were played since the last captured.
 	idle atomic.Int32
+	// quiet is how many blocks in a row were played silent.
+	quiet atomic.Int32
 
 	// renderMu is held while what is played is given to the canceller, and
 	// captureMu while it works on what was captured. The canceller is made
@@ -61,6 +69,9 @@ func newEcho() *echo {
 // what the other devices of Linkcord play added.
 func (e *echo) played(output []byte) {
 	if !e.on.Load() || e.idle.Load() > echoIdle {
+		// Once captured again, the canceller runs until what is played
+		// is known silent.
+		e.quiet.Store(0)
 		return
 	}
 	e.renderMu.Lock()
@@ -78,8 +89,16 @@ func (e *echo) played(output []byte) {
 	for at := 0; at < n; at += echoBlock {
 		block := e.pending[at : at+echoBlock]
 		e.idle.Add(1)
-		e.gate.played(meanSquare(block))
-		if e.aec != nil {
+		level := meanSquare(block)
+		e.gate.played(level)
+		if level < gateFloor {
+			if e.quiet.Load() <= echoQuiet {
+				e.quiet.Add(1)
+			}
+		} else {
+			e.quiet.Store(0)
+		}
+		if e.aec != nil && e.quiet.Load() <= echoQuiet {
 			e.aec.Render(block)
 		}
 	}
@@ -99,6 +118,12 @@ func (e *echo) capture(pcm []int16) bool {
 	}
 	e.idle.Store(0)
 	captured := meanSquare(pcm)
+	// With nothing played for a while there is no echo: the canceller is
+	// not run, which is most of what capture costs, and what was captured
+	// is left as it is.
+	if e.quiet.Load() > echoQuiet {
+		return e.gate.open(captured, captured)
+	}
 
 	if !e.stereo {
 		for i := 0; i+1 < len(pcm); i += 2 {
@@ -154,6 +179,7 @@ func (e *echo) reset() {
 func (e *echo) closeLocked() {
 	e.freeLocked()
 	e.stereo = false
+	e.quiet.Store(0)
 	e.gate.reset()
 }
 
