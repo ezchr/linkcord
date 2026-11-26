@@ -116,6 +116,9 @@ func (f *forumState) click(id discord.ChannelID) *widget.Clickable {
 	return cl
 }
 
+// olderThreadsPage is how many archived threads one search asks for.
+const olderThreadsPage = 25
+
 // loadOlderThreads asks Discord for the archived threads of parent, the most
 // recently active first, as its app lists a channel's older threads. They
 // land in the thread state while parent is still the one browsed.
@@ -126,7 +129,7 @@ func (c *chatView) loadOlderThreads(parent discord.Channel) {
 		// position holds.
 		t.archived = nil
 	}
-	t.browseParent, t.loadErr, t.loading = parent.ID, "", true
+	t.browseParent, t.loadErr, t.loading, t.hasMore = parent.ID, "", true, false
 	if c.demo {
 		for _, th := range t.demoArchived {
 			if th.ParentID == parent.ID {
@@ -136,9 +139,29 @@ func (c *chatView) loadOlderThreads(parent discord.Channel) {
 		t.loading = false
 		return
 	}
+	c.searchOlderThreads(parent, 0)
+}
+
+// loadMoreOlderThreads asks for the next page of parent's archived threads,
+// as Discord's app does when its list is scrolled to the end, unless there
+// are no more or a page is already on its way.
+func (c *chatView) loadMoreOlderThreads(parent discord.Channel) {
+	t := &c.threads
+	if c.demo || t.browseParent != parent.ID || t.loading || !t.hasMore || t.loadErr != "" {
+		return
+	}
+	t.loading = true
+	c.searchOlderThreads(parent, len(t.archived))
+}
+
+// searchOlderThreads asks for parent's archived threads from offset on,
+// which replace those listed if offset is 0 and follow them otherwise.
+func (c *chatView) searchOlderThreads(parent discord.Channel, offset int) {
+	t := &c.threads
 	go func() {
 		res, err := c.st.SearchThreads(parent.ID, api.SearchThreadsData{
-			Archived: true, SortBy: api.LastMessageTime, SortOrder: api.SortDescending, Limit: 25,
+			Archived: true, SortBy: api.LastMessageTime, SortOrder: api.SortDescending,
+			Limit: olderThreadsPage, Offset: offset,
 		})
 		c.u.post(func() {
 			if t.browseParent != parent.ID {
@@ -159,9 +182,31 @@ func (c *chatView) loadOlderThreads(parent discord.Channel) {
 					t.setJoined(m.ID, true)
 				}
 			}
-			t.archived = res.Threads
+			if offset == 0 {
+				t.archived = nil
+			}
+			t.archived = appendThreads(t.archived, res.Threads)
+			t.hasMore = res.HasMore && len(res.Threads) > 0
+			if offset > 0 && len(res.FirstMessages) > 0 {
+				c.noteFirstMessages(parent.ID, res.FirstMessages)
+			}
 		})
 	}()
+}
+
+// appendThreads adds to list the threads of more it does not have yet.
+func appendThreads(list, more []discord.Channel) []discord.Channel {
+	seen := make(map[discord.ChannelID]bool, len(list))
+	for _, th := range list {
+		seen[th.ID] = true
+	}
+	for _, th := range more {
+		if !seen[th.ID] {
+			seen[th.ID] = true
+			list = append(list, th)
+		}
+	}
+	return list
 }
 
 // openForum shows the posts of a forum in place of messages.
@@ -299,16 +344,35 @@ func (c *chatView) canPost(forum discord.Channel) bool {
 // recently active first, then the older ones.
 func (c *chatView) forumPosts(forum discord.Channel) (active, older []discord.Channel) {
 	chs, _ := c.st.Cabinet.Channels(forum.GuildID)
-	active = activeThreads(chs, forum.ID)
+	active = pinnedFirst(activeThreads(chs, forum.ID))
 	if c.threads.browseParent == forum.ID {
 		older = c.threads.archived
 	}
 	return active, older
 }
 
+// pinnedFirst puts the pinned posts at the top, as Discord lists a forum,
+// keeping the order of the rest.
+func pinnedFirst(posts []discord.Channel) []discord.Channel {
+	slices.SortStableFunc(posts, func(a, b discord.Channel) int {
+		pa, pb := a.Flags&discord.PinnedThread != 0, b.Flags&discord.PinnedThread != 0
+		switch {
+		case pa && !pb:
+			return -1
+		case pb && !pa:
+			return 1
+		}
+		return 0
+	})
+	return posts
+}
+
 // postSummary is the line under a post's name: how much was said and when.
 func postSummary(th discord.Channel) string {
 	var parts []string
+	if th.Flags&discord.PinnedThread != 0 {
+		parts = append(parts, "Pinned")
+	}
 	if th.MessageCount > 0 {
 		parts = append(parts, messageCount(th.MessageCount))
 	}
@@ -398,6 +462,9 @@ func (c *chatView) layoutForum(gtx layout.Context) layout.Dimensions {
 	for i := range older {
 		lines = append(lines, forumLine{post: &older[i]})
 	}
+	if t.browseParent == forum.ID && t.loading && len(older) > 0 {
+		lines = append(lines, forumLine{note: "Loading…", noteC: colorMuted})
+	}
 	cols := c.forumColumns()
 	if cols > 0 {
 		lines = gridLines(lines, cols)
@@ -433,6 +500,11 @@ func (c *chatView) layoutForum(gtx layout.Context) layout.Dimensions {
 			})
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			// The next page of older posts is asked for as the list nears
+			// its end, as Discord's app does.
+			if p := c.forum.list.Position; p.Count > 0 && p.First+p.Count >= len(lines)-3 {
+				c.loadMoreOlderThreads(forum)
+			}
 			return listLayout(gtx, th, &c.forum.list, len(lines), func(gtx layout.Context, i int) layout.Dimensions {
 				ln := lines[i]
 				switch {

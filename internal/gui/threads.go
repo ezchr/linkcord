@@ -111,6 +111,9 @@ type threadState struct {
 	archived     []discord.Channel
 	loading      bool
 	loadErr      string
+	// hasMore is whether Discord has more archived threads past those in
+	// archived, which come a page at a time as the list is scrolled.
+	hasMore bool
 	// demoArchived are the demo's archived threads.
 	demoArchived []discord.Channel
 	// parentClick is the channel's name in a thread's header.
@@ -491,7 +494,7 @@ func (c *chatView) threadBrowserItems(parent discord.Channel) []menuItem {
 	}
 	items = append(items, menuItem{sep: true}, menuItem{title: true, text: "Older Threads"})
 	switch {
-	case t.loading:
+	case t.loading && len(t.archived) == 0:
 		items = append(items, menuItem{key: "loading", text: "Loading…", col: colorMuted})
 	case t.loadErr != "":
 		items = append(items, menuItem{key: "err", text: t.loadErr, col: colorRed})
@@ -500,6 +503,17 @@ func (c *chatView) threadBrowserItems(parent discord.Channel) []menuItem {
 	}
 	for _, th := range t.archived {
 		items = append(items, entry(th))
+	}
+	if t.hasMore && t.loadErr == "" && len(t.archived) > 0 {
+		label := "Load more"
+		if t.loading {
+			label = "Loading…"
+		}
+		items = append(items, menuItem{key: "more", text: label, col: colorAccent, act: func() {
+			// The menu stays open, and the next page lands in it.
+			c.menu.stay = true
+			c.loadMoreOlderThreads(parent)
+		}})
 	}
 	return items
 }
@@ -532,7 +546,39 @@ type createThread struct {
 	busy    bool
 	err     string
 
+	// tags are the forum's tags chosen for the post, and tagClicks their
+	// chips.
+	tags      []discord.TagID
+	tagClicks map[discord.TagID]*widget.Clickable
+
 	privateBtn, cancel, create, close, x widget.Clickable
+}
+
+// maxPostTags is how many tags a forum post can have, as Discord allows.
+const maxPostTags = 5
+
+// postTags are the tags of forum the user can put on a post: moderated ones
+// only with the permission to manage threads, as in Discord's app.
+func (c *chatView) postTags(forum discord.Channel) []discord.Tag {
+	mod := c.can(forum.ID, discord.PermissionManageThreads)
+	var out []discord.Tag
+	for _, t := range forum.AvailableTags {
+		if !t.Moderated || mod {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// toggleTag chooses tag for the post, or takes it back, up to maxPostTags.
+func (ct *createThread) toggleTag(tag discord.TagID) {
+	if i := slices.Index(ct.tags, tag); i >= 0 {
+		ct.tags = slices.Delete(ct.tags, i, i+1)
+		return
+	}
+	if len(ct.tags) < maxPostTags {
+		ct.tags = append(ct.tags, tag)
+	}
 }
 
 // defaultThreadName is the name a thread from m gets when none is typed: the
@@ -576,6 +622,10 @@ func (c *chatView) submitCreateThread() {
 		ct.err = "A post needs a message."
 		return
 	}
+	if isForum(parent.Type) && parent.Flags&discord.ThreadRequireTag != 0 && len(ct.tags) == 0 {
+		ct.err = "This forum requires at least one tag."
+		return
+	}
 	archive := parent.DefaultAutoArchiveDuration
 	if archive == 0 {
 		archive = discord.ThreeDaysArchive
@@ -593,7 +643,7 @@ func (c *chatView) submitCreateThread() {
 			id = discord.ChannelID(from.ID)
 		}
 		th := discord.Channel{ID: id, GuildID: parent.GuildID, ParentID: parent.ID, Type: kind, Name: name, OwnerID: c.me.ID,
-			ThreadMetadata: &discord.ThreadMetadata{AutoArchiveDuration: archive}}
+			AppliedTags: slices.Clone(ct.tags), ThreadMetadata: &discord.ThreadMetadata{AutoArchiveDuration: archive}}
 		c.st.Cabinet.ChannelSet(&th, false)
 		if from != nil {
 			c.noteThreadStarted(*from, th)
@@ -609,6 +659,9 @@ func (c *chatView) submitCreateThread() {
 	if isForum(parent.Type) {
 		// A post is made with its first message, and has no kind to choose.
 		body = map[string]any{"name": name, "auto_archive_duration": archive, "message": map[string]any{"content": first}}
+		if len(ct.tags) > 0 {
+			body["applied_tags"] = ct.tags
+		}
 	}
 	url := api.EndpointChannels + parent.ID.String() + "/threads"
 	if from != nil {
@@ -661,6 +714,12 @@ func (c *chatView) layoutCreateThread(gtx layout.Context) {
 	}
 	if ct.privateBtn.Clicked(gtx) {
 		ct.private = !ct.private
+	}
+	for id, cl := range ct.tagClicks {
+		if cl.Clicked(gtx) {
+			ct.toggleTag(id)
+			ct.err = ""
+		}
 	}
 	if ct.create.Clicked(gtx) {
 		c.submitCreateThread()
@@ -760,6 +819,18 @@ func (c *chatView) layoutCreateThread(gtx layout.Context) {
 				return textField(gtx, th, &ct.message, "Enter a message…")
 			}),
 		)
+		if tags := c.postTags(ct.parent); len(tags) > 0 {
+			head := "Tags"
+			if ct.parent.Flags&discord.ThreadRequireTag != 0 {
+				head = "Tags (required)"
+			}
+			rows = append(rows,
+				layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+				layout.Rigid(bold(label(th, 14, colorHeader, fmt.Sprintf("%s · %d/%d", head, len(ct.tags), maxPostTags))).Layout),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return c.layoutTagChips(gtx, tags) }),
+			)
+		}
 	}
 	if ct.from == nil && ct.parent.Type == discord.GuildText && c.can(ct.parent.ID, discord.PermissionCreatePrivateThreads) {
 		rows = append(rows,
@@ -1065,4 +1136,57 @@ func (c *chatView) updateThreadButtons(gtx layout.Context) {
 			c.rebuildRows()
 		}
 	}
+}
+
+// layoutTagChips are the forum's tags as chips that choose them for the
+// post, wrapping onto as many lines as they need.
+func (c *chatView) layoutTagChips(gtx layout.Context, tags []discord.Tag) layout.Dimensions {
+	th := c.u.th
+	ct := &c.newThread
+	if ct.tagClicks == nil {
+		ct.tagClicks = make(map[discord.TagID]*widget.Clickable)
+	}
+	gap := gtx.Dp(6)
+	maxX := gtx.Constraints.Max.X
+	x, y, lineH, width := 0, 0, 0, 0
+	for _, tag := range tags {
+		cl := ct.tagClicks[tag.ID]
+		if cl == nil {
+			cl = new(widget.Clickable)
+			ct.tagClicks[tag.ID] = cl
+		}
+		on := slices.Contains(ct.tags, tag.ID)
+		bg := colorInput
+		switch {
+		case on:
+			bg = colorAccent
+		case cl.Hovered():
+			bg = colorHover
+		}
+		txt := tag.Name
+		if tag.EmojiName != nil && *tag.EmojiName != "" {
+			txt = *tag.EmojiName + " " + txt
+		}
+		macro := op.Record(gtx.Ops)
+		cgtx := gtx
+		cgtx.Constraints.Min = image.Point{}
+		dims := cl.Layout(cgtx, func(gtx layout.Context) layout.Dimensions {
+			pointer.CursorPointer.Add(gtx.Ops)
+			return rounded(gtx, bg, 12, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(4), Bottom: unit.Dp(4), Left: unit.Dp(10), Right: unit.Dp(10)}.Layout(gtx,
+					oneLine(label(th, 13, colorHeader, txt)).Layout)
+			})
+		})
+		call := macro.Stop()
+		if x > 0 && x+dims.Size.X > maxX {
+			x, y, lineH = 0, y+lineH+gap, 0
+		}
+		t := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
+		call.Add(gtx.Ops)
+		t.Pop()
+		x += dims.Size.X + gap
+		lineH = max(lineH, dims.Size.Y)
+		width = max(width, x-gap)
+	}
+	return layout.Dimensions{Size: image.Pt(width, y+lineH)}
 }
