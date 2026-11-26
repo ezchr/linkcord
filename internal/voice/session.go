@@ -3,7 +3,6 @@
 package voice
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -199,6 +198,11 @@ type Session struct {
 	// leftAt is when this end last left a voice channel itself, in Unix
 	// nanoseconds.
 	leftAt atomic.Int64
+	// deafened is whether nothing is played, the speakers stopped.
+	deafened atomic.Bool
+	// frames are buffers of what the microphone captured, sent back by
+	// send once read, for captured not to make one every period.
+	frames chan []byte
 	// linkcordOnly makes what the user says heard by Linkcord only.
 	linkcordOnly atomic.Bool
 	// healedDAVE is when the channel was last joined again for keys that
@@ -215,6 +219,7 @@ func New(state *state.State, sensitivity float64) *Session {
 		echo:     newEcho(),
 		updates:  make(chan struct{}, 1),
 		mic:      make(chan []byte, 4),
+		frames:   make(chan []byte, 8),
 		speaking: make(map[discord.UserID]bool),
 		heardAt:  make(map[discord.UserID]time.Time),
 		speakers: make(map[uint32]*speaker),
@@ -420,6 +425,7 @@ func (s *Session) setDevices(mute, deafen bool) error {
 		setDevice(&s.capture, !mute, malgo.Capture, s.input, s.captured),
 		setDevice(&s.playback, !deafen, malgo.Playback, s.output, s.mix),
 	)
+	s.deafened.Store(s.playback == nil)
 	if mute {
 		// Silence makes what is being said end.
 		s.queue(make([]byte, 2*hangover*frameBytes))
@@ -605,7 +611,12 @@ func (s *Session) SetMuteDeafen(mute, deafen bool) error {
 
 // captured queues what the microphone captured. It is what the capture device calls.
 func (s *Session) captured(_, input []byte) {
-	s.queue(bytes.Clone(input))
+	var buf []byte
+	select {
+	case buf = <-s.frames:
+	default:
+	}
+	s.queue(append(buf[:0], input...))
 }
 
 // queue queues what was captured to be sent, in place of the oldest if what is queued is not being sent fast enough, for what is said not to be sent ever later.
@@ -710,7 +721,11 @@ func (s *Session) receive(session *voice.Session) {
 		s.received.Add(1)
 		s.clips.record(user, packet.Opus)
 
-		if err := speaker.write(packet.Sequence(), packet.Opus); err != nil {
+		// Deafened, nothing is played: what is said is not decoded, which
+		// is most of what receiving costs.
+		if s.deafened.Load() {
+			speaker.skip(packet.Sequence())
+		} else if err := speaker.write(packet.Sequence(), packet.Opus); err != nil {
 			slog.Debug("failed to decode voice packet", "err", err, "ssrc", packet.SSRC())
 		}
 
@@ -863,11 +878,18 @@ func (s *Session) send(session *voice.Session) {
 	)
 
 	for captured := range s.mic {
-		for pcm = append(pcm, captured...); len(pcm) >= frameBytes; pcm = pcm[frameBytes:] {
+		pcm = append(pcm, captured...)
+		select {
+		case s.frames <- captured:
+		default:
+		}
+		var at int
+		for ; len(pcm)-at >= frameBytes; at += frameBytes {
+			frame := pcm[at : at+frameBytes]
 			quiet++
 			threshold := int(s.threshold.Load())
 			for i := range samples {
-				samples[i] = int16(binary.LittleEndian.Uint16(pcm[2*i:]))
+				samples[i] = int16(binary.LittleEndian.Uint16(frame[2*i:]))
 			}
 			// The echo of what is played is taken out first, as captured,
 			// before anything changes how loud it is.
@@ -942,6 +964,9 @@ func (s *Session) send(session *voice.Session) {
 				s.setSpeaking(me.ID, quiet < hangover)
 			}
 		}
+		// What is left short of a frame is moved to the front, for the
+		// buffer to be reused.
+		pcm = pcm[:copy(pcm, pcm[at:])]
 	}
 }
 

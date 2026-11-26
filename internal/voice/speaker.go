@@ -100,10 +100,22 @@ func (s *speaker) write(seq uint16, packet []byte) error {
 	}
 
 	if len(s.buf) > maxBuffered {
-		s.buf = s.buf[len(s.buf)-cushion:]
+		// Moved to the front, for the buffer to be reused rather than
+		// grown anew.
+		s.buf = s.buf[:copy(s.buf, s.buf[len(s.buf)-cushion:])]
 	}
 
 	return nil
+}
+
+// skip takes the packet with the sequence number seq as heard but not
+// played, as while deafened: it is not decoded, and what was buffered is
+// dropped, not to be played late once undeafened.
+func (s *speaker) skip(seq uint16) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seq, s.last = seq, time.Now()
+	s.buf, s.playing = s.buf[:0], false
 }
 
 // mix adds what is buffered to output, volume times as loud, once the
@@ -135,6 +147,6 @@ func (s *speaker) mix(output []byte, volume float32, guard bool) {
 		binary.LittleEndian.PutUint16(output[i:], uint16(max(-1<<15, min(1<<15-1, sum))))
 	}
 
-	s.buf = s.buf[n:]
+	s.buf = s.buf[:copy(s.buf, s.buf[n:])]
 	s.playing = len(s.buf) > 0
 }
