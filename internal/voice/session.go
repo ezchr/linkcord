@@ -21,9 +21,9 @@ import (
 	"github.com/ayn2op/arikawa/v3/voice/udp"
 	"github.com/ayn2op/arikawa/v3/voice/voicegateway"
 	"github.com/disgoorg/godave"
-	"github.com/ezchr/linkcord/internal/opus"
 	"github.com/gen2brain/malgo"
 	dave "github.com/thomas-vilte/dave-go/session"
+	"github.com/tphakala/go-opus/opus"
 )
 
 const (
@@ -855,7 +855,9 @@ func (s *Session) report() {
 
 // send sends what the microphone captures to the voice channels that session joins, while it is loud enough.
 func (s *Session) send(session *voice.Session) {
-	encoder, err := opus.NewEncoder(voiceEncoderConfig)
+	// 64 kbps, what Discord's clients send at in a channel left at its
+	// default bitrate.
+	encoder, err := opus.NewEncoder(opus.EncoderConfig{SampleRate: sampleRate, Channels: channels, Bitrate: 64000})
 	if err != nil {
 		slog.Error("failed to create Opus encoder", "err", err)
 		return

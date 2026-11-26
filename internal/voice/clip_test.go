@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/ayn2op/arikawa/v3/discord"
-	"github.com/ezchr/linkcord/internal/opus"
+	"github.com/tphakala/go-opus/opus"
 )
 
 func TestClip(t *testing.T) {

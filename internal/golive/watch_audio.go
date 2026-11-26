@@ -9,7 +9,7 @@ import (
 
 	"github.com/disgoorg/godave"
 	"github.com/ezchr/linkcord/internal/voice"
-	"github.com/ezchr/linkcord/internal/opus"
+	"github.com/tphakala/go-opus/opus"
 )
 
 const (

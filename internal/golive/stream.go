@@ -22,7 +22,7 @@ import (
 	"github.com/ayn2op/arikawa/v3/utils/ws"
 	"github.com/ayn2op/arikawa/v3/voice/voicegateway"
 	"github.com/thomas-vilte/dave-go/session"
-	"github.com/ezchr/linkcord/internal/opus"
+	"github.com/tphakala/go-opus/opus"
 )
 
 // Stream is a screen or a window being shared.
@@ -973,7 +973,7 @@ func (s *Stream) SetSound(on bool) {
 // it and sends it.
 func (s *Stream) soundLoop(pcm <-chan []int16, quit <-chan struct{}) {
 	const frame = 960 * 2 // 20 ms of stereo at 48 kHz
-	enc, err := opus.NewEncoder(opus.EncoderConfig{SampleRate: 48000, Channels: 2, Application: opus.Audio, Bitrate: 128000, Complexity: 10})
+	enc, err := opus.NewEncoder(opus.EncoderConfig{SampleRate: 48000, Channels: 2, Bitrate: 128000})
 	if err != nil {
 		s.log.Warn("could not make the sound encoder", "err", err)
 		return
