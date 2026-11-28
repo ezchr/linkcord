@@ -308,6 +308,7 @@ func (u *ui) runPending() {
 
 func (u *ui) loop() error {
 	stopProfile := u.startPerformanceProfile()
+	go watchCPU()
 	defer stopProfile()
 	stopResumeWatchdog := u.startResumeWatchdog()
 	defer stopResumeWatchdog()
